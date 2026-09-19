@@ -2064,6 +2064,11 @@ app.registerExtension({
     const originalDrawForeground = nodeType.prototype.onDrawForeground;
     nodeType.prototype.onDrawForeground = function () {
       originalDrawForeground?.apply(this, arguments);
+      // 右侧属性面板在自身画布上重绘本节点控件时会把 widget.width 固定成面板宽度，
+      // 画布上的 DOM 控件随之缩小且不再恢复；清掉该值让画布回退到节点宽度。
+      for (const widget of this.widgets ?? []) {
+        if (widget.element && widget.width != null) delete widget.width;
+      }
       this._bilingualPromptInspector?.checkForTextChange();
     };
 
