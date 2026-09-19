@@ -13,7 +13,6 @@ export function normalizePreferences(value) {
   const recent = Array.isArray(source.recent)
     ? [...new Set(source.recent.map(normalizeKey).filter(Boolean))].slice(0, 100)
     : [];
-  const detailsExpanded = source.detailsExpanded !== false;
   const boundedHeight = (candidate, min, max) => {
     const parsed = Number(candidate);
     return Number.isFinite(parsed) ? Math.max(min, Math.min(max, Math.round(parsed))) : null;
@@ -21,7 +20,7 @@ export function normalizePreferences(value) {
   const englishInputHeight = boundedHeight(source.englishInputHeight, 84, 420);
   const chineseMirrorHeight = boundedHeight(source.chineseMirrorHeight, 92, 360);
   const chineseEditorHeight = boundedHeight(source.chineseEditorHeight, 110, 600);
-  return { favorites, recent, detailsExpanded, englishInputHeight, chineseMirrorHeight, chineseEditorHeight };
+  return { favorites, recent, englishInputHeight, chineseMirrorHeight, chineseEditorHeight };
 }
 
 export function preservedSearchScroll(previousQuery, nextQuery, scrollTop) {

@@ -1,5 +1,4 @@
 const SCROLLABLE_SELECTOR = [
-  ".bpi-panel.bpi-details-collapsed",
   ".bpi-table",
   ".bpi-results",
   ".bpi-issues",
@@ -14,6 +13,9 @@ const SCROLLABLE_SELECTOR = [
   ".bpi-community-preview",
   ".bpi-modal textarea",
   ".bpi-modal",
+  ".bpm-panel",
+  ".bpm-rows",
+  ".bpm-tagmanager-host",
 ].join(",");
 
 export function normalizedWheelDelta(delta, deltaMode, pageSize) {

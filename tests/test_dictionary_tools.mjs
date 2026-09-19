@@ -29,8 +29,6 @@ assert.equal(rankDictionaryTags(tags, "直视")[0].english, "looking at viewer")
 assert.equal(rankDictionaryTags(tags, "镜头").length, 2);
 
 let preferences = normalizePreferences({ favorites: [], recent: [] });
-assert.equal(preferences.detailsExpanded, true);
-assert.equal(normalizePreferences({ detailsExpanded: false }).detailsExpanded, false);
 assert.equal(normalizePreferences({ englishInputHeight: 500 }).englishInputHeight, 420);
 assert.equal(normalizePreferences({ chineseMirrorHeight: 40 }).chineseMirrorHeight, 92);
 assert.equal(normalizePreferences({ chineseEditorHeight: 999 }).chineseEditorHeight, 600);
