@@ -52,11 +52,28 @@ DEFAULT_CONFIG = {
     "base_url": "",
     "model": "",
     "api_key": "",
+    "baidu_appid": "",
+    "baidu_secret_key": "",
     "temperature": 0.2,
     "timeout_seconds": 90,
     "translation_rule": DEFAULT_TRANSLATION_RULE,
     "translate_optimize_rule": DEFAULT_TRANSLATE_OPTIMIZE_RULE,
     "optimization_rule": DEFAULT_OPTIMIZATION_RULE,
+}
+
+BAIDU_TRANSLATE_ENDPOINT = "https://fanyi-api.baidu.com/api/trans/vip/translate"
+
+BAIDU_ERROR_MESSAGES = {
+    "52001": "请求超时，请重试",
+    "52002": "百度翻译系统错误，请稍后重试",
+    "52003": "未授权用户，请检查 APP ID 是否正确",
+    "54000": "必填参数缺失，请检查 APP ID 与密钥",
+    "54001": "签名错误，请检查密钥是否正确",
+    "54003": "请求过于频繁，请稍后重试",
+    "54004": "账户余额不足或免费额度已用尽",
+    "54005": "单次请求文本过长",
+    "58002": "翻译服务已被关闭，请在百度智能云控制台开启",
+    "90107": "当前接口需要开通高级版",
 }
 
 
@@ -76,6 +93,39 @@ def openai_chat_endpoint(base_url):
     if not path and parsed.hostname in {"127.0.0.1", "localhost"} and parsed.port == 1234:
         return f"{base}/v1/chat/completions"
     return f"{base}/chat/completions"
+
+
+def baidu_translate_params(appid, secret_key, query, to_lang, from_lang="auto", salt=None):
+    """组装百度通用文本翻译接口参数；sign = MD5(appid + q + salt + 密钥)。"""
+    appid = str(appid or "")
+    secret_key = str(secret_key or "")
+    salt = str(salt if salt is not None else secrets.token_hex(8))
+    sign = hashlib.md5(f"{appid}{query}{salt}{secret_key}".encode("utf-8")).hexdigest()
+    return {"q": query, "from": from_lang, "to": to_lang, "appid": appid, "salt": salt, "sign": sign}
+
+
+def baidu_split_query(text, max_chars=600, max_lines=30):
+    """把待翻译文本拆成接口可接受的分块：按行切分，超长行在逗号处断开。"""
+    lines = [line for line in str(text or "").replace("\r\n", "\n").split("\n") if line.strip()]
+    prepared = []
+    for line in lines:
+        while len(line) > max_chars:
+            cut = max(line.rfind(",", 0, max_chars), line.rfind("，", 0, max_chars))
+            if cut <= 0:
+                cut = max_chars
+            prepared.append(line[:cut])
+            line = line[cut:]
+        prepared.append(line)
+    chunks, current, size = [], [], 0
+    for line in prepared:
+        if current and (size + len(line) + 1 > max_chars or len(current) >= max_lines):
+            chunks.append("\n".join(current))
+            current, size = [], 0
+        current.append(line)
+        size += len(line) + 1
+    if current:
+        chunks.append("\n".join(current))
+    return chunks
 
 
 def sanitize_anima_prompt(value):
@@ -195,6 +245,7 @@ class AssistantStore:
             **DEFAULT_CONFIG,
             "installation_id": self.installation_id,
             "credential_binding": "",
+            "baidu_credential_binding": "",
         }
 
     def config(self):
@@ -225,6 +276,13 @@ class AssistantStore:
             result["api_key"] = ""
             result["credential_binding"] = ""
             should_rewrite = True
+        if result.get("baidu_secret_key") and (
+            result.get("provider") != "baidu"
+            or result.get("baidu_credential_binding") != self._credential_binding("baidu", "")
+        ):
+            result["baidu_secret_key"] = ""
+            result["baidu_credential_binding"] = ""
+            should_rewrite = True
         if should_rewrite:
             self._write_json_atomic(self.config_path, result)
         return result
@@ -232,9 +290,10 @@ class AssistantStore:
     def public_config(self):
         config = self.config()
         return {
-            key: config[key] for key in DEFAULT_CONFIG if key != "api_key"
+            key: config[key] for key in DEFAULT_CONFIG if key not in ("api_key", "baidu_secret_key")
         } | {
             "api_key_configured": bool(config.get("api_key")),
+            "baidu_secret_key_configured": bool(config.get("baidu_secret_key")),
             "default_translation_rule": DEFAULT_TRANSLATION_RULE,
             "default_translate_optimize_rule": DEFAULT_TRANSLATE_OPTIMIZE_RULE,
             "default_optimization_rule": DEFAULT_OPTIMIZATION_RULE,
@@ -254,8 +313,8 @@ class AssistantStore:
             raise ValueError("设置必须是对象")
         current = self.config()
         provider = str(payload.get("provider", current["provider"])).strip().lower()
-        if provider not in {"dictionary", "openai_compatible", "ollama"}:
-            raise ValueError("服务类型仅支持词库、OpenAI兼容接口或 Ollama")
+        if provider not in {"dictionary", "openai_compatible", "ollama", "baidu"}:
+            raise ValueError("服务类型仅支持词库、OpenAI 兼容接口、Ollama 或百度翻译")
         base_url = self._normalize_base_url(payload.get("base_url", current["base_url"]))
         if base_url:
             parsed = urlparse(base_url)
@@ -289,9 +348,24 @@ class AssistantStore:
                 api_key = incoming_key
             elif payload.get("clear_api_key"):
                 api_key = ""
-        if provider == "dictionary":
+        if provider in {"dictionary", "baidu"}:
             api_key = ""
+        baidu_appid = str(payload.get("baidu_appid", current.get("baidu_appid", ""))).strip()
+        if len(baidu_appid) > 128:
+            raise ValueError("百度 APP ID 过长")
+        baidu_secret = "" if provider != current["provider"] else current.get("baidu_secret_key", "")
+        if "baidu_secret_key" in payload:
+            incoming_secret = str(payload.get("baidu_secret_key") or "").strip()
+            if incoming_secret and incoming_secret != "••••••••":
+                if len(incoming_secret) > 4096:
+                    raise ValueError("百度密钥过长")
+                baidu_secret = incoming_secret
+            elif payload.get("clear_baidu_secret_key"):
+                baidu_secret = ""
+        if provider != "baidu":
+            baidu_secret = ""
         credential_binding = self._credential_binding(provider, base_url) if api_key else ""
+        baidu_credential_binding = self._credential_binding("baidu", "") if baidu_secret else ""
         result = {
             "schema_version": 2,
             "provider": provider,
@@ -299,6 +373,9 @@ class AssistantStore:
             "model": model,
             "api_key": api_key,
             "credential_binding": credential_binding,
+            "baidu_appid": baidu_appid,
+            "baidu_secret_key": baidu_secret,
+            "baidu_credential_binding": baidu_credential_binding,
             "installation_id": self.installation_id,
             "temperature": temperature,
             "timeout_seconds": timeout_seconds,

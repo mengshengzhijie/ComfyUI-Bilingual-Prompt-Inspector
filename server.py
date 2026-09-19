@@ -12,7 +12,11 @@ from aiohttp import ClientSession, ClientTimeout, web
 from server import PromptServer
 
 from .assistant_store import (
+    BAIDU_ERROR_MESSAGES,
+    BAIDU_TRANSLATE_ENDPOINT,
     AssistantStore,
+    baidu_split_query,
+    baidu_translate_params,
     dictionary_translate,
     openai_chat_endpoint,
     sanitize_anima_prompt,
@@ -129,6 +133,39 @@ def _dictionary_explain(text):
     return "，".join(output)
 
 
+async def _baidu_translate(text, to_lang):
+    config = assistant_store.config()
+    appid = str(config.get("baidu_appid") or "").strip()
+    secret_key = str(config.get("baidu_secret_key") or "").strip()
+    if not appid or not secret_key:
+        raise ValueError("尚未填写百度翻译的 APP ID 或密钥")
+    chunks = baidu_split_query(text)
+    if not chunks:
+        raise ValueError("待翻译文本为空")
+    timeout = ClientTimeout(total=config["timeout_seconds"])
+    results = []
+    async with ClientSession(timeout=timeout) as session:
+        for index, chunk in enumerate(chunks):
+            if index:
+                await asyncio.sleep(1.1)  # 通用文本翻译标准版限 1 QPS
+            params = baidu_translate_params(appid, secret_key, chunk, to_lang)
+            async with session.post(BAIDU_TRANSLATE_ENDPOINT, data=params) as response:
+                if response.status >= 400:
+                    raise ValueError(f"百度翻译请求失败：HTTP {response.status}")
+                data = await response.json(content_type=None)
+            if not isinstance(data, dict):
+                raise ValueError("百度翻译返回了无法解析的内容")
+            if data.get("error_code"):
+                code = str(data["error_code"])
+                message = BAIDU_ERROR_MESSAGES.get(code) or data.get("error_msg") or f"错误码 {code}"
+                raise ValueError(f"百度翻译失败：{message}")
+            results.append("\n".join(str(item.get("dst", "")) for item in data.get("trans_result") or []))
+    result = "\n".join(results).strip()
+    if not result:
+        raise ValueError("百度翻译没有返回译文")
+    return result
+
+
 async def _call_configured_assistant(action, text, instruction="", connection_test=False):
     config = assistant_store.config()
     provider = config["provider"]
@@ -138,6 +175,16 @@ async def _call_configured_assistant(action, text, instruction="", connection_te
         if action in {"translate_optimize", "optimize"}:
             raise ValueError("翻译优化和提示词优化需要配置 Ollama 或 OpenAI 兼容接口")
         return dictionary_translate(text, store) if translation_direction(text) == "to_english" else _dictionary_explain(text)
+    if provider == "baidu":
+        if action in {"translate_optimize", "optimize"}:
+            raise ValueError("百度翻译只执行纯翻译；“翻译并优化”和“优化为 Anima”需要 Ollama 或 OpenAI 兼容接口")
+        if instruction:
+            raise ValueError("百度翻译不支持附加要求，请把要求并入待翻译文本")
+        if connection_test:
+            await _baidu_translate("连接测试", "en")
+            return "百度翻译连接成功"
+        to_lang = "zh" if action == "explain" or translation_direction(text) == "to_chinese" else "en"
+        return await _baidu_translate(text, to_lang)
     if not config.get("model"):
         raise ValueError("尚未填写模型名称")
     rule = {

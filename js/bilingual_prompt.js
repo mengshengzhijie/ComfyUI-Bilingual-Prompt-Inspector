@@ -462,6 +462,7 @@ async function openAssistantSettings(onSaved, onStatus) {
       ["dictionary", "纯词库（无需 API）"],
       ["ollama", "Ollama 本地模型"],
       ["openai_compatible", "OpenAI 兼容 API"],
+      ["baidu", "百度翻译 API"],
     ]) {
       const option = element("option", "", label);
       option.value = value;
@@ -487,7 +488,8 @@ async function openAssistantSettings(onSaved, onStatus) {
     const clearApiKey = element("input");
     clearApiKey.type = "checkbox";
     clearLine.append(clearApiKey, element("span", "", "清除已保存的 API Key"));
-    form.append(element("span"), clearLine);
+    const apiKeySpacer = element("span");
+    form.append(apiKeySpacer, clearLine);
     const temperature = field(form, "温度", "assistant-temperature", config.temperature, "0–2");
     temperature.type = "number";
     temperature.min = "0";
@@ -497,22 +499,46 @@ async function openAssistantSettings(onSaved, onStatus) {
     timeout.type = "number";
     timeout.min = "5";
     timeout.max = "600";
+    const baiduAppId = field(form, "APP ID", "assistant-baidu-appid", config.baidu_appid, "百度智能云“通用文本翻译”的 APP ID");
+    const baiduSecretKey = field(form, "密钥", "assistant-baidu-secret", "", config.baidu_secret_key_configured ? "已保存；留空保持不变" : "百度智能云“通用文本翻译”的密钥");
+    baiduSecretKey.type = "password";
+    const clearBaiduLine = element("label", "bpi-manager-head");
+    const clearBaiduSecretKey = element("input");
+    clearBaiduSecretKey.type = "checkbox";
+    clearBaiduLine.append(clearBaiduSecretKey, element("span", "", "清除已保存的百度密钥"));
+    const baiduSpacer = element("span");
+    form.append(baiduSpacer, clearBaiduLine);
 
-    const addRule = (label, value) => {
-      const labelElement = element("label", "", label);
+    const addRule = (labelText, value, name) => {
+      const labelElement = element("label", "", labelText);
+      labelElement.htmlFor = `bpi-field-${name}`;
       const textarea = element("textarea");
+      textarea.id = labelElement.htmlFor;
       textarea.value = value;
       form.append(labelElement, textarea);
       return textarea;
     };
-    const translationRule = addRule("仅翻译规则", config.translation_rule);
-    const translateOptimizeRule = addRule("翻译并优化规则", config.translate_optimize_rule);
-    const optimizationRule = addRule("优化为 Anima 规则", config.optimization_rule);
+    const translationRule = addRule("仅翻译规则", config.translation_rule, "translation-rule");
+    const translateOptimizeRule = addRule("翻译并优化规则", config.translate_optimize_rule, "translate-optimize-rule");
+    const optimizationRule = addRule("优化为 Anima 规则", config.optimization_rule, "optimization-rule");
     const error = element("div", "bpi-status");
     error.style.gridColumn = "1 / -1";
     form.appendChild(error);
+    const rowOf = (input) => [form.querySelector(`label[for="${input.id}"]`), input];
+    const setShown = (nodes, shown) => nodes.forEach((node) => node?.classList.toggle("bpi-hidden", !shown));
+    const syncProviderFields = () => {
+      const baidu = provider.value === "baidu";
+      setShown(
+        [...rowOf(baseUrl), ...rowOf(model), ...rowOf(apiKey), ...rowOf(temperature), ...rowOf(translationRule), ...rowOf(translateOptimizeRule), ...rowOf(optimizationRule)],
+        !baidu,
+      );
+      setShown([presetLine, apiKeySpacer, clearLine], !baidu);
+      setShown([...rowOf(baiduAppId), ...rowOf(baiduSecretKey), baiduSpacer, clearBaiduLine], baidu);
+    };
+    provider.addEventListener("change", syncProviderFields);
+    syncProviderFields();
     modal.appendChild(form);
-    modal.appendChild(element("div", "bpi-config-note", "设置保存在当前 ComfyUI 用户目录。API Key 不写入工作流、不返回浏览器，并与当前安装及 API 地址绑定。"));
+    modal.appendChild(element("div", "bpi-config-note", "设置保存在当前 ComfyUI 用户目录。API Key 与百度密钥不写入工作流、不返回浏览器，并与当前安装及所配置的服务绑定。"));
 
     const payload = () => ({
       provider: provider.value,
@@ -520,6 +546,9 @@ async function openAssistantSettings(onSaved, onStatus) {
       model: model.value.trim(),
       api_key: apiKey.value.trim(),
       clear_api_key: clearApiKey.checked,
+      baidu_appid: baiduAppId.value.trim(),
+      baidu_secret_key: baiduSecretKey.value.trim(),
+      clear_baidu_secret_key: clearBaiduSecretKey.checked,
       temperature: temperature.value,
       timeout_seconds: timeout.value,
       translation_rule: translationRule.value,
@@ -2958,7 +2987,7 @@ function createPanel(node, textWidget) {
   translateOptimizeButton.title = "自动翻译后优化成符合 Anima 格式的英文提示词";
   optimizeChineseButton.title = "只优化已有英文，不承担翻译";
   sortPromptButton.title = "按 Anima 推荐分类稳定排序，每个非空分类单独一行；自然语言和 BREAK/AND 保持完整";
-  assistantSettingsButton.title = "配置纯词库、Ollama 或 OpenAI 兼容 API 与自定义规则";
+  assistantSettingsButton.title = "配置纯词库、百度翻译、Ollama 或 OpenAI 兼容 API 与自定义规则";
   bindMirrorAction(editChineseButton, () => setChineseEditing(!state.chineseEditing));
   bindMirrorAction(expandChineseButton, openExpandedChineseEditor);
   bindMirrorAction(translateChineseButton, () => runTextAssistant("translate"));

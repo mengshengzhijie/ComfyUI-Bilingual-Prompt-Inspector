@@ -1,3 +1,4 @@
+import hashlib
 import json
 import tempfile
 import unittest
@@ -11,6 +12,8 @@ from assistant_store import (
     LEGACY_DEFAULT_OPTIMIZATION_RULE,
     LEGACY_DEFAULT_TRANSLATION_RULE,
     V17_DEFAULT_TRANSLATION_RULE,
+    baidu_split_query,
+    baidu_translate_params,
     dictionary_translate,
     openai_chat_endpoint,
     sanitize_anima_prompt,
@@ -152,6 +155,41 @@ class AssistantStoreTests(unittest.TestCase):
 
             store.update({"translation_rule": "我的自定义翻译规则"})
             self.assertEqual(store.config()["translation_rule"], "我的自定义翻译规则")
+
+    def test_baidu_provider_saves_and_masks_secret(self):
+        with tempfile.TemporaryDirectory() as root:
+            store = AssistantStore(Path(root) / "config")
+            public = store.update({
+                "provider": "baidu",
+                "baidu_appid": "2026092000123456",
+                "baidu_secret_key": "baidu-secret",
+            })
+            self.assertEqual(public["provider"], "baidu")
+            self.assertEqual(public["baidu_appid"], "2026092000123456")
+            self.assertTrue(public["baidu_secret_key_configured"])
+            self.assertNotIn("baidu_secret_key", public)
+            self.assertEqual(store.config()["baidu_secret_key"], "baidu-secret")
+            self.assertFalse(public["api_key_configured"])
+
+    def test_baidu_secret_is_cleared_when_provider_changes(self):
+        with tempfile.TemporaryDirectory() as root:
+            store = AssistantStore(Path(root) / "config")
+            store.update({"provider": "baidu", "baidu_appid": "appid", "baidu_secret_key": "baidu-secret"})
+            public = store.update({"provider": "openai_compatible", "base_url": "https://example.test/v1", "model": "m"})
+            self.assertFalse(public["baidu_secret_key_configured"])
+            self.assertEqual(store.config()["baidu_secret_key"], "")
+
+    def test_baidu_params_and_query_splitting(self):
+        params = baidu_translate_params("appid", "secret", "你好", "zh", salt="12345")
+        self.assertEqual(params["sign"], hashlib.md5("appid你好12345secret".encode("utf-8")).hexdigest())
+        self.assertEqual(params["q"], "你好")
+        self.assertEqual(baidu_split_query(""), [])
+        self.assertEqual(baidu_split_query("a\nb"), ["a\nb"])
+        chunks = baidu_split_query("，".join(["很长的标签" * 20] * 40))
+        self.assertTrue(len(chunks) > 1)
+        self.assertTrue(all(len(chunk) <= 600 for chunk in chunks))
+        rejoined = "".join(part for chunk in chunks for part in chunk.split("\n"))
+        self.assertEqual(rejoined, "，".join(["很长的标签" * 20] * 40))
 
 
 if __name__ == "__main__":
