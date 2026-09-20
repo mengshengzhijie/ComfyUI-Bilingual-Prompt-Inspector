@@ -45,7 +45,7 @@ cd ComfyUI/custom_nodes/
 git clone https://github.com/mengshengzhijie/ComfyUI-Bilingual-Prompt-Inspector.git
 ```
 
-重启 ComfyUI 后，在节点菜单的 **文本/提示词工具** 分类里找到 **双语提示词检查器（英文输出）**。
+重启 ComfyUI 后，在节点菜单的 **文本/提示词工具** 分类里找到 **提示词翻译与管理（英文输出）**。
 
 > 从原版升级：直接覆盖 `custom_nodes` 下的目录即可，个人词库与词库设置会保留。
 

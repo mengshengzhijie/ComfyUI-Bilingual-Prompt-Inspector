@@ -1,0 +1,20 @@
+[project]
+name = "prompt-translator-manager"
+version = "1.2.0"
+description = "ComfyUI prompt node with translation and management: bilingual tag view, drag-to-reorder, temporary hiding, multiple translation services and a sidebar dictionary manager."
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+dependencies = []
+classifiers = [
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+Repository = "https://github.com/mengshengzhijie/ComfyUI-Bilingual-Prompt-Inspector"
+Documentation = "https://github.com/mengshengzhijie/ComfyUI-Bilingual-Prompt-Inspector#readme"
+"Bug Tracker" = "https://github.com/mengshengzhijie/ComfyUI-Bilingual-Prompt-Inspector/issues"
+
+[tool.comfy]
+PublisherId = "mengshengzhijie"
+DisplayName = "Prompt Translator & Manager"
+requires-comfyui = ">=0.3.40"
