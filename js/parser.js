@@ -296,6 +296,52 @@ export function movePromptToken(text, tokens, token, targetIndex) {
   };
 }
 
+/**
+ * Re-insert a previously hidden tag back into the prompt text.
+ *
+ * `raw` is the tag's trimmed core slice (weight syntax, <lora:…> and BREAK
+ * included) exactly as recorded when it was hidden, and `afterRaw` is the
+ * trimmed core of the tag that used to sit immediately before it — null when
+ * it used to be the very first token.  The tag is appended after the last
+ * token first (with the text's original trailing whitespace moved behind the
+ * appended tag so it survives as the suffix), then moved next to its
+ * remembered neighbour via movePromptToken.  When the neighbour has since
+ * disappeared the tag simply stays at the end.
+ */
+export function restorePromptToken(text, tokens, raw, afterRaw) {
+  const value = String(text ?? "");
+  const list = Array.isArray(tokens) ? tokens : [];
+  const rawTag = String(raw ?? "").trim();
+  if (!rawTag) return { text: value, cursor: value.length, changed: false };
+
+  // Split the trailing whitespace off the current text: it must end up AFTER
+  // the appended tag so movePromptToken keeps it as the suffix instead of
+  // dropping the original line-break layout.  A trailing comma is likewise
+  // moved behind the appended tag — it belongs to the suffix, and a comma
+  // left inside the b↔c gap would be silently dropped by the move.
+  const core = value.replace(/\s+$/, "");
+  const tail = core ? value.slice(core.length) : "";
+  let appended;
+  if (!core) appended = rawTag;
+  else if (core.endsWith(",")) appended = `${core} ${rawTag},`;
+  else appended = `${core}, ${rawTag}`;
+  const end = core.endsWith(",") ? appended.length - 1 : appended.length;
+  const start = end - rawTag.length;
+  const appendedToken = { raw: rawTag, start, end };
+  const fallback = { text: appended + tail, cursor: end, changed: true };
+
+  if (afterRaw === null) {
+    if (!list.length) return fallback;
+    const moved = movePromptToken(appended + tail, list.concat([appendedToken]), appendedToken, 0);
+    return moved.changed ? moved : fallback;
+  }
+  if (afterRaw == null) return fallback;
+  const anchorIndex = list.findIndex((item) => item && item.raw === afterRaw);
+  if (anchorIndex < 0) return fallback;
+  const moved = movePromptToken(appended + tail, list.concat([appendedToken]), appendedToken, anchorIndex + 1);
+  return moved.changed ? moved : fallback;
+}
+
 /** Return the concrete token occurrence intersecting a textarea selection. */
 export function tokenForSelection(tokens, selectionStart, selectionEnd = selectionStart) {
   const start = Math.max(0, Number(selectionStart) || 0);

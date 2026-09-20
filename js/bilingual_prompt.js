@@ -8,6 +8,7 @@ import {
   parsePrompt,
   removePromptToken,
   replacePromptTokenWeight,
+  restorePromptToken,
   validateTranslationResult,
 } from "./parser.js";
 import {
@@ -116,7 +117,9 @@ function createPanel(node, textWidget) {
   englishTokenView.setAttribute("aria-readonly", "true");
   const englishEditor = element("textarea", "bpi-english-editor");
   englishEditor.placeholder = "输入英文提示词；完成编辑后将显示为可选择和删除的标签。";
-  englishSection.append(englishHead, englishTokenView, englishEditor);
+  const englishHiddenBar = element("div", "bpi-hidden-bar bpi-hidden");
+  englishHiddenBar.title = "已隐藏的标签不会进入实际输出文本";
+  englishSection.append(englishHead, englishTokenView, englishHiddenBar, englishEditor);
   const mirrorSection = element("section", "bpi-mirror-section");
   const mirrorHead = element("div", "bpi-section-head");
   const mirrorTitle = element("span", "", "中文同步编辑（逐标签组合）");
@@ -143,6 +146,7 @@ function createPanel(node, textWidget) {
   chineseEditor.placeholder = "可输入中文、英文或中英混合文本；使用“仅翻译”或“翻译并优化”处理，确认后再单独同步到英文输出。";
   mirrorSection.append(mirrorHead, chineseMirror, chineseEditor);
   const detailsBody = element("div", "bpi-details-body");
+  const detailsHiddenBar = element("div", "bpi-hidden-bar bpi-hidden");
   const toolbar = element("div", "bpi-toolbar");
   const leftTools = element("div", "bpi-toolbar-group");
   const rightTools = element("div", "bpi-toolbar-group");
@@ -776,6 +780,117 @@ function createPanel(node, textWidget) {
     return true;
   };
 
+  // ---- Hidden tags ---------------------------------------------------------
+  // A hidden tag is removed from the actual output text (the model never sees
+  // it) but remembered on the node itself — properties.bpiHiddenTags survives
+  // workflow save/load — together with the tag that used to sit in front of
+  // it, so one click puts it back at its original position.  Both directions
+  // run through the shared undo stack, and every entry snapshots the hidden
+  // list so Ctrl+Z rolls text and list back together.
+  const getHiddenTags = () => {
+    if (!node.properties || typeof node.properties !== "object") node.properties = {};
+    if (!Array.isArray(node.properties.bpiHiddenTags)) node.properties.bpiHiddenTags = [];
+    return node.properties.bpiHiddenTags;
+  };
+  const setHiddenTags = (nextList) => {
+    if (!node.properties || typeof node.properties !== "object") node.properties = {};
+    node.properties.bpiHiddenTags = Array.isArray(nextList) ? nextList : [];
+  };
+
+  const canHideTokens = () => ["tags", "mixed"].includes(state.modeInfo.mode);
+
+  const pushHistoryWithHidden = (entry) => {
+    state.undoStack.push(entry);
+    if (state.undoStack.length > 50) state.undoStack.shift();
+    state.redoStack = [];
+  };
+
+  const hideToken = (token) => {
+    if (!token || !canHideTokens()) return false;
+    const before = String(textWidget.value ?? "");
+    const result = removePromptToken(before, token);
+    if (!result.changed) return false;
+    const index = state.tokens.findIndex((item) =>
+      item.start === token.start && item.end === token.end && item.raw === token.raw);
+    const afterToken = index > 0 ? state.tokens[index - 1] : null;
+    const hidden = getHiddenTags();
+    const entry = {
+      before,
+      after: result.text,
+      beforeStart: token.start,
+      beforeEnd: token.end,
+      afterCursor: result.cursor,
+      label: `隐藏“${token.term}”`,
+      hiddenBefore: hidden.slice(),
+      hiddenAfter: hidden.concat([{
+        raw: token.raw,
+        chinese: token.chinese ?? "",
+        after: afterToken ? afterToken.raw : null,
+      }]),
+    };
+    pushHistoryWithHidden(entry);
+    setHiddenTags(entry.hiddenAfter);
+    state.pinned = null;
+    updateText(result.text, result.cursor);
+    setStatus(`已隐藏“${token.term}”（不会进入实际输出）；在已隐藏区可随时恢复，按 Ctrl+Z 撤销`, "ok");
+    return true;
+  };
+
+  const restoreHiddenTag = (index) => {
+    const hidden = getHiddenTags();
+    const item = hidden[index];
+    if (!item) return false;
+    const before = String(textWidget.value ?? "");
+    const result = restorePromptToken(before, state.tokens, item.raw, item.after);
+    if (!result.changed) return false;
+    const entry = {
+      before,
+      after: result.text,
+      beforeStart: 0,
+      beforeEnd: before.length,
+      afterCursor: result.cursor,
+      label: `恢复“${item.raw}”`,
+      hiddenBefore: hidden.slice(),
+      hiddenAfter: hidden.filter((_, i) => i !== index),
+    };
+    pushHistoryWithHidden(entry);
+    setHiddenTags(entry.hiddenAfter);
+    updateText(result.text, result.cursor);
+    setStatus(`已恢复“${item.raw}”到原位置；按 Ctrl+Z 可撤销`, "ok");
+    return true;
+  };
+
+  const restoreAllHiddenTags = () => {
+    const hidden = getHiddenTags();
+    if (!hidden.length) return false;
+    const before = String(textWidget.value ?? "");
+    let text = before;
+    let tokens = state.tokens;
+    for (const item of hidden) {
+      const step = restorePromptToken(text, tokens, item.raw, item.after);
+      if (!step.changed) continue;
+      text = step.text;
+      tokens = parsePrompt(text, state.index, state.machine, { mode: state.modePreference });
+    }
+    if (text === before) return false;
+    const entry = {
+      before,
+      after: text,
+      beforeStart: 0,
+      beforeEnd: before.length,
+      afterCursor: text.length,
+      label: `恢复全部隐藏标签（${hidden.length} 个）`,
+      hiddenBefore: hidden.slice(),
+      hiddenAfter: [],
+    };
+    pushHistoryWithHidden(entry);
+    setHiddenTags([]);
+    state.pinned = null;
+    updateText(text, text.length);
+    setStatus(`已恢复 ${hidden.length} 个隐藏标签；按 Ctrl+Z 可撤销`, "ok");
+    return true;
+  };
+
   let chipClickSuppressed = false;
 
   // Drag-to-reorder on the English token chips: pointerdown arms a possible
@@ -938,6 +1053,7 @@ function createPanel(node, textWidget) {
     state.redoStack.push(entry);
     state.pinned = null;
     if (typeof entry.beforeCategoryView === "boolean") state.categoryView = entry.beforeCategoryView;
+    if (Array.isArray(entry.hiddenBefore)) setHiddenTags(entry.hiddenBefore);
     updateText(entry.before, entry.beforeStart);
     setStatus(`已撤销：${entry.label}`, "ok");
     return true;
@@ -950,6 +1066,7 @@ function createPanel(node, textWidget) {
     state.undoStack.push(entry);
     state.pinned = null;
     if (typeof entry.afterCategoryView === "boolean") state.categoryView = entry.afterCategoryView;
+    if (Array.isArray(entry.hiddenAfter)) setHiddenTags(entry.hiddenAfter);
     updateText(entry.after, entry.afterCursor);
     setStatus(`已重做：${entry.label}`, "ok");
     return true;
@@ -1350,6 +1467,18 @@ function createPanel(node, textWidget) {
         ? `${token.term} ↔ ${token.chinese}｜自然语言仅支持整段编辑；可整段拖动排序`
         : `${token.term} ↔ ${token.chinese}｜单击联动；双击修改权重；选中后按 Delete 删除；可拖动排序或 Alt+↑/↓ 微调`;
       attachChipDrag(chip, token);
+      if (canHideTokens()) {
+        const hideCorner = element("span", "bpi-chip-hide");
+        hideCorner.appendChild(buildEyeIcon());
+        hideCorner.title = `隐藏“${token.raw}”：不进入实际输出，可在已隐藏区恢复`;
+        hideCorner.addEventListener("pointerdown", (event) => event.stopPropagation());
+        hideCorner.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          hideToken(token);
+        });
+        chip.appendChild(hideCorner);
+      }
       chip.addEventListener("click", (event) => {
         event.stopPropagation();
         if (chipClickSuppressed) return;
@@ -1542,6 +1671,61 @@ function createPanel(node, textWidget) {
     return handle;
   };
 
+  // Eye icon used by both hide affordances (table row button and chip corner).
+  const buildEyeIcon = () => {
+    const icon = element("span", "bpi-eye-icon");
+    icon.innerHTML =
+      '<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true">' +
+      '<path d="M12 5C6.5 5 2.5 10.5 2 12c.5 1.5 4.5 7 10 7s9.5-5.5 10-7c-.5-1.5-4.5-7-10-7z" ' +
+      'fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/>' +
+      '<circle cx="12" cy="12" r="3" fill="currentColor"/></svg>';
+    return icon;
+  };
+
+  // Details-table row button: hide this tag from the actual output while
+  // keeping it in the hidden list so it can be restored with one click.
+  const buildRowHideButton = (token) => {
+    const hide = element("span", "bpi-hide-btn");
+    hide.appendChild(buildEyeIcon());
+    hide.title = `隐藏“${token.raw}”：从实际输出中移除，但留在此列表，可随时恢复到原位置`;
+    hide.addEventListener("click", (event) => {
+      event.stopPropagation();
+      hideToken(token);
+    });
+    return hide;
+  };
+
+  // The "hidden" bar: every hidden tag keeps a greyed chip here so it never
+  // disappears for good — clicking restores it next to its old neighbour.
+  const renderHiddenBar = (container) => {
+    if (!container) return;
+    const hidden = getHiddenTags();
+    container.replaceChildren();
+    if (!hidden.length) {
+      container.classList.add("bpi-hidden");
+      return;
+    }
+    container.classList.remove("bpi-hidden");
+    const label = element("span", "bpi-hidden-label", `已隐藏 (${hidden.length})`);
+    label.title = "这些标签不会进入实际输出文本；点击标签恢复到原位置";
+    container.appendChild(label);
+    for (const [index, item] of hidden.entries()) {
+      const chip = element("span", "bpi-hidden-chip");
+      chip.title = `点击恢复“${item.raw}”到原位置`;
+      chip.appendChild(element("span", "bpi-hidden-en", item.raw));
+      if (item.chinese) chip.appendChild(element("span", "bpi-hidden-zh", item.chinese));
+      chip.appendChild(element("span", "bpi-hidden-restore", "↩"));
+      chip.addEventListener("click", (event) => {
+        event.stopPropagation();
+        restoreHiddenTag(index);
+      });
+      container.appendChild(chip);
+    }
+    const restoreAll = button("全部恢复", () => restoreAllHiddenTags(), "bpi-mini bpi-hidden-all");
+    restoreAll.title = `恢复全部 ${hidden.length} 个隐藏标签到各自原位置`;
+    container.appendChild(restoreAll);
+  };
+
   const render = () => {
     const text = String(textWidget.value ?? "");
     state.lastText = text;
@@ -1602,6 +1786,9 @@ function createPanel(node, textWidget) {
         const englishCell = element("div", "bpi-cell bpi-en");
         if (state.tableFilter === "all" && canReorderTokens()) {
           englishCell.appendChild(buildRowDragHandle(row, token));
+        }
+        if (canHideTokens()) {
+          englishCell.appendChild(buildRowHideButton(token));
         }
         const chineseCell = element("div", "bpi-cell bpi-zh");
         const englishText = element("span", "", token.raw);
@@ -1778,6 +1965,8 @@ function createPanel(node, textWidget) {
     const modeLabels = { tags: "标签", mixed: "标签 + 自然语言", natural: "自然语言", instruction: "附带指令" };
     modeInfo.textContent = `模式：${modeLabels[state.modeInfo.mode]}（${state.modeInfo.reason}）`;
     for (const [filter, control] of state.filterButtons) control.classList.toggle("bpi-filter-active", filter === state.tableFilter);
+    renderHiddenBar(detailsHiddenBar);
+    renderHiddenBar(englishHiddenBar);
   };
 
   const scheduleRender = (immediate = false) => {
@@ -1983,7 +2172,7 @@ function createPanel(node, textWidget) {
   toolbar.append(leftTools, rightTools);
   searchLine.append(modeSelect, searchLabel, search);
   summary.append(counts, modeInfo, status);
-  detailsBody.append(toolbar, searchLine, results, summary, filtersBar, issuesPanel, table);
+  detailsBody.append(toolbar, searchLine, results, summary, filtersBar, issuesPanel, table, detailsHiddenBar);
   panel.append(englishSection, mirrorSection, aboutFooter);
   panel.addEventListener("mousedown", (event) => event.stopPropagation());
   panel.addEventListener("wheel", (event) => event.stopPropagation(), { passive: true });
@@ -2207,6 +2396,12 @@ function createPanel(node, textWidget) {
     getMaxHeight() {
       return state.collapsedWidgetHeight;
     },
+    refreshAfterConfigure() {
+      // Workflow files keep the hidden-tag list in node.properties; make sure
+      // the bar is drawn even when the text itself did not change.
+      getHiddenTags();
+      scheduleRender(true);
+    },
     syncInitialLayout() {
       requestNodeResize();
     },
@@ -2264,6 +2459,12 @@ app.registerExtension({
       const height = Math.max(this.size?.[1] ?? 0, COLLAPSED_NODE_MIN_HEIGHT);
       this.setSize?.([width, height]);
       requestAnimationFrame(() => inspector.syncInitialLayout());
+    };
+
+    const originalConfigure = nodeType.prototype.onConfigure;
+    nodeType.prototype.onConfigure = function () {
+      originalConfigure?.apply(this, arguments);
+      this._bilingualPromptInspector?.refreshAfterConfigure?.();
     };
 
     const originalDrawForeground = nodeType.prototype.onDrawForeground;
