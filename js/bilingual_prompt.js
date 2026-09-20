@@ -43,29 +43,30 @@ import {
 } from "./bpi_shared.js";
 
 const NODE_NAME = "BilingualPromptInspector";
-const EXTENSION_VERSION = "v1.1.0";
-const AUTHOR_URL = "https://space.bilibili.com/697555747";
+const EXTENSION_VERSION = "v1.2.0";
+const PROJECT_URL = "https://github.com/mengshengzhijie/ComfyUI-Bilingual-Prompt-Inspector";
 const COLLAPSED_WIDGET_FALLBACK_HEIGHT = 390;
 const COLLAPSED_NODE_MIN_HEIGHT = 360;
 
-function openAuthorAbout() {
+function openProjectAbout() {
   const shade = element("div", "bpi-modal-shade");
   const modal = element("div", "bpi-modal bpi-about-modal");
   modal.append(
-    element("h3", "", "关于作者"),
-    element("div", "bpi-about-name", `ComfyUI 双语提示词检查器 ${EXTENSION_VERSION}`),
-    element("div", "bpi-config-note", "面向 Anima / Danbooru 提示词整理、翻译与检查的 ComfyUI 社区工具。"),
+    element("h3", "", "关于插件"),
+    element("div", "bpi-about-name", `双语提示词管理器 ${EXTENSION_VERSION}`),
+    element("div", "bpi-config-note", "面向 Anima / Danbooru 提示词整理、翻译与管理的 ComfyUI 社区工具。"),
+    element("div", "bpi-config-note", "基于 Qiongyi44 的双语提示词检查器二次开发，现由本人独立维护。"),
   );
   const actions = element("div", "bpi-modal-actions");
-  const authorLink = element("a", "bpi-button bpi-primary", "访问作者社区主页 ↗");
-  authorLink.href = AUTHOR_URL;
-  authorLink.target = "_blank";
-  authorLink.rel = "noopener noreferrer";
-  authorLink.referrerPolicy = "no-referrer";
-  authorLink.addEventListener("mousedown", (event) => event.stopPropagation());
-  authorLink.addEventListener("click", (event) => event.stopPropagation());
+  const projectLink = element("a", "bpi-button bpi-primary", "访问插件仓库 ↗");
+  projectLink.href = PROJECT_URL;
+  projectLink.target = "_blank";
+  projectLink.rel = "noopener noreferrer";
+  projectLink.referrerPolicy = "no-referrer";
+  projectLink.addEventListener("mousedown", (event) => event.stopPropagation());
+  projectLink.addEventListener("click", (event) => event.stopPropagation());
   const close = () => shade.remove();
-  actions.append(authorLink, button("关闭", close));
+  actions.append(projectLink, button("关闭", close));
   modal.appendChild(actions);
   shade.appendChild(modal);
   document.body.appendChild(shade);
@@ -167,14 +168,14 @@ function createPanel(node, textWidget) {
   head.append(element("div", "", "英文原文（实际输出）"), element("div", "", "中文解释（仅供阅读）"));
   table.appendChild(head);
   const aboutFooter = element("div", "bpi-about-footer");
-  const aboutButton = element("button", "bpi-about-button", "关于作者");
+  const aboutButton = element("button", "bpi-about-button", "关于插件");
   aboutButton.type = "button";
-  aboutButton.title = "查看作者信息和社区主页";
+  aboutButton.title = "查看插件版本与项目仓库";
   aboutButton.addEventListener("mousedown", (event) => event.stopPropagation());
   aboutButton.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    openAuthorAbout();
+    openProjectAbout();
   });
   aboutFooter.append(element("span", "", `Bilingual Prompt Inspector ${EXTENSION_VERSION}`), aboutButton);
 
