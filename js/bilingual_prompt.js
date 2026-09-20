@@ -3,6 +3,7 @@ import {
   analyzePromptSyntax,
   buildDictionaryIndex,
   detectInputMode,
+  movePromptToken,
   normalizeKey,
   parsePrompt,
   removePromptToken,
@@ -751,6 +752,122 @@ function createPanel(node, textWidget) {
     return true;
   };
 
+  const canReorderTokens = () =>
+    ["tags", "mixed"].includes(state.modeInfo.mode) && state.tokens.length > 1;
+
+  const moveTokenTo = (token, targetIndex) => {
+    if (!token || !canReorderTokens()) return false;
+    const before = String(textWidget.value ?? "");
+    const result = movePromptToken(before, state.tokens, token, targetIndex);
+    if (!result.changed) return false;
+    state.undoStack.push({
+      before,
+      after: result.text,
+      beforeStart: token.start,
+      beforeEnd: token.end,
+      afterCursor: result.cursor,
+      label: `移动“${token.term}”`,
+    });
+    if (state.undoStack.length > 50) state.undoStack.shift();
+    state.redoStack = [];
+    state.pinned = null;
+    updateText(result.text, result.cursor);
+    setStatus(`已移动“${token.term}”；按 Ctrl+Z 可撤销`, "ok");
+    return true;
+  };
+
+  let chipClickSuppressed = false;
+
+  // Drag-to-reorder on the English token chips: pointerdown arms a possible
+  // drag, moving past a small threshold activates it (so plain clicks and
+  // double-clicks keep working), and releasing applies a structured move
+  // through the shared undo stack.
+  const attachChipDrag = (chip, token) => {
+    chip.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0 || !canReorderTokens()) return;
+      const startX = event.clientX;
+      const startY = event.clientY;
+      let active = false;
+      let targetIndex = null;
+      let hoverChip = null;
+      const clearHover = () => {
+        if (hoverChip) hoverChip.classList.remove("bpi-drop-before", "bpi-drop-after");
+        hoverChip = null;
+      };
+      const onMove = (moveEvent) => {
+        if (!chip.isConnected) {
+          finish();
+          return;
+        }
+        if (!active) {
+          if (Math.abs(moveEvent.clientX - startX) < 4 && Math.abs(moveEvent.clientY - startY) < 4) return;
+          active = true;
+          chipClickSuppressed = true;
+          chip.classList.add("bpi-dragging");
+        }
+        moveEvent.preventDefault();
+        clearHover();
+        targetIndex = null;
+        const hit = document.elementFromPoint(moveEvent.clientX, moveEvent.clientY);
+        const hitChip = hit?.closest?.(".bpi-english-token");
+        const list = [...englishTokenView.querySelectorAll(".bpi-english-token")];
+        if (hitChip && hitChip !== chip) {
+          const index = list.indexOf(hitChip);
+          if (index >= 0) {
+            const rect = hitChip.getBoundingClientRect();
+            const before = moveEvent.clientX < rect.left + rect.width / 2;
+            targetIndex = before ? index : index + 1;
+            hoverChip = hitChip;
+            hoverChip.classList.add(before ? "bpi-drop-before" : "bpi-drop-after");
+          }
+        } else if (!hitChip) {
+          let last = -1;
+          for (const [index, other] of list.entries()) {
+            if (other === chip) continue;
+            const rect = other.getBoundingClientRect();
+            if (rect.bottom <= moveEvent.clientY) last = Math.max(last, index);
+            else if (moveEvent.clientY >= rect.top && moveEvent.clientX >= rect.right) last = Math.max(last, index);
+          }
+          targetIndex = last + 1;
+        }
+      };
+      const finish = () => {
+        document.removeEventListener("pointermove", onMove);
+        document.removeEventListener("pointerup", finish);
+        document.removeEventListener("pointercancel", finish);
+        chip.classList.remove("bpi-dragging");
+        clearHover();
+        if (active) {
+          setTimeout(() => { chipClickSuppressed = false; }, 0);
+          if (targetIndex !== null && chip.isConnected) {
+            moveTokenTo(token, targetIndex);
+            requestAnimationFrame(() => englishTokenView.focus({ preventScroll: true }));
+          }
+        }
+      };
+      document.addEventListener("pointermove", onMove);
+      document.addEventListener("pointerup", finish);
+      document.addEventListener("pointercancel", finish);
+    });
+  };
+
+  // Alt+ArrowUp / Alt+ArrowDown nudge the pinned token one slot.  Returns
+  // true when the key was consumed.
+  const handleTokenReorderShortcut = (event) => {
+    if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return false;
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return false;
+    const token = state.tokens.find((item) => item.id === state.pinned);
+    if (!token) return false;
+    const index = state.tokens.indexOf(token);
+    if (index < 0) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    const upward = event.key === "ArrowUp";
+    const moved = moveTokenTo(token, upward ? index - 1 : index + 2);
+    if (!moved) setStatus(upward ? `“${token.term}”已经在最前面了` : `“${token.term}”已经在最后面了`, "");
+    return true;
+  };
+
   const openWeightEditor = (token) => {
     if (!token || token.syntax !== "tag" || token.segmentKind === "natural" ||
         !["tags", "mixed"].includes(state.modeInfo.mode)) {
@@ -1230,16 +1347,19 @@ function createPanel(node, textWidget) {
       const chip = element("span", classes.join(" "), label);
       chip.dataset.tokenId = String(token.id);
       chip.title = token.segmentKind === "natural"
-        ? `${token.term} ↔ ${token.chinese}｜自然语言仅支持整段编辑`
-        : `${token.term} ↔ ${token.chinese}｜单击联动；双击修改权重；选中后按 Delete 删除`;
+        ? `${token.term} ↔ ${token.chinese}｜自然语言仅支持整段编辑；可整段拖动排序`
+        : `${token.term} ↔ ${token.chinese}｜单击联动；双击修改权重；选中后按 Delete 删除；可拖动排序或 Alt+↑/↓ 微调`;
+      attachChipDrag(chip, token);
       chip.addEventListener("click", (event) => {
         event.stopPropagation();
+        if (chipClickSuppressed) return;
         activateToken(token);
         englishTokenView.focus({ preventScroll: true });
       });
       chip.addEventListener("dblclick", (event) => {
         event.preventDefault();
         event.stopPropagation();
+        if (chipClickSuppressed) return;
         window.getSelection()?.removeAllRanges();
         activateToken(token);
         englishTokenView.focus({ preventScroll: true });
@@ -1344,6 +1464,84 @@ function createPanel(node, textWidget) {
     autoFitActiveGreenArea();
   };
 
+  // Drag handle for the details table rows: grab the ⠿ grip to drag a token
+  // to a new position.  A drop indicator line shows the insertion point and
+  // the table auto-scrolls near its edges while dragging.
+  const buildRowDragHandle = (row, token) => {
+    const handle = element("span", "bpi-drag-handle", "⠿");
+    handle.title = "拖动调整标签顺序；也可选中后按 Alt+↑/↓ 微调；Ctrl+Z 可撤销";
+    handle.addEventListener("click", (event) => event.stopPropagation());
+    handle.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const startX = event.clientX;
+      const startY = event.clientY;
+      let active = false;
+      let targetIndex = null;
+      let indicator = null;
+      const orderedRows = () => [...table.querySelectorAll(".bpi-row[data-token-id]")];
+      const finish = () => {
+        document.removeEventListener("pointermove", onMove);
+        document.removeEventListener("pointerup", finish);
+        document.removeEventListener("pointercancel", finish);
+        row.classList.remove("bpi-dragging");
+        if (indicator) {
+          indicator.remove();
+          indicator = null;
+        }
+        if (active && targetIndex !== null && row.isConnected) {
+          moveTokenTo(token, targetIndex);
+        }
+      };
+      const onMove = (moveEvent) => {
+        if (!row.isConnected) {
+          finish();
+          return;
+        }
+        if (!active) {
+          if (Math.abs(moveEvent.clientX - startX) < 3 && Math.abs(moveEvent.clientY - startY) < 3) return;
+          active = true;
+          row.classList.add("bpi-dragging");
+          indicator = element("div", "bpi-drop-indicator");
+          table.appendChild(indicator);
+        }
+        moveEvent.preventDefault();
+        const tableRect = table.getBoundingClientRect();
+        if (moveEvent.clientY < tableRect.top + 28) table.scrollTop -= 9;
+        else if (moveEvent.clientY > tableRect.bottom - 28) table.scrollTop += 9;
+        const rows = orderedRows();
+        let anchorRow = null;
+        for (const candidate of rows) {
+          const rect = candidate.getBoundingClientRect();
+          if (moveEvent.clientY < rect.top + rect.height / 2) {
+            anchorRow = candidate;
+            break;
+          }
+        }
+        if (anchorRow) {
+          const tokenId = Number(anchorRow.dataset.tokenId);
+          const index = state.tokens.findIndex((item) => item.id === tokenId);
+          targetIndex = index >= 0 ? index : state.tokens.length;
+        } else {
+          targetIndex = state.tokens.length;
+        }
+        let y;
+        if (anchorRow) {
+          y = anchorRow.getBoundingClientRect().top - tableRect.top + table.scrollTop;
+        } else {
+          const lastRow = rows[rows.length - 1];
+          y = (lastRow ? lastRow.getBoundingClientRect().bottom - tableRect.top : 0) + table.scrollTop;
+        }
+        indicator.style.top = `${Math.max(0, y - 1)}px`;
+      };
+      document.addEventListener("pointermove", onMove);
+      document.addEventListener("pointerup", finish);
+      document.addEventListener("pointercancel", finish);
+    });
+    return handle;
+  };
+
   const render = () => {
     const text = String(textWidget.value ?? "");
     state.lastText = text;
@@ -1402,6 +1600,9 @@ function createPanel(node, textWidget) {
         row.dataset.tokenId = String(token.id);
         if (state.pinned === token.id) row.classList.add("bpi-pinned");
         const englishCell = element("div", "bpi-cell bpi-en");
+        if (state.tableFilter === "all" && canReorderTokens()) {
+          englishCell.appendChild(buildRowDragHandle(row, token));
+        }
         const chineseCell = element("div", "bpi-cell bpi-zh");
         const englishText = element("span", "", token.raw);
         englishText.title = `查询词：${token.term}${token.weight === null ? "" : `｜权重：${token.weight}`}`;
@@ -1788,7 +1989,9 @@ function createPanel(node, textWidget) {
   panel.addEventListener("wheel", (event) => event.stopPropagation(), { passive: true });
   const handleTokenViewKeydown = (event) => {
     handleHistoryShortcut(event);
-    if (event.defaultPrevented || !["Backspace", "Delete"].includes(event.key)) return;
+    if (event.defaultPrevented) return;
+    if (handleTokenReorderShortcut(event)) return;
+    if (!["Backspace", "Delete"].includes(event.key)) return;
     const token = state.tokens.find((item) => item.id === state.pinned);
     if (!token) return;
     event.preventDefault();
@@ -1798,7 +2001,9 @@ function createPanel(node, textWidget) {
   englishTokenView.addEventListener("keydown", handleTokenViewKeydown);
   chineseMirror.addEventListener("keydown", (event) => {
     handleHistoryShortcut(event);
-    if (event.defaultPrevented || !["Backspace", "Delete"].includes(event.key)) return;
+    if (event.defaultPrevented) return;
+    if (handleTokenReorderShortcut(event)) return;
+    if (!["Backspace", "Delete"].includes(event.key)) return;
     const token = state.tokens.find((item) => item.id === state.pinned);
     if (!token) return;
     event.preventDefault();

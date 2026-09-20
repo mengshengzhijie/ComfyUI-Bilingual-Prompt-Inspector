@@ -184,6 +184,118 @@ export function replacePromptTokenWeight(text, token, weight) {
   };
 }
 
+/**
+ * Move one parsed prompt token to a new position in the token order.
+ *
+ * `tokens` must be the current parse of `text` (as produced by parsePrompt),
+ * so natural-language segments stay whole units and a tag can never be
+ * inserted inside one.  `targetIndex` is an insertion index into the ORIGINAL
+ * token order: the moved token ends up immediately before the token that was
+ * at `targetIndex`, or at the very end when it equals `tokens.length`.
+ *
+ * The move is modeled as extract-then-insert: removing the token closes up
+ * exactly one adjacent separator (preferring one without a line break so
+ * multi-line layouts survive), and inserting reuses the separator already
+ * present at the drop boundary.  Duplicate tags are moved by occurrence via
+ * their start/end offsets, matching removePromptToken.
+ */
+export function movePromptToken(text, tokens, token, targetIndex) {
+  const value = String(text ?? "");
+  const list = Array.isArray(tokens) ? tokens : [];
+  const fromIndex = list.findIndex((item) =>
+    item && Number.isInteger(item.start) && Number.isInteger(item.end) &&
+    item.start === token?.start && item.end === token?.end && item.raw === token?.raw);
+  if (fromIndex < 0 || list.length < 2) {
+    return { text: value, cursor: token?.start ?? value.length, changed: false, index: fromIndex };
+  }
+  const count = list.length;
+  let target = Math.round(Number(targetIndex));
+  if (!Number.isFinite(target)) target = fromIndex;
+  target = Math.max(0, Math.min(count, target));
+  const newIndex = target > fromIndex ? target - 1 : target;
+  if (newIndex === fromIndex) {
+    return { text: value, cursor: token.start, changed: false, index: fromIndex };
+  }
+
+  // Geometry: splitPrompt keeps each token's leading/trailing whitespace
+  // INSIDE its slice, so every inter-token gap is pure separators (commas /
+  // line breaks) while `raw` is the trimmed core.  Rebuilding the text from
+  // `raw` alone would silently drop that whitespace, so track the slice
+  // layout explicitly: prefix, per-token (inEdge, lead, core, trail), suffix.
+  const startOf = (i) => list[i].start;
+  const endOf = (i) => list[i].end;
+  const sliceOf = (i) => value.slice(startOf(i), endOf(i));
+  const coreOf = (i) => String(list[i].raw ?? sliceOf(i).trim());
+  const leadOf = (i) => (sliceOf(i).match(/^\s*/) ?? [""])[0];
+  const trailOf = (i) => (sliceOf(i).match(/\s*$/) ?? [""])[0];
+  const gapBetween = (a, b) => value.slice(endOf(a), startOf(b));
+  const prefix = value.slice(0, startOf(0));
+  const suffix = value.slice(endOf(count - 1));
+  const hasBreak = (gap) => /[\r\n]/.test(gap);
+  const normGap = (gap) => (hasBreak(gap) ? gap : ", ");
+
+  // Extraction: drop the moved token plus exactly one adjacent gap.  When
+  // both sides exist, drop the one WITHOUT a line break so multi-line
+  // layouts survive; the surviving gap becomes the join between neighbours.
+  const leftGap = fromIndex > 0 ? gapBetween(fromIndex - 1, fromIndex) : prefix;
+  const rightGap = fromIndex < count - 1 ? gapBetween(fromIndex, fromIndex + 1) : suffix;
+  let dropLeft;
+  if (fromIndex === 0) dropLeft = false;
+  else if (fromIndex === count - 1) dropLeft = true;
+  else dropLeft = hasBreak(rightGap) && !hasBreak(leftGap);
+  const survivingJoin = dropLeft ? rightGap : leftGap;
+
+  const order = [];
+  for (let i = 0; i < count; i += 1) if (i !== fromIndex) order.push(i);
+  const survivorCount = order.length;
+
+  // Separator run in front of survivor position p after extraction.
+  const inEdge = (p) => {
+    if (p === 0) return prefix;
+    const idx = order[p];
+    const prev = order[p - 1];
+    if (idx === prev + 1) return gapBetween(prev, idx);
+    return survivingJoin; // the only hole is the removed token
+  };
+  // Whether the token's own leading whitespace survives extraction: it is
+  // dropped when a new edge takes over (extraction head, or a line-break
+  // join) but kept across a plain comma join so "a, c" stays "a, c".
+  const keepsLead = (p) => {
+    if (p === 0) return fromIndex !== 0;
+    if (order[p] === order[p - 1] + 1) return true;
+    return !hasBreak(survivingJoin);
+  };
+
+  // Insertion: the moved token takes the drop point's own separator (commas
+  // are normalised to ", "), and the token it displaces gets a fresh ", ".
+  const movedCore = coreOf(fromIndex);
+  let out = "";
+  let cursor = 0;
+  for (let p = 0; p < survivorCount; p += 1) {
+    const idx = order[p];
+    if (p === newIndex) {
+      const edge = p === 0 ? prefix : normGap(inEdge(p));
+      out += edge + movedCore;
+      cursor = out.length;
+      out += ", " + coreOf(idx) + trailOf(idx);
+    } else {
+      const lead = keepsLead(p) ? leadOf(idx) : "";
+      out += inEdge(p) + lead + coreOf(idx) + trailOf(idx);
+    }
+  }
+  if (newIndex === survivorCount) {
+    out += ", " + movedCore;
+    cursor = out.length;
+  }
+  const nextText = out + suffix;
+  return {
+    text: nextText,
+    cursor,
+    changed: nextText !== value,
+    index: newIndex,
+  };
+}
+
 /** Return the concrete token occurrence intersecting a textarea selection. */
 export function tokenForSelection(tokens, selectionStart, selectionEnd = selectionStart) {
   const start = Math.max(0, Number(selectionStart) || 0);
