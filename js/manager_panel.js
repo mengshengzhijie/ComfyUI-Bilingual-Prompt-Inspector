@@ -766,7 +766,9 @@ function buildTagManagerSection() {
   toolbar.append(element("span", "", "检查器节点："), select, refresh,
     element("span", "bpi-config-note", "标签翻译、词库搜索与逐标签操作在下方编辑当前选中的节点。"));
   select.addEventListener("change", () => {
-    manager.tagManagerNodeId = Number(select.value);
+    // ComfyUI 前端 1.16+ 的 node.id 是字符串（见 litegraph 的 toNodeId），
+    // 用 Number() 会变成数字，导致下面 find 的严格比较永远失败、退回第一个节点。
+    manager.tagManagerNodeId = String(select.value);
     rebuildTagManagerSection();
   });
   refs.tagManagerSelect = select;
