@@ -47,15 +47,19 @@ DEFAULT_OPTIMIZATION_RULE = """你是 Anima 模型英文提示词优化器。输
 标签使用英文逗号分隔；自然语言只放在末尾并使用英文句点分隔。仅使用 Anima 支持的英文标点和语法：逗号、句点、圆括号与冒号权重、@ 画师前缀、下划线、连字符、撇号、百分号，以及尖括号 LoRA 语法。"""
 
 DEFAULT_CONFIG = {
-    "schema_version": 2,
-    "provider": "dictionary",
-    "base_url": "",
-    "model": "",
-    "api_key": "",
+    "schema_version": 3,
+    # 翻译/解释走哪个服务；优化永远走 AI，与此无关
+    "translate_service": "dictionary",  # dictionary | baidu | ai
+    # AI 后端独立配置，不随翻译服务切换而清空
+    "ai_provider": "openai_compatible",  # openai_compatible | ollama
+    "ai_base_url": "",
+    "ai_model": "",
+    "ai_api_key": "",
+    "ai_temperature": 0.2,
+    "ai_timeout_seconds": 90,
+    # 百度翻译独立配置，不随翻译服务切换而清空
     "baidu_appid": "",
     "baidu_secret_key": "",
-    "temperature": 0.2,
-    "timeout_seconds": 90,
     "translation_rule": DEFAULT_TRANSLATION_RULE,
     "translate_optimize_rule": DEFAULT_TRANSLATE_OPTIMIZE_RULE,
     "optimization_rule": DEFAULT_OPTIMIZATION_RULE,
@@ -244,9 +248,36 @@ class AssistantStore:
         return {
             **DEFAULT_CONFIG,
             "installation_id": self.installation_id,
-            "credential_binding": "",
+            "ai_credential_binding": "",
             "baidu_credential_binding": "",
         }
+
+    @staticmethod
+    def _migrate_v2(value):
+        """旧 schema（单一 provider）→ v3（翻译服务 + 独立 AI/百度槽）。"""
+        if value.get("schema_version", 0) >= 3:
+            return value
+        old_provider = str(value.get("provider", "dictionary")).strip().lower()
+        if old_provider in ("openai_compatible", "ollama"):
+            value["translate_service"] = "ai"
+            value.setdefault("ai_provider", old_provider)
+        elif old_provider == "baidu":
+            value["translate_service"] = "baidu"
+            value.setdefault("ai_provider", "openai_compatible")
+        else:
+            value["translate_service"] = "dictionary"
+            value.setdefault("ai_provider", "openai_compatible")
+        # 旧的 base_url/model/api_key/temperature/timeout_seconds 搬到 ai_* 槽
+        value.setdefault("ai_base_url", value.get("base_url", ""))
+        value.setdefault("ai_model", value.get("model", ""))
+        value.setdefault("ai_api_key", value.get("api_key", ""))
+        value.setdefault("ai_temperature", value.get("temperature", 0.2))
+        value.setdefault("ai_timeout_seconds", value.get("timeout_seconds", 90))
+        # 旧 credential_binding 改名 ai_credential_binding（语义一致：绑 AI 后端+地址）
+        value.setdefault("ai_credential_binding", value.get("credential_binding", ""))
+        value.setdefault("baidu_credential_binding", value.get("baidu_credential_binding", ""))
+        value["schema_version"] = 3
+        return value
 
     def config(self):
         value = {}
@@ -261,6 +292,9 @@ class AssistantStore:
         if value and value.get("installation_id") != self.installation_id:
             value = self._default_persisted_config()
             should_rewrite = True
+        if value and value.get("schema_version", 0) < 3:
+            value = self._migrate_v2(value)
+            should_rewrite = True
         if value.get("translation_rule") in {LEGACY_DEFAULT_TRANSLATION_RULE, V17_DEFAULT_TRANSLATION_RULE}:
             value["translation_rule"] = DEFAULT_TRANSLATION_RULE
             should_rewrite = True
@@ -271,15 +305,12 @@ class AssistantStore:
             value["translate_optimize_rule"] = DEFAULT_TRANSLATE_OPTIMIZE_RULE
             should_rewrite = True
         result = {**self._default_persisted_config(), **value, "installation_id": self.installation_id}
-        expected_binding = self._credential_binding(result["provider"], result["base_url"])
-        if result.get("api_key") and result.get("credential_binding") != expected_binding:
-            result["api_key"] = ""
-            result["credential_binding"] = ""
+        # 密钥只在「绑定的后端/地址变了」或「换机器」时清，切翻译服务绝不清
+        if result.get("ai_api_key") and result.get("ai_credential_binding") != self._credential_binding(result["ai_provider"], result["ai_base_url"]):
+            result["ai_api_key"] = ""
+            result["ai_credential_binding"] = ""
             should_rewrite = True
-        if result.get("baidu_secret_key") and (
-            result.get("provider") != "baidu"
-            or result.get("baidu_credential_binding") != self._credential_binding("baidu", "")
-        ):
+        if result.get("baidu_secret_key") and result.get("baidu_credential_binding") != self._credential_binding("baidu", ""):
             result["baidu_secret_key"] = ""
             result["baidu_credential_binding"] = ""
             should_rewrite = True
@@ -290,9 +321,9 @@ class AssistantStore:
     def public_config(self):
         config = self.config()
         return {
-            key: config[key] for key in DEFAULT_CONFIG if key not in ("api_key", "baidu_secret_key")
+            key: config[key] for key in DEFAULT_CONFIG if key not in ("ai_api_key", "baidu_secret_key")
         } | {
-            "api_key_configured": bool(config.get("api_key")),
+            "ai_api_key_configured": bool(config.get("ai_api_key")),
             "baidu_secret_key_configured": bool(config.get("baidu_secret_key")),
             "default_translation_rule": DEFAULT_TRANSLATION_RULE,
             "default_translate_optimize_rule": DEFAULT_TRANSLATE_OPTIMIZE_RULE,
@@ -312,12 +343,15 @@ class AssistantStore:
         if not isinstance(payload, dict):
             raise ValueError("设置必须是对象")
         current = self.config()
-        provider = str(payload.get("provider", current["provider"])).strip().lower()
-        if provider not in {"dictionary", "openai_compatible", "ollama", "baidu"}:
-            raise ValueError("服务类型仅支持词库、OpenAI 兼容接口、Ollama 或百度翻译")
-        base_url = self._normalize_base_url(payload.get("base_url", current["base_url"]))
-        if base_url:
-            parsed = urlparse(base_url)
+        translate_service = str(payload.get("translate_service", current["translate_service"])).strip().lower()
+        if translate_service not in {"dictionary", "baidu", "ai"}:
+            raise ValueError("翻译服务仅支持词库、百度翻译或 AI")
+        ai_provider = str(payload.get("ai_provider", current["ai_provider"])).strip().lower()
+        if ai_provider not in {"openai_compatible", "ollama"}:
+            raise ValueError("AI 后端仅支持 OpenAI 兼容接口或 Ollama")
+        ai_base_url = self._normalize_base_url(payload.get("ai_base_url", current["ai_base_url"]))
+        if ai_base_url:
+            parsed = urlparse(ai_base_url)
             if parsed.scheme not in {"http", "https"} or not parsed.netloc:
                 raise ValueError("API 地址必须是完整的 http:// 或 https:// 地址")
             if parsed.username or parsed.password:
@@ -326,62 +360,61 @@ class AssistantStore:
                 raise ValueError("API 地址中不能包含查询参数或片段")
             if parsed.scheme == "http" and not self._is_local_hostname(parsed.hostname):
                 raise ValueError("非本机 API 地址必须使用 HTTPS，避免 API Key 明文传输")
-        model = str(payload.get("model", current["model"])).strip()
-        if len(model) > 300:
+        ai_model = str(payload.get("ai_model", current["ai_model"])).strip()
+        if len(ai_model) > 300:
             raise ValueError("模型名称过长")
         try:
-            temperature = float(payload.get("temperature", current["temperature"]))
-            timeout_seconds = int(payload.get("timeout_seconds", current["timeout_seconds"]))
+            ai_temperature = float(payload.get("ai_temperature", current["ai_temperature"]))
+            ai_timeout_seconds = int(payload.get("ai_timeout_seconds", current["ai_timeout_seconds"]))
         except (TypeError, ValueError) as error:
             raise ValueError("温度和超时时间必须是数字") from error
-        if not 0 <= temperature <= 2:
+        if not 0 <= ai_temperature <= 2:
             raise ValueError("温度必须在 0 到 2 之间")
-        if not 5 <= timeout_seconds <= 600:
+        if not 5 <= ai_timeout_seconds <= 600:
             raise ValueError("超时时间必须在 5 到 600 秒之间")
-        endpoint_changed = provider != current["provider"] or base_url != self._normalize_base_url(current["base_url"])
-        api_key = "" if endpoint_changed else current.get("api_key", "")
-        if "api_key" in payload:
-            incoming_key = str(payload.get("api_key") or "").strip()
+        # AI key：只在「AI 后端/地址变了」或显式清除时清，切翻译服务绝不清
+        ai_endpoint_changed = ai_provider != current["ai_provider"] or ai_base_url != self._normalize_base_url(current["ai_base_url"])
+        ai_api_key = "" if ai_endpoint_changed else current.get("ai_api_key", "")
+        if payload.get("clear_ai_api_key"):
+            ai_api_key = ""
+        elif "ai_api_key" in payload:
+            incoming_key = str(payload.get("ai_api_key") or "").strip()
             if incoming_key and incoming_key != "••••••••":
                 if len(incoming_key) > 4096:
                     raise ValueError("API Key 过长")
-                api_key = incoming_key
-            elif payload.get("clear_api_key"):
-                api_key = ""
-        if provider in {"dictionary", "baidu"}:
-            api_key = ""
+                ai_api_key = incoming_key
         baidu_appid = str(payload.get("baidu_appid", current.get("baidu_appid", ""))).strip()
         if len(baidu_appid) > 128:
             raise ValueError("百度 APP ID 过长")
-        baidu_secret = "" if provider != current["provider"] else current.get("baidu_secret_key", "")
-        if "baidu_secret_key" in payload:
+        # 百度密钥：只在显式清除时清，切翻译服务绝不清
+        baidu_secret = current.get("baidu_secret_key", "")
+        if payload.get("clear_baidu_secret_key"):
+            baidu_secret = ""
+        elif "baidu_secret_key" in payload:
             incoming_secret = str(payload.get("baidu_secret_key") or "").strip()
             if incoming_secret and incoming_secret != "••••••••":
                 if len(incoming_secret) > 4096:
                     raise ValueError("百度密钥过长")
                 baidu_secret = incoming_secret
-            elif payload.get("clear_baidu_secret_key"):
-                baidu_secret = ""
-        if provider != "baidu":
-            baidu_secret = ""
-        credential_binding = self._credential_binding(provider, base_url) if api_key else ""
+        ai_credential_binding = self._credential_binding(ai_provider, ai_base_url) if ai_api_key else ""
         baidu_credential_binding = self._credential_binding("baidu", "") if baidu_secret else ""
         result = {
-            "schema_version": 2,
-            "provider": provider,
-            "base_url": base_url,
-            "model": model,
-            "api_key": api_key,
-            "credential_binding": credential_binding,
+            "schema_version": 3,
+            "translate_service": translate_service,
+            "ai_provider": ai_provider,
+            "ai_base_url": ai_base_url,
+            "ai_model": ai_model,
+            "ai_api_key": ai_api_key,
+            "ai_temperature": ai_temperature,
+            "ai_timeout_seconds": ai_timeout_seconds,
             "baidu_appid": baidu_appid,
             "baidu_secret_key": baidu_secret,
-            "baidu_credential_binding": baidu_credential_binding,
-            "installation_id": self.installation_id,
-            "temperature": temperature,
-            "timeout_seconds": timeout_seconds,
             "translation_rule": self._clean_rule(payload.get("translation_rule"), current["translation_rule"]),
             "translate_optimize_rule": self._clean_rule(payload.get("translate_optimize_rule"), current["translate_optimize_rule"]),
             "optimization_rule": self._clean_rule(payload.get("optimization_rule"), current["optimization_rule"]),
+            "installation_id": self.installation_id,
+            "ai_credential_binding": ai_credential_binding,
+            "baidu_credential_binding": baidu_credential_binding,
         }
         self._write_json_atomic(self.config_path, result)
         return self.public_config()

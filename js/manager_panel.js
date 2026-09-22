@@ -9,19 +9,25 @@ import {
   button,
   deleteCommunityPack,
   deletePersonalTag,
+  deleteSavedPrompt,
   downloadJson,
   element,
   exportDictionaryPack,
   exportPersonalDictionary,
+  exportSavedPrompts,
   field,
   getAssistantConfig,
   importCommunityPack,
+  importSavedPrompts,
   importTags,
   bulkUpdateTags,
   injectBpiStyles,
+  listSavedPrompts,
   loadDictionary,
   loadPreferences,
+  openSavePromptDialog,
   openTagDialog,
+  savedPromptImageUrl,
   runInspectorAssistant,
   saveAssistantConfig,
   savePreferences,
@@ -36,6 +42,7 @@ const SECTIONS = [
   ["tags", "词库"],
   ["packs", "词库包"],
   ["assistant", "助手设置"],
+  ["favorites", "收藏"],
 ];
 
 const manager = {
@@ -45,6 +52,9 @@ const manager = {
   section: "tags",
   loaded: false,
   assistantLoaded: false,
+  favoritesLoaded: false,
+  favorites: [],
+  favoritesChangeHandler: null,
   tagManagerNodeId: null,
   largeMatches: [],
   largeQuery: "",
@@ -562,51 +572,32 @@ async function buildAssistantSection(section) {
   section.replaceChildren();
   const form = element("form", "bpi-form");
   form.addEventListener("submit", (event) => event.preventDefault());
-  const providerLabel = element("label", "", "服务类型");
-  const provider = element("select");
+  const error = element("div", "bpi-status");
+  error.style.gridColumn = "1 / -1";
+
+  // 翻译服务：翻译/解释按此选择；“翻译并优化”“优化为 Anima”恒走 AI
+  const serviceLabel = element("label", "", "翻译服务");
+  const service = element("select");
   for (const [value, label] of [
     ["dictionary", "纯词库（无需 API）"],
-    ["ollama", "Ollama 本地模型"],
-    ["openai_compatible", "OpenAI 兼容 API"],
-    ["baidu", "百度翻译 API"],
+    ["baidu", "百度翻译"],
+    ["ai", "AI（OpenAI 兼容 / Ollama）"],
   ]) {
     const option = element("option", "", label);
     option.value = value;
-    provider.appendChild(option);
+    service.appendChild(option);
   }
-  provider.value = config.provider;
-  form.append(providerLabel, provider);
-  const baseUrl = field(form, "API 地址", "assistant-base-url", config.base_url, "Ollama 可留空；兼容接口示例 https://host/v1");
-  const model = field(form, "模型名称", "assistant-model", config.model, "例如 qwen3:8b 或服务商模型 ID");
-  const presetLine = element("div", "bpm-toolbar");
-  presetLine.style.gridColumn = "1 / -1";
-  const error = element("div", "bpi-status");
-  error.style.gridColumn = "1 / -1";
-  const lmStudioPreset = button("使用 LM Studio 本地预设", () => {
-    provider.value = "openai_compatible";
-    baseUrl.value = "http://127.0.0.1:1234/v1";
-    error.textContent = "已填入 LM Studio 默认地址；请选择已加载模型的 ID，再保存并测试连接";
-    error.dataset.kind = "ok";
-  });
-  presetLine.append(lmStudioPreset, element("span", "bpi-config-note", "默认连接本机 1234 端口，不要求购买外部 API。"));
-  form.append(presetLine);
-  const apiKey = field(form, "API Key", "assistant-api-key", "", config.api_key_configured ? "已保存；留空保持不变" : "本地 Ollama / LM Studio 可留空");
-  apiKey.type = "password";
-  const clearLine = element("label", "bpm-toolbar");
-  const clearApiKey = element("input");
-  clearApiKey.type = "checkbox";
-  clearLine.append(clearApiKey, element("span", "", "清除已保存的 API Key"));
-  const apiKeySpacer = element("span");
-  form.append(apiKeySpacer, clearLine);
-  const temperature = field(form, "温度", "assistant-temperature", config.temperature, "0–2");
-  temperature.type = "number";
-  temperature.min = "0";
-  temperature.max = "2";
-  temperature.step = "0.05";
-  const timeout = field(form, "超时（秒）", "assistant-timeout", config.timeout_seconds, "5–600");
-  timeout.type = "number";
-  timeout.min = "5";
-  timeout.max = "600";
+  service.value = config.translate_service;
+  form.append(serviceLabel, service);
+  const serviceNote = element("div", "bpi-config-note", "翻译/解释按此选择；“翻译并优化”与“优化为 Anima”恒走 AI，与此处无关。要测 AI 连接请临时把翻译服务设为 AI 再点测试（密钥不会丢）。");
+  serviceNote.style.gridColumn = "1 / -1";
+  form.append(serviceNote);
+
+  // 百度翻译（独立留存，切翻译服务不清）
+  const baiduHead = element("div", "bpm-toolbar");
+  baiduHead.style.gridColumn = "1 / -1";
+  baiduHead.append(element("strong", "", "百度翻译"));
+  form.append(baiduHead);
   const baiduAppId = field(form, "APP ID", "assistant-baidu-appid", config.baidu_appid, "百度智能云“通用文本翻译”的 APP ID");
   const baiduSecretKey = field(form, "密钥", "assistant-baidu-secret", "", config.baidu_secret_key_configured ? "已保存；留空保持不变" : "百度智能云“通用文本翻译”的密钥");
   baiduSecretKey.type = "password";
@@ -616,6 +607,52 @@ async function buildAssistantSection(section) {
   clearBaiduLine.append(clearBaiduSecretKey, element("span", "", "清除已保存的百度密钥"));
   const baiduSpacer = element("span");
   form.append(baiduSpacer, clearBaiduLine);
+
+  // AI 服务（优化恒走它；翻译在选 AI 时也走它）
+  const aiHead = element("div", "bpm-toolbar");
+  aiHead.style.gridColumn = "1 / -1";
+  aiHead.append(element("strong", "", "AI 服务（翻译并优化 / 优化为 Anima / AI 翻译）"));
+  form.append(aiHead);
+  const aiProviderLabel = element("label", "", "AI 后端");
+  const aiProvider = element("select");
+  for (const [value, label] of [["openai_compatible", "OpenAI 兼容 API"], ["ollama", "Ollama 本地模型"]]) {
+    const option = element("option", "", label);
+    option.value = value;
+    aiProvider.appendChild(option);
+  }
+  aiProvider.value = config.ai_provider;
+  form.append(aiProviderLabel, aiProvider);
+  const baseUrl = field(form, "API 地址", "assistant-base-url", config.ai_base_url, "Ollama 可留空；兼容接口示例 https://host/v1");
+  const model = field(form, "模型名称", "assistant-model", config.ai_model, "例如 qwen3:8b 或服务商模型 ID");
+  const presetLine = element("div", "bpm-toolbar");
+  presetLine.style.gridColumn = "1 / -1";
+  const lmStudioPreset = button("使用 LM Studio 本地预设", () => {
+    aiProvider.value = "openai_compatible";
+    baseUrl.value = "http://127.0.0.1:1234/v1";
+    error.textContent = "已填入 LM Studio 默认地址；请选择已加载模型的 ID，再保存并测试连接";
+    error.dataset.kind = "ok";
+  });
+  presetLine.append(lmStudioPreset, element("span", "bpi-config-note", "默认连接本机 1234 端口，不要求购买外部 API。"));
+  form.append(presetLine);
+  const apiKey = field(form, "API Key", "assistant-api-key", "", config.ai_api_key_configured ? "已保存；留空保持不变" : "本地 Ollama / LM Studio 可留空");
+  apiKey.type = "password";
+  const clearLine = element("label", "bpm-toolbar");
+  const clearApiKey = element("input");
+  clearApiKey.type = "checkbox";
+  clearLine.append(clearApiKey, element("span", "", "清除已保存的 API Key"));
+  const apiKeySpacer = element("span");
+  form.append(apiKeySpacer, clearLine);
+  const temperature = field(form, "温度", "assistant-temperature", config.ai_temperature, "0–2");
+  temperature.type = "number";
+  temperature.min = "0";
+  temperature.max = "2";
+  temperature.step = "0.05";
+  const timeout = field(form, "超时（秒）", "assistant-timeout", config.ai_timeout_seconds, "5–600");
+  timeout.type = "number";
+  timeout.min = "5";
+  timeout.max = "600";
+
+  // 规则
   const addRule = (labelText, value) => {
     const labelElement = element("label", "", labelText);
     const textarea = element("textarea");
@@ -627,22 +664,9 @@ async function buildAssistantSection(section) {
   const translateOptimizeRule = addRule("翻译并优化规则", config.translate_optimize_rule);
   const optimizationRule = addRule("优化为 Anima 规则", config.optimization_rule);
   form.appendChild(error);
-  const rowOf = (input) => [form.querySelector(`label[for="${input.id}"]`), input];
-  const ruleRows = [translationRule, translateOptimizeRule, optimizationRule];
-  const setShown = (nodes, shown) => nodes.forEach((node) => node?.classList.toggle("bpi-hidden", !shown));
-  const syncProviderFields = () => {
-    const baidu = provider.value === "baidu";
-    setShown(
-      [...rowOf(baseUrl), ...rowOf(model), ...rowOf(apiKey), ...rowOf(temperature), ...ruleRows.flatMap((rule) => [rule.labelElement, rule.textarea])],
-      !baidu,
-    );
-    setShown([presetLine, apiKeySpacer, clearLine], !baidu);
-    setShown([...rowOf(baiduAppId), ...rowOf(baiduSecretKey), baiduSpacer, clearBaiduLine], baidu);
-  };
-  provider.addEventListener("change", syncProviderFields);
-  syncProviderFields();
+
   section.appendChild(form);
-  section.appendChild(element("div", "bpi-config-note", "设置保存在当前 ComfyUI 用户目录。API Key 与百度密钥不写入工作流、不返回浏览器，并与当前安装及所配置的服务绑定。"));
+  section.appendChild(element("div", "bpi-config-note", "设置保存在当前 ComfyUI 用户目录。AI Key 与百度密钥独立留存，切换翻译服务互不清空；仅在 AI 后端/地址变更或换机器时才清 AI Key。两者均不写入工作流、不返回浏览器。"));
   const actions = element("div", "bpm-assistant-actions");
   const resetButton = button("恢复默认规则", () => {
     translationRule.textarea.value = config.default_translation_rule;
@@ -683,16 +707,17 @@ async function buildAssistantSection(section) {
   actions.append(resetButton, testButton, saveButton);
   section.appendChild(actions);
   const payload = () => ({
-    provider: provider.value,
-    base_url: baseUrl.value.trim(),
-    model: model.value.trim(),
-    api_key: apiKey.value.trim(),
-    clear_api_key: clearApiKey.checked,
+    translate_service: service.value,
+    ai_provider: aiProvider.value,
+    ai_base_url: baseUrl.value.trim(),
+    ai_model: model.value.trim(),
+    ai_api_key: apiKey.value.trim(),
+    clear_ai_api_key: clearApiKey.checked,
     baidu_appid: baiduAppId.value.trim(),
     baidu_secret_key: baiduSecretKey.value.trim(),
     clear_baidu_secret_key: clearBaiduSecretKey.checked,
-    temperature: temperature.value,
-    timeout_seconds: timeout.value,
+    ai_temperature: temperature.value,
+    ai_timeout_seconds: timeout.value,
     translation_rule: translationRule.textarea.value,
     translate_optimize_rule: translateOptimizeRule.textarea.value,
     optimization_rule: optimizationRule.textarea.value,
@@ -708,6 +733,232 @@ function setSection(section) {
   }
   if (section === "tag-manager") rebuildTagManagerSection();
   if (section === "assistant" && !manager.assistantLoaded) buildAssistantSection(refs.assistantSection);
+  if (section === "favorites" && !manager.favoritesLoaded) {
+    manager.favoritesLoaded = true;
+    refs.sections.appendChild(buildFavoritesSection());
+    refreshFavorites();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 收藏：提示词 + 可选配图，落在 ComfyUI 用户目录
+// ---------------------------------------------------------------------------
+
+function favoriteDate(value) {
+  const stamp = Number(value ?? 0);
+  if (!stamp) return "";
+  const date = new Date(stamp * 1000);
+  const pad = (item) => String(item).padStart(2, "0");
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function targetInspectorNode() {
+  const nodes = inspectorNodes();
+  return nodes.find((node) => node.id === manager.tagManagerNodeId)
+    ?? nodes.find((node) => node.selected)
+    ?? nodes[0]
+    ?? null;
+}
+
+function confirmDialog(title, message, confirmLabel = "确定") {
+  return new Promise((resolve) => {
+    const shade = element("div", "bpi-modal-shade");
+    const modal = element("div", "bpi-modal");
+    const actions = element("div", "bpi-modal-actions");
+    const close = (value) => {
+      shade.remove();
+      resolve(value);
+    };
+    actions.append(button("取消", () => close(false)), button(confirmLabel, () => close(true), "bpi-primary"));
+    modal.append(element("h3", "", title), element("div", "bpi-preview-text", message), actions);
+    shade.appendChild(modal);
+    document.body.appendChild(shade);
+    shade.addEventListener("mousedown", (event) => {
+      if (event.target === shade) close(false);
+    });
+    modal.addEventListener("mousedown", (event) => event.stopPropagation());
+  });
+}
+
+async function pickInspectorNode() {
+  const nodes = inspectorNodes();
+  if (!nodes.length) {
+    setStatus("画布上没有检查器节点", "error");
+    return null;
+  }
+  if (nodes.length === 1) return nodes[0];
+  return new Promise((resolve) => {
+    const shade = element("div", "bpi-modal-shade");
+    const modal = element("div", "bpi-modal");
+    const list = element("div", "bpi-pack-list");
+    for (const node of nodes) {
+      list.appendChild(button(tagNodeLabel(node), () => {
+        shade.remove();
+        resolve(node);
+      }));
+    }
+    const actions = element("div", "bpi-modal-actions");
+    actions.append(button("取消", () => {
+      shade.remove();
+      resolve(null);
+    }));
+    modal.append(element("h3", "", "选择要收藏的节点"), list, actions);
+    shade.appendChild(modal);
+    document.body.appendChild(shade);
+    shade.addEventListener("mousedown", (event) => {
+      if (event.target === shade) {
+        shade.remove();
+        resolve(null);
+      }
+    });
+    modal.addEventListener("mousedown", (event) => event.stopPropagation());
+  });
+}
+
+function favoriteCard(item) {
+  const card = element("div", "bpi-fav-card");
+  const thumb = element("div", "bpi-fav-thumb");
+  if (item.image) thumb.style.backgroundImage = `url("${savedPromptImageUrl(item.id)}")`;
+  else thumb.textContent = "无配图";
+  const info = element("div", "bpi-fav-info");
+  const name = element("span", "bpi-fav-name", item.name ?? "未命名收藏");
+  name.appendChild(element("span", "bpi-fav-date", favoriteDate(item.created_at)));
+  const actions = element("div", "bpi-fav-actions");
+  actions.append(
+    button("载入到节点", () => loadFavoriteIntoNode(item), "bpi-primary"),
+    button("复制", () => copyFavorite(item)),
+    button("删除", () => removeFavorite(item), "bpi-danger"),
+  );
+  info.append(
+    name,
+    element("div", "bpi-fav-text", item.text ?? ""),
+    element("div", "bpi-fav-meta", item.note || "未记录来源节点"),
+    actions,
+  );
+  card.append(thumb, info);
+  return card;
+}
+
+function renderFavorites() {
+  const list = refs.favoritesList;
+  if (!list) return;
+  const query = String(refs.favoritesSearch?.value ?? "").trim().toLowerCase();
+  const items = manager.favorites.filter((item) => !query
+    || String(item.name ?? "").toLowerCase().includes(query)
+    || String(item.text ?? "").toLowerCase().includes(query));
+  list.replaceChildren();
+  if (!items.length) {
+    list.appendChild(element("div", "bpi-empty", manager.favorites.length
+      ? "没有匹配的收藏。"
+      : "还没有收藏。在节点上点「收藏」即可保存当前提示词。"));
+    return;
+  }
+  for (const item of items) list.appendChild(favoriteCard(item));
+}
+
+async function refreshFavorites() {
+  try {
+    manager.favorites = await listSavedPrompts();
+  } catch (error) {
+    setStatus(error.message, "error");
+    manager.favorites = [];
+  }
+  renderFavorites();
+}
+
+async function copyFavorite(item) {
+  try {
+    await navigator.clipboard.writeText(item.text ?? "");
+    setStatus("提示词已复制到剪贴板", "ok");
+  } catch {
+    setStatus("浏览器拒绝了剪贴板访问", "error");
+  }
+}
+
+async function loadFavoriteIntoNode(item) {
+  const target = targetInspectorNode();
+  if (!target) {
+    setStatus("画布上没有检查器节点", "error");
+    return;
+  }
+  const confirmed = await confirmDialog(
+    "载入收藏",
+    `将用这条收藏覆盖节点 #${target.id} 的英文提示词，此操作无法用 Ctrl+Z 撤销。`,
+  );
+  if (!confirmed) return;
+  target._bilingualPromptInspector?.setText?.(item.text ?? "");
+  setStatus(`已载入到节点 #${target.id}`, "ok");
+}
+
+async function removeFavorite(item) {
+  const confirmed = await confirmDialog("删除收藏", `删除「${item.name ?? "未命名收藏"}」，配图会一并删除。`);
+  if (!confirmed) return;
+  try {
+    await deleteSavedPrompt(item.id);
+    await refreshFavorites();
+    setStatus("已删除收藏", "ok");
+  } catch (error) {
+    setStatus(error.message, "error");
+  }
+}
+
+async function createFavoriteFromNode() {
+  const node = await pickInspectorNode();
+  if (!node) return;
+  const text = String(node.widgets?.find((widget) => widget.name === "text")?.value ?? "");
+  openSavePromptDialog({ text, note: `节点 #${node.id}` }, async () => {
+    await refreshFavorites();
+    setStatus("已保存收藏", "ok");
+  });
+}
+
+async function exportFavorites() {
+  try {
+    const bundle = await exportSavedPrompts();
+    downloadJson(bundle, `saved-prompts-${new Date().toISOString().slice(0, 10)}.json`);
+    setStatus("已导出收藏", "ok");
+  } catch (error) {
+    setStatus(error.message, "error");
+  }
+}
+
+async function importFavoritesFile(file) {
+  try {
+    const result = await importSavedPrompts(JSON.parse(await file.text()));
+    await refreshFavorites();
+    setStatus(`导入完成，新增 ${result?.imported ?? 0} 条`, "ok");
+  } catch (error) {
+    setStatus(error.message, "error");
+  }
+}
+
+function buildFavoritesSection() {
+  const section = element("div", "bpm-section");
+  section.dataset.section = "favorites";
+  const toolbar = element("div", "bpm-toolbar");
+  refs.favoritesSearch = element("input", "bpi-search");
+  refs.favoritesSearch.type = "search";
+  refs.favoritesSearch.placeholder = "按名称或内容搜索";
+  refs.favoritesSearch.addEventListener("input", renderFavorites);
+  const importInput = element("input");
+  importInput.type = "file";
+  importInput.accept = ".json,application/json";
+  importInput.style.display = "none";
+  importInput.addEventListener("change", async () => {
+    const file = importInput.files?.[0];
+    importInput.value = "";
+    if (file) await importFavoritesFile(file);
+  });
+  toolbar.append(
+    refs.favoritesSearch,
+    button("新建收藏", () => createFavoriteFromNode(), "bpi-primary"),
+    button("导出", () => exportFavorites()),
+    button("导入", () => importInput.click()),
+    importInput,
+  );
+  refs.favoritesList = element("div", "bpm-rows");
+  section.append(toolbar, refs.favoritesList);
+  return section;
 }
 
 function renderAll() {
@@ -800,10 +1051,14 @@ function rebuildTagManagerSection() {
     option.value = String(node.id);
     select.appendChild(option);
   }
-  const target = nodes.find((node) => node.id === previous) ?? nodes[0];
+  // 没有指定节点时优先落在画布上当前选中的那个，而不是永远第一个
+  const target = nodes.find((node) => node.id === previous) ?? nodes.find((node) => node.selected) ?? nodes[0];
   select.value = String(target.id);
   manager.tagManagerNodeId = target.id;
   host.appendChild(target._bilingualPromptInspector.detailsBody);
+  // detailsBody 的内容靠节点自身的 render 填充；换宿主后补一次同步渲染，
+  // 否则刚挂进来时明细表可能是空的。
+  target._bilingualPromptInspector.refreshAfterConfigure?.();
 }
 
 function build() {
@@ -828,6 +1083,15 @@ function build() {
   root.append(head, refs.tabs, refs.sections);
   root.addEventListener("mousedown", (event) => event.stopPropagation());
   root.addEventListener("wheel", (event) => event.stopPropagation(), { passive: true });
+  // 面板每次都重建，收藏分页也要跟着重新懒加载
+  manager.favoritesLoaded = false;
+  if (manager.favoritesChangeHandler) {
+    window.removeEventListener("bpi:saved-prompts-changed", manager.favoritesChangeHandler);
+  }
+  manager.favoritesChangeHandler = () => {
+    if (manager.favoritesLoaded) refreshFavorites();
+  };
+  window.addEventListener("bpi:saved-prompts-changed", manager.favoritesChangeHandler);
 }
 
 function buildTagsSection() {

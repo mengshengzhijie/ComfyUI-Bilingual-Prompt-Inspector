@@ -35,11 +35,14 @@ import {
   loadPreferences,
   lookupLargeDictionary,
   openManagerPanel,
+  openSavePromptDialog,
   openTagDialog,
+  postUpstreamAction,
   runInspectorAssistant,
   savePreferences,
   saveTag,
   searchLargeDictionary,
+  UPSTREAM_ARRIVED_EVENT,
 } from "./bpi_shared.js";
 
 const NODE_NAME = "BilingualPromptInspector";
@@ -47,6 +50,11 @@ const EXTENSION_VERSION = "v1.2.0";
 const PROJECT_URL = "https://github.com/mengshengzhijie/ComfyUI-Bilingual-Prompt-Inspector";
 const COLLAPSED_WIDGET_FALLBACK_HEIGHT = 390;
 const COLLAPSED_NODE_MIN_HEIGHT = 360;
+const IMPORT_POLICIES = [
+  { value: "changed", label: "导入：内容变化时" },
+  { value: "always", label: "导入：每次运行" },
+  { value: "once", label: "导入：仅首次" },
+];
 
 function openProjectAbout() {
   const shade = element("div", "bpi-modal-shade");
@@ -108,9 +116,12 @@ function createPanel(node, textWidget) {
   const englishHint = element("span", "bpi-english-hint", "空内容时直接编辑");
   const editEnglishButton = element("button", "bpi-button bpi-mini", "完成编辑");
   const clearEnglishButton = element("button", "bpi-button bpi-mini bpi-danger", "清空");
+  const favoriteButton = element("button", "bpi-button bpi-mini", "收藏");
   editEnglishButton.type = "button";
   clearEnglishButton.type = "button";
-  englishHead.append(englishTitle, englishHint, editEnglishButton, clearEnglishButton);
+  favoriteButton.type = "button";
+  favoriteButton.title = "把当前英文提示词保存到用户目录的收藏（可配一张参考图）";
+  englishHead.append(englishTitle, englishHint, editEnglishButton, clearEnglishButton, favoriteButton);
   const englishTokenView = element("div", "bpi-english-token-view bpi-hidden");
   englishTokenView.tabIndex = 0;
   englishTokenView.setAttribute("role", "textbox");
@@ -120,7 +131,27 @@ function createPanel(node, textWidget) {
   englishEditor.placeholder = "输入英文提示词；完成编辑后将显示为可选择和删除的标签。";
   const englishHiddenBar = element("div", "bpi-hidden-bar bpi-hidden");
   englishHiddenBar.title = "已隐藏的标签不会进入实际输出文本";
-  englishSection.append(englishHead, englishTokenView, englishHiddenBar, englishEditor);
+  // 上游输入条：只在节点接到上游 prompt 连线时出现
+  const sourceBar = element("div", "bpi-source-bar bpi-hidden");
+  // 注意别叫 sourceLabel：模块顶层已有同名函数（标签来源文案），会把它遮蔽掉
+  const sourceCaption = element("span", "bpi-source-label", "上游输入");
+  const sourceToggle = element("input");
+  sourceToggle.type = "checkbox";
+  sourceToggle.title = "开启后接管上游文本并暂停等待确认；关闭时上游文本原样输出";
+  const sourceToggleLabel = element("label", "bpi-source-toggle");
+  sourceToggleLabel.append(sourceToggle, element("span", "", "接管上游文本"));
+  const sourceSelect = element("select", "bpi-source-select");
+  sourceSelect.title = "决定上游文本何时覆盖节点里的内容";
+  for (const item of IMPORT_POLICIES) {
+    const option = element("option", "", item.label);
+    option.value = item.value;
+    sourceSelect.appendChild(option);
+  }
+  const sourceState = element("span", "bpi-source-state");
+  const resumeButton = button("继续运行", () => releaseUpstream(String(textWidget.value ?? "")), "bpi-primary");
+  const cancelButton = button("放弃", () => cancelUpstreamWait());
+  sourceBar.append(sourceCaption, sourceToggleLabel, sourceSelect, sourceState, resumeButton, cancelButton);
+  englishSection.append(sourceBar, englishHead, englishTokenView, englishHiddenBar, englishEditor);
   const mirrorSection = element("section", "bpi-mirror-section");
   const mirrorHead = element("div", "bpi-section-head");
   const mirrorTitle = element("span", "", "中文同步编辑（逐标签组合）");
@@ -133,10 +164,14 @@ function createPanel(node, textWidget) {
   const expandChineseButton = element("button", "bpi-button bpi-mini", "展开编辑");
   const syncTextButton = element("button", "bpi-button bpi-mini", "同步到英文输出");
   const sortPromptButton = element("button", "bpi-button bpi-mini", "按官方顺序整理");
-  const assistantSettingsButton = element("button", "bpi-button bpi-mini", "助手设置");
-  const tagManagerButton = element("button", "bpi-button bpi-mini", "标签管理");
-  for (const control of [editChineseButton, expandChineseButton, translateChineseButton, translateOptimizeButton, optimizeChineseButton, syncTextButton, sortPromptButton, assistantSettingsButton]) control.type = "button";
-  mirrorActions.append(editChineseButton, expandChineseButton, translateChineseButton, translateOptimizeButton, optimizeChineseButton, syncTextButton, sortPromptButton, tagManagerButton, assistantSettingsButton);
+  // 已注释：标签管理与助手设置入口已在侧边栏管理面板提供，节点内重复入口移除以简化界面。
+  // 如需恢复，取消下面两行注释并在 mirrorActions.append 与 bindMirrorAction 处一并恢复。
+  // const assistantSettingsButton = element("button", "bpi-button bpi-mini", "助手设置");
+  // const tagManagerButton = element("button", "bpi-button bpi-mini", "标签管理");
+  for (const control of [editChineseButton, expandChineseButton, translateChineseButton, translateOptimizeButton, optimizeChineseButton, syncTextButton, sortPromptButton]) control.type = "button";
+  mirrorActions.append(editChineseButton, expandChineseButton, translateChineseButton, translateOptimizeButton, optimizeChineseButton, syncTextButton, sortPromptButton
+    // tagManagerButton, assistantSettingsButton
+  );
   mirrorHead.append(mirrorTitle, mirrorHint, mirrorActions);
   const chineseMirror = element("div", "bpi-chinese-mirror");
   chineseMirror.tabIndex = 0;
@@ -239,6 +274,9 @@ function createPanel(node, textWidget) {
     resizeFrame: null,
     manualResize: null,
     windowPointerUp: null,
+    // 上游输入：是否正在等待用户确认，以及上次渲染时的连线状态
+    upstreamWaiting: false,
+    upstreamConnectedCache: null,
     syncSource: Symbol(`bpi-node-${node.id ?? "unknown"}`),
   };
 
@@ -264,7 +302,6 @@ function createPanel(node, textWidget) {
     autoFitGreenArea(state.chineseEditing ? chineseEditor : chineseMirror, state.chineseEditing ? 110 : 92);
   });
   const hasNodeSize = () => Number.isFinite(Number(node.size?.[0])) && Number.isFinite(Number(node.size?.[1]));
-  const inspectorWidget = () => node.widgets?.find((widget) => widget.name === "bilingual_inspector");
   const resizeCornerHit = (elementValue, event) => {
     const bounds = elementValue.getBoundingClientRect();
     return bounds.right - event.clientX <= 24 && bounds.bottom - event.clientY <= 24;
@@ -341,22 +378,31 @@ function createPanel(node, textWidget) {
       state.collapsedWidgetHeight = measureCollapsedWidgetHeight();
       panel.style.setProperty("--bpi-collapsed-height", `${state.collapsedWidgetHeight}px`);
       const width = Math.max(node.size?.[0] ?? 0, 590);
-      const widget = inspectorWidget();
-      const computedWidgetHeight = Number(widget?.computedHeight);
-      const panelHeight = Number(panel.offsetHeight);
-      const currentWidgetHeight = Number.isFinite(computedWidgetHeight) && computedWidgetHeight > 0
-        ? computedWidgetHeight
-        : Number.isFinite(panelHeight) && panelHeight > 0 ? panelHeight : undefined;
+      // 稳定基线 = 标题栏 + 原生 text 控件的真实内容高度。
+      // 绝不能读 inspectorWidget().y（= bilingual_inspector.y）——那是 ComfyUI arrange
+      // 从 text.computedHeight 派生的，而 text.computedHeight 在「setSize 变高 → 文本框
+      // 可用空间变大 → scrollHeight 变大 → computedHeight 再涨」的反馈里只增不减
+      // （实测每写一次值节点 +10px、永不回缩）。这里临时把 text 控件设成 auto 量
+      // scrollHeight，得到与 setSize 无关的真实内容高，再恢复，从源头断开反馈环。
+      const textWidget = node.widgets?.find((widget) => widget.name === "text");
+      let baseHeight = state.nodeBaseHeight ?? 96;
+      if (textWidget?.element) {
+        const element = textWidget.element;
+        const previousHeight = element.style.height;
+        element.style.height = "auto";
+        const natural = element.scrollHeight;
+        element.style.height = previousHeight;
+        const top = Number.isFinite(textWidget.y) && textWidget.y >= 0 ? textWidget.y : 26;
+        const margin = Math.max(0, Number(textWidget.margin) || 0);
+        if (Number.isFinite(natural) && natural > 0) baseHeight = top + natural + margin * 2;
+        state.nodeBaseHeight = baseHeight;
+      }
       const targetHeight = inspectorNodeTargetHeight({
-        widgetY: widget?.y,
-        widgetMargin: widget?.margin ?? 10,
-        nodeHeight: node.size?.[1],
-        currentWidgetHeight,
+        baseHeight,
         targetWidgetHeight: state.collapsedWidgetHeight,
-        fallbackBaseHeight: state.nodeBaseHeight ?? 70,
+        fallbackBaseHeight: state.nodeBaseHeight ?? 96,
         minimumHeight: COLLAPSED_NODE_MIN_HEIGHT,
       });
-      state.nodeBaseHeight = Math.max(0, targetHeight - targetWidgetHeight);
       const sizeChanged = Math.abs((node.size?.[0] ?? 0) - width) > 0.5
         || Math.abs((node.size?.[1] ?? 0) - targetHeight) > 0.5;
       if (sizeChanged) {
@@ -1727,7 +1773,121 @@ function createPanel(node, textWidget) {
     container.appendChild(restoreAll);
   };
 
+  const upstreamSettings = () => {
+    const stored = node.properties?.bpiUpstream ?? {};
+    return {
+      takeOver: stored.takeOver !== false,
+      importPolicy: IMPORT_POLICIES.some((item) => item.value === stored.importPolicy)
+        ? stored.importPolicy
+        : "changed",
+      lastText: typeof stored.lastText === "string" ? stored.lastText : "",
+    };
+  };
+  const saveUpstreamSettings = (patch) => {
+    if (!node.properties) node.properties = {};
+    node.properties.bpiUpstream = { ...upstreamSettings(), ...patch };
+  };
+  const upstreamConnected = () =>
+    (node.inputs ?? []).some((input) => input.name === "prompt" && input.link != null);
+
+  const renderSourceBar = () => {
+    const connected = upstreamConnected();
+    sourceBar.classList.toggle("bpi-hidden", !connected);
+    if (!connected) {
+      state.upstreamWaiting = false;
+      return;
+    }
+    const settings = upstreamSettings();
+    const waiting = state.upstreamWaiting && settings.takeOver;
+    sourceToggle.checked = settings.takeOver;
+    sourceSelect.value = settings.importPolicy;
+    sourceSelect.disabled = !settings.takeOver || waiting;
+    sourceToggle.disabled = waiting;
+    sourceState.textContent = waiting
+      ? "暂停中，等待确认…"
+      : settings.takeOver
+        ? "接管上游文本，确认后输出"
+        : "直接透传：上游原样输出，不导入、不暂停";
+    sourceState.classList.toggle("bpi-source-waiting-text", waiting);
+    sourceBar.classList.toggle("bpi-source-waiting", waiting);
+    resumeButton.classList.toggle("bpi-hidden", !waiting);
+    cancelButton.classList.toggle("bpi-hidden", !waiting);
+  };
+
+  const syncSourceBar = () => {
+    const connected = upstreamConnected();
+    if (connected === state.upstreamConnectedCache) return;
+    state.upstreamConnectedCache = connected;
+    renderSourceBar();
+    if (hasNodeSize()) requestNodeResize();
+  };
+
+  const releaseUpstream = async (text) => {
+    state.upstreamWaiting = false;
+    try {
+      await postUpstreamAction("resume", node.id, text);
+    } catch (error) {
+      setStatus(`放行失败：${error.message}`, "error");
+    }
+    renderSourceBar();
+  };
+
+  const cancelUpstreamWait = async () => {
+    state.upstreamWaiting = false;
+    try {
+      await postUpstreamAction("cancel", node.id);
+      setStatus("已放弃本次上游输入", "ok");
+    } catch (error) {
+      setStatus(`放弃失败：${error.message}`, "error");
+    }
+    renderSourceBar();
+  };
+
+  // 后端把上游文本推过来：先按策略同步到节点（透传时也同步，保证节点显示
+  // 的就是本次实际输出），接管模式再挂起等待确认，透传模式立即原样放行。
+  const handleUpstreamText = async (text) => {
+    const settings = upstreamSettings();
+    const shouldImport =
+      settings.importPolicy === "always" ||
+      (settings.importPolicy === "once" && !settings.lastText) ||
+      (settings.importPolicy === "changed" && text !== settings.lastText);
+    if (shouldImport && text !== String(textWidget.value ?? "")) updateText(text);
+    saveUpstreamSettings({ lastText: text });
+    if (!settings.takeOver) {
+      await releaseUpstream(text);
+      return;
+    }
+    state.upstreamWaiting = true;
+    renderSourceBar();
+    try {
+      await postUpstreamAction("ack", node.id);
+    } catch (error) {
+      state.upstreamWaiting = false;
+      renderSourceBar();
+      setStatus(`无法挂起等待：${error.message}`, "error");
+    }
+  };
+
+  const saveFavoriteFromNode = () => {
+    const text = String(textWidget.value ?? "");
+    if (!text.trim()) {
+      setStatus("提示词为空，无法收藏", "error");
+      return;
+    }
+    openSavePromptDialog({ text, note: `节点 #${node.id} · ${state.tokens.length} 个标签` });
+  };
+
+  sourceToggle.addEventListener("change", () => {
+    saveUpstreamSettings({ takeOver: sourceToggle.checked });
+    renderSourceBar();
+  });
+  sourceSelect.addEventListener("change", () => {
+    saveUpstreamSettings({ importPolicy: sourceSelect.value });
+    renderSourceBar();
+  });
+
   const render = () => {
+    renderSourceBar();
     const text = String(textWidget.value ?? "");
     state.lastText = text;
     state.modeInfo = detectInputMode(text, state.modePreference);
@@ -1920,9 +2080,10 @@ function createPanel(node, textWidget) {
           actions.appendChild(editButton);
         }
         if (token.key) {
-          const favoriteButton = element("button", `bpi-mini bpi-star${isFavorite(token.term) ? " bpi-starred" : ""}`, isFavorite(token.term) ? "★" : "☆");
-          favoriteButton.title = isFavorite(token.term) ? "取消收藏" : "收藏";
-          favoriteButton.addEventListener("click", (event) => {
+          // 别叫 favoriteButton——外层「收藏」按钮已经是这个名字，遮蔽后很难查
+          const starButton = element("button", `bpi-mini bpi-star${isFavorite(token.term) ? " bpi-starred" : ""}`, isFavorite(token.term) ? "★" : "☆");
+          starButton.title = isFavorite(token.term) ? "取消收藏" : "收藏";
+          starButton.addEventListener("click", (event) => {
             event.stopPropagation();
             changeFavorite(token.term);
             render();
@@ -1934,7 +2095,7 @@ function createPanel(node, textWidget) {
             event.stopPropagation();
             copyText(`${token.raw}\t${token.chinese}`, `已复制“${token.term}”的中英对照`);
           });
-          actions.append(favoriteButton, copyButton);
+          actions.append(starButton, copyButton);
         }
         if (personalKeys.has(token.key)) {
           const hasBuiltin = Boolean(builtinTagFor(token.term));
@@ -2225,7 +2386,7 @@ function createPanel(node, textWidget) {
   translateOptimizeButton.title = "自动翻译后优化成符合 Anima 格式的英文提示词";
   optimizeChineseButton.title = "只优化已有英文，不承担翻译";
   sortPromptButton.title = "按 Anima 推荐分类稳定排序，每个非空分类单独一行；自然语言和 BREAK/AND 保持完整";
-  assistantSettingsButton.title = "在侧边栏管理面板中配置纯词库、百度翻译、Ollama 或 OpenAI 兼容 API 与自定义规则";
+  // assistantSettingsButton.title = "在侧边栏管理面板中配置纯词库、百度翻译、Ollama 或 OpenAI 兼容 API 与自定义规则";
   bindMirrorAction(editChineseButton, () => setChineseEditing(!state.chineseEditing));
   bindMirrorAction(expandChineseButton, openExpandedChineseEditor);
   bindMirrorAction(translateChineseButton, () => runTextAssistant("translate"));
@@ -2233,9 +2394,9 @@ function createPanel(node, textWidget) {
   bindMirrorAction(optimizeChineseButton, () => runTextAssistant("optimize"));
   bindMirrorAction(syncTextButton, syncEditedText);
   bindMirrorAction(sortPromptButton, sortByAnimaOrder);
-  bindMirrorAction(assistantSettingsButton, () => openManagerPanel("assistant"));
-  bindMirrorAction(tagManagerButton, () => openManagerPanel("tag-manager", node.id));
-  tagManagerButton.title = "在侧边栏管理面板中打开本节点的标签翻译与词库搜索";
+  // bindMirrorAction(assistantSettingsButton, () => openManagerPanel("assistant"));
+  // bindMirrorAction(tagManagerButton, () => openManagerPanel("tag-manager", node.id));
+  // tagManagerButton.title = "在侧边栏管理面板中打开本节点的标签翻译与词库搜索";
   editEnglishButton.title = "在英文文本编辑框和可联动标签视图之间切换";
   clearEnglishButton.title = "需要再次确认才会清空英文实际输出；清空后可点同一按钮撤销，也可按 Ctrl+Z";
   editEnglishButton.addEventListener("mousedown", (event) => {
@@ -2255,6 +2416,15 @@ function createPanel(node, textWidget) {
     event.preventDefault();
     event.stopPropagation();
     clearEnglishText();
+  });
+  favoriteButton.addEventListener("mousedown", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  favoriteButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    saveFavoriteFromNode();
   });
   englishEditor.addEventListener("mousedown", (event) => {
     event.stopPropagation();
@@ -2409,10 +2579,20 @@ function createPanel(node, textWidget) {
     checkForTextChange() {
       const current = String(textWidget.value ?? "");
       if (current !== state.lastText) scheduleRender();
+      syncSourceBar();
       bindTextareaEvents();
+    },
+    // 后端把上游文本送过来时由扩展层转发到这个节点
+    handleUpstream(text) {
+      handleUpstreamText(String(text ?? ""));
+    },
+    // 侧边栏收藏「载入到节点」用：直接改写当前文本
+    setText(nextText) {
+      if (typeof nextText === "string" && nextText !== String(textWidget.value ?? "")) updateText(nextText);
     },
     destroy() {
       unsubscribePanelSync();
+      inspectorRegistry.delete(String(node.id ?? ""));
       detailsBody.remove();
       clearTimeout(state.renderTimer);
       clearTimeout(state.largeLookupTimer);
@@ -2430,8 +2610,31 @@ function createPanel(node, textWidget) {
 injectBpiStyles();
 installBpiWheelGuard();
 
+// 后端按 node_id 推事件，这里把节点实例登记下来，事件到达时直接转发。
+const inspectorRegistry = new Map();
+let upstreamListenerBound = false;
+const bindUpstreamListener = () => {
+  // 自定义 socket 事件只有先注册过才会被前端分发，晚一步注册就收不到，
+  // 所以在 setup 与节点创建两个时机都试一次，注册本身幂等。
+  if (upstreamListenerBound || !app.api?.addEventListener) return;
+  upstreamListenerBound = true;
+  app.api.addEventListener(UPSTREAM_ARRIVED_EVENT, (event) => {
+    const detail = event?.detail ?? {};
+    findInspectorByNodeId(detail.node_id)?.handleUpstream?.(detail.text ?? "");
+  });
+};
+const findInspectorByNodeId = (nodeId) => {
+  const known = inspectorRegistry.get(String(nodeId ?? ""));
+  if (known) return known;
+  const target = (app.graph?._nodes ?? []).find((node) => String(node.id) === String(nodeId));
+  return target?._bilingualPromptInspector ?? null;
+};
+
 app.registerExtension({
   name: "ComfyUI.BilingualPromptInspector",
+  async setup() {
+    bindUpstreamListener();
+  },
   async beforeRegisterNodeDef(nodeType, nodeData) {
     if (nodeData.name !== NODE_NAME) return;
 
@@ -2442,8 +2645,10 @@ app.registerExtension({
       if (!textWidget) return;
       textWidget.label = "英文提示词（实际输出）";
 
+      bindUpstreamListener();
       const inspector = createPanel(this, textWidget);
       this._bilingualPromptInspector = inspector;
+      inspectorRegistry.set(String(this.id ?? ""), inspector);
       try {
         this.addDOMWidget("bilingual_inspector", "bilingual-inspector", inspector.panel, {
           getMinHeight: () => inspector.getMinHeight(),

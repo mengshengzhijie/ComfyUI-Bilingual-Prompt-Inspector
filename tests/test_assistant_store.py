@@ -37,17 +37,18 @@ class AssistantStoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             store = AssistantStore(Path(root) / "config")
             public = store.update({
-                "provider": "openai_compatible",
-                "base_url": "https://example.test/v1",
-                "model": "example-model",
-                "api_key": "secret-value",
+                "translate_service": "ai",
+                "ai_provider": "openai_compatible",
+                "ai_base_url": "https://example.test/v1",
+                "ai_model": "example-model",
+                "ai_api_key": "secret-value",
                 "translation_rule": "自定义仅翻译",
                 "translate_optimize_rule": "自定义翻译并优化",
                 "optimization_rule": "自定义优化",
             })
-            self.assertTrue(public["api_key_configured"])
-            self.assertNotIn("api_key", public)
-            self.assertEqual(store.config()["api_key"], "secret-value")
+            self.assertTrue(public["ai_api_key_configured"])
+            self.assertNotIn("ai_api_key", public)
+            self.assertEqual(store.config()["ai_api_key"], "secret-value")
             self.assertEqual(store.config()["translation_rule"], "自定义仅翻译")
             self.assertEqual(store.config()["translate_optimize_rule"], "自定义翻译并优化")
             self.assertNotIn("explanation_rule", public)
@@ -61,15 +62,16 @@ class AssistantStoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             store = AssistantStore(Path(root) / "config")
             store.update({
-                "provider": "openai_compatible",
-                "base_url": "https://first.example/v1",
-                "model": "example-model",
-                "api_key": "secret-value",
+                "translate_service": "ai",
+                "ai_provider": "openai_compatible",
+                "ai_base_url": "https://first.example/v1",
+                "ai_model": "example-model",
+                "ai_api_key": "secret-value",
             })
-            self.assertEqual(store.config()["api_key"], "secret-value")
-            public = store.update({"base_url": "https://second.example/v1"})
-            self.assertFalse(public["api_key_configured"])
-            self.assertEqual(store.config()["api_key"], "")
+            self.assertEqual(store.config()["ai_api_key"], "secret-value")
+            public = store.update({"ai_base_url": "https://second.example/v1"})
+            self.assertFalse(public["ai_api_key_configured"])
+            self.assertEqual(store.config()["ai_api_key"], "")
 
     def test_new_installation_id_invalidates_saved_configuration(self):
         with tempfile.TemporaryDirectory() as root:
@@ -77,24 +79,25 @@ class AssistantStoreTests(unittest.TestCase):
             first_marker = Path(root) / "first-installation-id"
             first = AssistantStore(config_dir, install_id_path=first_marker)
             first.update({
-                "provider": "openai_compatible",
-                "base_url": "https://example.test/v1",
-                "model": "example-model",
-                "api_key": "secret-value",
+                "translate_service": "ai",
+                "ai_provider": "openai_compatible",
+                "ai_base_url": "https://example.test/v1",
+                "ai_model": "example-model",
+                "ai_api_key": "secret-value",
             })
             second = AssistantStore(config_dir, install_id_path=Path(root) / "second-installation-id")
             config = second.config()
-            self.assertEqual(config["provider"], "dictionary")
-            self.assertEqual(config["base_url"], "")
-            self.assertEqual(config["api_key"], "")
+            self.assertEqual(config["translate_service"], "dictionary")
+            self.assertEqual(config["ai_base_url"], "")
+            self.assertEqual(config["ai_api_key"], "")
 
     def test_remote_http_endpoint_is_rejected_but_local_http_is_allowed(self):
         with tempfile.TemporaryDirectory() as root:
             store = AssistantStore(Path(root) / "config")
             with self.assertRaisesRegex(ValueError, "HTTPS"):
-                store.update({"provider": "openai_compatible", "base_url": "http://public.example/v1"})
-            result = store.update({"provider": "ollama", "base_url": "http://127.0.0.1:11434"})
-            self.assertEqual(result["base_url"], "http://127.0.0.1:11434")
+                store.update({"ai_provider": "openai_compatible", "ai_base_url": "http://public.example/v1"})
+            result = store.update({"ai_provider": "ollama", "ai_base_url": "http://127.0.0.1:11434"})
+            self.assertEqual(result["ai_base_url"], "http://127.0.0.1:11434")
 
     def test_dictionary_translation_reports_unknown(self):
         with tempfile.TemporaryDirectory() as root:
@@ -160,22 +163,30 @@ class AssistantStoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             store = AssistantStore(Path(root) / "config")
             public = store.update({
-                "provider": "baidu",
+                "translate_service": "baidu",
                 "baidu_appid": "2026092000123456",
                 "baidu_secret_key": "baidu-secret",
             })
-            self.assertEqual(public["provider"], "baidu")
+            self.assertEqual(public["translate_service"], "baidu")
             self.assertEqual(public["baidu_appid"], "2026092000123456")
             self.assertTrue(public["baidu_secret_key_configured"])
             self.assertNotIn("baidu_secret_key", public)
             self.assertEqual(store.config()["baidu_secret_key"], "baidu-secret")
-            self.assertFalse(public["api_key_configured"])
+            self.assertFalse(public["ai_api_key_configured"])
 
-    def test_baidu_secret_is_cleared_when_provider_changes(self):
+    def test_baidu_secret_is_retained_when_translate_service_changes(self):
         with tempfile.TemporaryDirectory() as root:
             store = AssistantStore(Path(root) / "config")
-            store.update({"provider": "baidu", "baidu_appid": "appid", "baidu_secret_key": "baidu-secret"})
-            public = store.update({"provider": "openai_compatible", "base_url": "https://example.test/v1", "model": "m"})
+            store.update({"translate_service": "baidu", "baidu_appid": "appid", "baidu_secret_key": "baidu-secret"})
+            public = store.update({"translate_service": "ai", "ai_provider": "openai_compatible", "ai_base_url": "https://example.test/v1", "ai_model": "m"})
+            self.assertTrue(public["baidu_secret_key_configured"])
+            self.assertEqual(store.config()["baidu_secret_key"], "baidu-secret")
+
+    def test_baidu_secret_is_cleared_on_explicit_clear(self):
+        with tempfile.TemporaryDirectory() as root:
+            store = AssistantStore(Path(root) / "config")
+            store.update({"translate_service": "baidu", "baidu_appid": "appid", "baidu_secret_key": "baidu-secret"})
+            public = store.update({"clear_baidu_secret_key": True})
             self.assertFalse(public["baidu_secret_key_configured"])
             self.assertEqual(store.config()["baidu_secret_key"], "")
 

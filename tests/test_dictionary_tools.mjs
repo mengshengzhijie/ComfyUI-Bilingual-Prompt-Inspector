@@ -34,9 +34,9 @@ assert.equal(normalizePreferences({ chineseMirrorHeight: 40 }).chineseMirrorHeig
 assert.equal(normalizePreferences({ chineseEditorHeight: 999 }).chineseEditorHeight, 600);
 assert.equal(preservedSearchScroll("裙子", "裙子", 824), 824);
 assert.equal(preservedSearchScroll("裙子", "丝袜", 824), 0);
-assert.equal(inspectorNodeTargetHeight({ widgetY: 58, targetWidgetHeight: 390 }), 458);
-assert.equal(inspectorNodeTargetHeight({ nodeHeight: 1060, currentWidgetHeight: 820, targetWidgetHeight: 390 }), 630);
-assert.equal(inspectorNodeTargetHeight({ widgetY: 58, targetWidgetHeight: 820, minimumHeight: 900 }), 900);
+assert.equal(inspectorNodeTargetHeight({ baseHeight: 68, targetWidgetHeight: 390 }), 458);
+assert.equal(inspectorNodeTargetHeight({ baseHeight: 240, targetWidgetHeight: 390 }), 630);
+assert.equal(inspectorNodeTargetHeight({ baseHeight: 80, targetWidgetHeight: 820, minimumHeight: 900 }), 900);
 assert.deepEqual(createClearTextHistoryEntry("masterpiece, 1girl", "清空英文提示词", true), {
   before: "masterpiece, 1girl",
   after: "",

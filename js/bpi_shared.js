@@ -5,6 +5,8 @@ const API_ROOT = "/bpi";
 const PREFERENCES_KEY = "bpi.dictionary.preferences.v1";
 const MANAGER_TAB_ID = "bpi-manager";
 const MANAGER_OPEN_EVENT = "bpi:open-manager";
+// 后端把上游传来的提示词推给前端时使用的事件名
+const UPSTREAM_ARRIVED_EVENT = "bpi/upstream-arrived";
 
 let sessionTokenPromise = null;
 let dictionaryPromise = null;
@@ -36,6 +38,19 @@ async function bpiFetch(url, options = {}, retry = true) {
     return bpiFetch(url, options, false);
   }
   return response;
+}
+
+async function postUpstreamAction(action, nodeId, text = null) {
+  const payload = { node_id: String(nodeId ?? "") };
+  if (typeof text === "string") payload.text = text;
+  const response = await bpiFetch(`${API_ROOT}/upstream/${action}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const result = await response.json().catch(() => null);
+  if (!response.ok || !result?.success) throw new Error(result?.error || `放行失败（${response.status}）`);
+  return result;
 }
 
 function loadPreferences() {
@@ -271,6 +286,151 @@ async function exportPersonalDictionary() {
   return payload;
 }
 
+async function listSavedPrompts() {
+  const response = await bpiFetch(`${API_ROOT}/saved-prompts`);
+  const payload = await response.json();
+  if (!response.ok || payload.success === false) throw new Error(payload.error || "收藏读取失败");
+  return payload.data ?? [];
+}
+
+async function createSavedPrompt({ name, text, note, imageFile }) {
+  const form = new FormData();
+  form.append("name", name ?? "");
+  form.append("text", text ?? "");
+  if (typeof note === "string" && note) form.append("note", note);
+  if (imageFile) form.append("image", imageFile);
+  const response = await bpiFetch(`${API_ROOT}/saved-prompts`, { method: "POST", body: form });
+  const payload = await response.json();
+  if (!response.ok || payload.success === false) throw new Error(payload.error || "收藏保存失败");
+  return payload.data;
+}
+
+async function deleteSavedPrompt(promptId) {
+  const response = await bpiFetch(`${API_ROOT}/saved-prompts/${encodeURIComponent(promptId)}`, { method: "DELETE" });
+  const payload = await response.json();
+  if (!response.ok || payload.success === false) throw new Error(payload.error || "收藏删除失败");
+  return payload.data;
+}
+
+async function exportSavedPrompts() {
+  const response = await bpiFetch(`${API_ROOT}/saved-prompts/export`);
+  const payload = await response.json();
+  if (!response.ok || payload.success === false) throw new Error(payload.error || "收藏导出失败");
+  return payload.data;
+}
+
+async function importSavedPrompts(bundle) {
+  const response = await bpiFetch(`${API_ROOT}/saved-prompts/import`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(bundle),
+  });
+  const payload = await response.json();
+  if (!response.ok || payload.success === false) throw new Error(payload.error || "收藏导入失败");
+  return payload.data;
+}
+
+function savedPromptImageUrl(promptId) {
+  return `${API_ROOT}/saved-prompts/${encodeURIComponent(promptId)}/image`;
+}
+
+// 保存当前提示词的弹窗：文本自动带好，图片可拖、可选、可粘贴，不想要就空着。
+function openSavePromptDialog({ name = "", text = "", note = "" } = {}, onSaved) {
+  const shade = element("div", "bpi-modal-shade");
+  const modal = element("div", "bpi-modal");
+  const title = element("h3", "", "收藏当前提示词");
+  const form = element("form", "bpi-form");
+  const nameInput = field(form, "名称", "name", (name || text.trim().slice(0, 24)).slice(0, 80), "默认取提示词开头");
+  const textLabel = element("label", "", "提示词");
+  textLabel.htmlFor = "bpi-save-prompt-text";
+  const textPreview = element("textarea", "");
+  textPreview.id = "bpi-save-prompt-text";
+  textPreview.readOnly = true;
+  textPreview.value = text;
+  form.append(textLabel, textPreview);
+  const imageLabel = element("label", "", "参考图");
+  const drop = element("div", "bpi-save-drop");
+  const previewImage = element("img", "bpi-save-preview");
+  const dropText = element("div", "", "将图片拖到此处，或点击选择文件");
+  const fileInfo = element("div", "bpi-save-file", "可选；PNG / JPG / WebP，最大 5 MB");
+  drop.append(previewImage, dropText, fileInfo);
+  const picker = element("input");
+  picker.type = "file";
+  picker.accept = "image/png,image/jpeg,image/webp";
+  picker.hidden = true;
+  form.append(imageLabel, drop);
+  const error = element("div", "bpi-status");
+  error.dataset.kind = "error";
+  error.style.gridColumn = "1 / -1";
+  form.appendChild(error);
+
+  let imageFile = null;
+  const setImage = (file) => {
+    imageFile = file;
+    previewImage.src = URL.createObjectURL(file);
+    previewImage.style.display = "block";
+    fileInfo.textContent = `${file.name || "图片"} · ${Math.max(1, Math.round(file.size / 1024))} KB`;
+  };
+  drop.addEventListener("click", () => picker.click());
+  picker.addEventListener("change", () => {
+    if (picker.files?.[0]) setImage(picker.files[0]);
+  });
+  drop.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    drop.classList.add("bpi-dragover");
+  });
+  drop.addEventListener("dragleave", () => drop.classList.remove("bpi-dragover"));
+  drop.addEventListener("drop", (event) => {
+    event.preventDefault();
+    drop.classList.remove("bpi-dragover");
+    const file = event.dataTransfer?.files?.[0];
+    if (file) setImage(file);
+  });
+  const onPaste = (event) => {
+    const file = event.clipboardData?.files?.[0];
+    if (!file) return;
+    event.preventDefault();
+    setImage(file);
+  };
+  window.addEventListener("paste", onPaste);
+  const close = () => {
+    window.removeEventListener("paste", onPaste);
+    shade.remove();
+  };
+
+  const actions = element("div", "bpi-modal-actions");
+  const saveButton = button("保存收藏", async () => {
+    if (!text.trim()) {
+      error.textContent = "提示词为空，无法收藏";
+      return;
+    }
+    saveButton.disabled = true;
+    try {
+      const entry = await createSavedPrompt({ name: nameInput.value, text, note, imageFile });
+      window.dispatchEvent(new CustomEvent("bpi:saved-prompts-changed", { detail: entry }));
+      onSaved?.(entry);
+      close();
+    } catch (failure) {
+      error.textContent = failure.message;
+      saveButton.disabled = false;
+    }
+  }, "bpi-primary");
+  actions.append(button("取消", close), saveButton);
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    saveButton.click();
+  });
+  modal.append(title, form, picker, actions);
+  shade.appendChild(modal);
+  document.body.appendChild(shade);
+  shade.addEventListener("mousedown", (event) => {
+    if (event.target === shade) close();
+  });
+  modal.addEventListener("mousedown", (event) => event.stopPropagation());
+  requestAnimationFrame(() => nameInput.focus());
+  return { close };
+}
+
 function openTagDialog(initial, onSaved) {
   const shade = element("div", "bpi-modal-shade");
   const modal = element("div", "bpi-modal");
@@ -364,6 +524,27 @@ function injectBpiStyles() {
     .bpi-mirror-token{user-select:none}.bpi-english-token.bpi-drop-before{box-shadow:-2px 0 0 0 #76c9ff,0 0 5px rgba(118,201,255,.4)}.bpi-english-token.bpi-drop-after{box-shadow:2px 0 0 0 #76c9ff,0 0 5px rgba(118,201,255,.4)}
     .bpi-english-token{position:relative}.bpi-hide-btn{flex:none;cursor:pointer;color:#7194ad;font-size:11px;line-height:1;user-select:none;padding:1px 2px;border-radius:3px;display:inline-flex;align-items:center}.bpi-hide-btn:hover{color:#9ed0ff;background:#2b3a4d}.bpi-eye-icon{display:inline-flex;align-items:center}
     .bpi-chip-hide{position:absolute;top:-5px;right:-5px;display:none;cursor:pointer;padding:1px 2px;border-radius:999px;background:#1d2937;border:1px solid #4c5668;color:#9ed0ff;line-height:1;z-index:2}.bpi-english-token:hover .bpi-chip-hide{display:inline-flex}.bpi-chip-hide:hover{background:#285f8e;border-color:#76c9ff;color:#fff}
+.bpi-source-bar{display:flex;gap:7px;align-items:center;flex-wrap:wrap;padding:5px 7px;margin-bottom:7px;border:1px solid #4c5668;border-radius:6px;background:#1b2230}
+.bpi-source-bar.bpi-source-waiting{border-color:#8a5f16;background:rgba(70,52,25,.5)}
+.bpi-source-label{color:#87bfea;font-size:11px}
+.bpi-source-state{color:#a8b6c8;font-size:11px}
+.bpi-source-state.bpi-source-waiting-text{color:#ffd27a}
+.bpi-source-toggle{display:inline-flex;gap:5px;align-items:center;font-size:11px;color:#e2e9f2;cursor:pointer;user-select:none}
+.bpi-source-toggle input{margin:0;accent-color:#3f83ba}
+.bpi-source-select{border:1px solid #4b5567;border-radius:5px;background:#171b22;color:#eef3fb;padding:3px 5px;font-size:11px}
+.bpi-source-select:disabled{opacity:.45}
+.bpi-save-drop{position:relative;display:flex;flex-direction:column;gap:5px;align-items:center;justify-content:center;min-height:86px;border:1px dashed #4b5567;border-radius:7px;background:#14181f;color:#7194ad;font-size:11px;text-align:center;cursor:pointer}
+.bpi-save-drop.bpi-dragover{border-color:#4ca7e8;color:#9ed0ff}
+.bpi-save-preview{display:none;max-width:100%;max-height:150px;border-radius:5px;border:1px solid #4c586b}
+.bpi-save-file{color:#9fb0c4;font-size:10px}
+.bpi-fav-card{display:flex;gap:10px;border:1px solid #3a4250;border-radius:7px;background:#171b22;padding:8px}
+.bpi-fav-thumb{width:104px;height:64px;border-radius:5px;background:#22303f center/cover no-repeat;display:flex;align-items:center;justify-content:center;color:#5e7d94;font-size:10px;flex:none;overflow:hidden}
+.bpi-fav-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.bpi-fav-name{font-size:12px;color:#eef3fb;font-weight:500}
+.bpi-fav-name .bpi-fav-date{color:#7194ad;font-weight:400;font-size:10px;margin-left:6px}
+.bpi-fav-text{color:#9fb0c4;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:Consolas,monospace}
+.bpi-fav-meta{color:#6f8296;font-size:10px}
+.bpi-fav-actions{display:flex;gap:5px;margin-top:2px}
     .bpi-hidden-bar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:5px 2px;border-top:1px solid #29313d}.bpi-hidden-bar.bpi-hidden{display:none}.bpi-hidden-label{flex:none;color:#87a3bb;font-size:11px}
     .bpi-hidden-chip{display:inline-flex;align-items:center;gap:5px;max-width:280px;overflow:hidden;border:1px dashed #4c5668;border-radius:999px;padding:2px 8px;background:#20262f;color:#8b98a8;cursor:pointer;font-size:11px}.bpi-hidden-chip:hover{background:#31404f;border-color:#76c9ff;color:#d7e6f7}.bpi-hidden-en{text-decoration:line-through;white-space:nowrap}.bpi-hidden-zh{color:#7194ad;font-size:10px}.bpi-hidden-restore{color:#76c9ff;font-size:12px}
     .bpi-hidden-all{margin-left:auto}
@@ -396,24 +577,33 @@ export {
   API_ROOT,
   MANAGER_TAB_ID,
   MANAGER_OPEN_EVENT,
+  UPSTREAM_ARRIVED_EVENT,
   button,
+  createSavedPrompt,
   deleteCommunityPack,
   deletePersonalTag,
+  deleteSavedPrompt,
   downloadJson,
   element,
   exportDictionaryPack,
   exportPersonalDictionary,
+  exportSavedPrompts,
   field,
   getAssistantConfig,
   importCommunityPack,
+  importSavedPrompts,
   importTags,
   bulkUpdateTags,
   injectBpiStyles,
+  listSavedPrompts,
   loadDictionary,
   loadPreferences,
   lookupLargeDictionary,
   openManagerPanel,
+  openSavePromptDialog,
   openTagDialog,
+  postUpstreamAction,
+  savedPromptImageUrl,
   runInspectorAssistant,
   saveAssistantConfig,
   savePreferences,

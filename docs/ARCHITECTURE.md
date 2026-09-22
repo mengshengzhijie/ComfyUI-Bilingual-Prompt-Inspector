@@ -21,7 +21,8 @@
 
 - `nodes.py`
   - 定义唯一工作流节点 `BilingualPromptInspector`。
-  - 输入为多行动态提示词 `text`，输出为同一字符串。
+  - 输入为多行动态提示词 `text`，以及可选的 `prompt`（上游文本，`forceInput`）；输出始终为单一字符串。
+  - 没有上游时协程立即返回，行为与旧版完全一致；有上游时把文本交给前端并挂起等待确认（见第 3 节）。
   - 不执行翻译、解析、词库搜索或网络请求。
 - `__init__.py`
   - 注册节点映射、显示名称和 `WEB_DIRECTORY`。
@@ -32,12 +33,19 @@
 - `server.py`
   - 注册助手、个人词库、词库包和大型词库的本地接口。
   - 执行同源检查、临时会话令牌校验、请求体限制、助手频率限制和并发限制。
-  - 只在用户主动调用时访问配置的 Ollama 或 OpenAI 兼容服务。
+  - 只在用户主动调用时访问配置的百度翻译或 AI（OpenAI 兼容 / Ollama）服务；"翻译并优化"与"优化为 Anima"恒走 AI，翻译/解释按 `translate_service` 选择。
+  - `UpstreamGate` 负责上游输入的挂起：按节点 id 保存一个 future，只能被 `/bpi/upstream/{ack,resume,cancel}` 唤醒。等待循环每 0.5 秒检查一次 ComfyUI 中断，无人接管时到点自动透传。唤醒一律走 `loop.call_soon_threadsafe`——future 属于执行线程的 loop，而路由跑在主线程。
 - `assistant_store.py`
-  - 保存助手服务类型、地址、模型、三套规则和 API Key。
-  - API Key 不通过读取接口返回前端。
-  - Key 与“安装身份 + 服务类型 + API 地址”绑定；地址或服务商变化后自动清除旧 Key。
+  - 保存翻译服务类型（schema v3：`translate_service` = dictionary / baidu / ai）、AI 后端与地址模型、百度 APP ID 与密钥、三套规则和独立留存的 AI Key 与百度密钥。
+  - AI Key 与百度密钥互不干扰：切换翻译服务不清任一密钥；AI Key 只在 AI 后端/地址变更或换机器时清，百度密钥只在显式清除时清。
+  - 旧 v2 配置（单一 `provider`）自动迁移至 v3，密钥与绑定原样搬入 `ai_*` 槽。
+  - API Key 不通过读取接口返回前端；公开配置只返回 `ai_api_key_configured` 与 `baidu_secret_key_configured` 布尔值。
   - 负责翻译方向判断、纯词库翻译和 Anima 输出标点清理。
+- `saved_prompt_store.py`
+  - 收藏提示词的读写：`user/bilingual-prompt-inspector/saved_prompts/index.json` 存元数据，配图按 id 存成独立文件（不塞 base64）。
+  - 写入走临时文件 + `os.replace` 原子替换；图片按文件头（PNG/JPG/WebP 魔数）判定类型，不信任扩展名。
+  - `create_prompt` 的时间戳在同一秒内连续保存时自动顺延，保证「新的在前」稳定可预期；导入时保留包里的 `created_at`，认不出（字符串等）才回退到当前时间。
+  - 导入按「名称 + 正文」判重，跳过空条目与非对象条目；图片总量与单图大小各自设上限。
 - `dictionary_store.py`
   - 加载内置包、社区包、个人词库及可选大型 SQLite。
   - 校验词条结构、控制导入数量、生成原子写入和有限备份。
@@ -46,19 +54,22 @@
 ### 浏览器前端层
 
 - `js/bpi_shared.js`
-  - 提供 /bpi/* 接口客户端（会话令牌、请求封装、全部端点函数）、共享词库快照缓存、偏好读写、通用 DOM 工具、个人标签编辑弹窗和全局样式注入。
+  - 提供 /bpi/* 接口客户端（会话令牌、请求封装、全部端点函数）、共享词库快照缓存、偏好读写、通用 DOM 工具、个人标签编辑弹窗、收藏保存弹窗和全局样式注入。
+  - `openSavePromptDialog` 用 multipart 一次提交名称、备注与图片文件，正文只读展示，保存成功后回调刷新侧边栏。
   - `openManagerPanel` 通过 ComfyUI 侧边栏 API 打开管理面板，可指定定位分页与目标节点。
 - `js/manager_panel.js`
-  - 在 ComfyUI 侧边栏注册「双语提示词管理」面板，包含标签管理、词库、词库包、助手设置四个分页。
+  - 在 ComfyUI 侧边栏注册「双语提示词管理」面板，包含标签管理、词库、词库包、助手设置、收藏五个分页。
   - 承担原节点内管理弹窗的全部职责：词条增删改、批量操作、个人词库导入导出、社区包与大型词库管理、助手服务与 API Key 配置。
   - “标签管理”分页通过节点下拉列表挂载指定节点的标签翻译与词库搜索界面（DOM 直接移植，逻辑仍归属各节点闭包），节点删除时自动摘下。
   - 修改后通过 `panelSyncHub` 通知当前页面所有节点刷新。
+  - “收藏”分页按需挂载并监听 `bpi:saved-prompts-changed`：卡片支持搜索、复制、删除、导出导入；「新建」没有选中节点时弹出节点选择器；「载入节点」先确认再调目标节点的 `_bilingualPromptInspector.setText`，覆盖不进 undo 栈。
 - `js/bilingual_prompt.js`
   - 创建节点内可视化界面：英文文本/标签双模式、绿色中文镜像、联动选择、权重、删除、撤销重做与跨节点刷新。
   - 标签排序是结构化编辑：英文标签区支持指针拖拽（4px 阈值区分点击与拖动，拖动后吞掉 click/dblclick），明细表行首提供 `⠿` 手柄（带插入指示线与边缘自动滚动），`Alt+↑/↓` 键盘微调；三个入口都汇入同一个 `moveTokenTo` → `movePromptToken` → undo 栈管线。
   - 标签隐藏（临时排除出实际输出）同样是结构化编辑：明细表行内眼睛图标、英文标签 hover 浮出的眼睛角标负责隐藏，明细表下方与英文标签区下方的“已隐藏”条负责逐个/全部恢复；清单存在 `node.properties.bpiHiddenTags`（随工作流保存），每次编辑把清单快照写进 undo 条目，撤销时文本与清单一起回滚，避免出现“幽灵恢复项”。
   - 标签翻译与词库搜索（标签管理）不再渲染进节点，其 DOM 由侧边栏“标签管理”分页挂载，节点高度恒为折叠尺寸。
   - 管理功能收敛为「标签管理」「助手设置」等入口按钮，打开侧边栏面板对应分页并定位到本节点。
+  - 上游输入条（`.bpi-source-bar`）只在 `prompt` 端口真的连上时才渲染，未连线时零高度、界面与旧版一致。条内含接管开关、导入策略下拉和状态文案，等待确认时额外出现「继续运行」「放弃」。开关与策略存在 `node.properties.bpiUpstream`（随工作流保存）；放行时把节点当前文本 POST 回后端，因此输出始终等于放行那一刻节点上的内容。
 - `js/parser.js`
   - 非破坏性切分标签，保留原始字符位置。
   - 识别纯标签、纯自然语言、指令正文和双边界混合文本。
@@ -104,13 +115,30 @@ ComfyUI 原生 text 控件（工作流真值）
 绿色草稿框
   → 用户点击仅翻译 / 翻译并优化 / 优化为 Anima
   → /bpi/assistant/run
-  → 纯词库、Ollama 或 OpenAI 兼容服务
+  → 纯词库、百度翻译或 AI（OpenAI 兼容 / Ollama）
   → 结果写回绿色暂存区
   → 用户点击“同步到英文输出”并确认
   → 更新原生 text 控件
 ```
 
 任何助手失败都不应中断 Python 节点的英文透传。
+
+### 上游输入与暂停流程
+
+```
+执行器调用节点，prompt 有值
+  → send_sync("bpi/upstream-arrived") 把文本推给前端
+  → await future（节点函数是 async def，future 未完成时执行器把节点记为
+    pending 并对下游加阻塞：下游不会执行，也不占用显卡）
+  → 前端决定：透传则立即 resume（带上游原文）
+              接管则按导入策略写入 text 控件，再 ack 表示“我在等用户”
+  → 用户整理完点「继续运行」，resume 带上节点当前文本
+  → future 完成，执行器解除阻塞，下游继续
+```
+
+无人接管（无浏览器、API 提交）时到点自动按上游原文放行；用户点 ComfyUI 取消或点「放弃」则抛中断终止本次运行。
+
+关键约束：放行文本由前端带回，后端不读 widget、不保存任何提示词内容；无论接管还是透传，输出都等于放行那一刻节点上的文本或上游原文。
 
 ### 词库查询优先级
 
@@ -128,6 +156,9 @@ ComfyUI 原生 text 控件（工作流真值）
 | 状态 | 保存位置 | 是否进入工作流 | 是否允许发布 |
 |---|---|---:|---:|
 | 英文实际提示词 | ComfyUI 原生 `text` 控件 | 是 | 随用户工作流，不属于扩展发布包 |
+| 隐藏标签清单 | `node.properties.bpiHiddenTags` | 是 | 否，随用户工作流 |
+| 上游接管开关与导入策略 | `node.properties.bpiUpstream` | 是 | 否，随用户工作流 |
+| 挂起中的等待（future） | 后端进程内存 | 否 | 否，进程重启即消失 |
 | 版面展开、高度、收藏、最近使用 | 浏览器本地存储 | 否 | 否 |
 | 临时机器翻译/待确认 | 当前页面共享内存 | 否 | 否，刷新即失效 |
 | 个人词库 | `data/user_tags.json` | 否 | 否，干净发布包必须为空或不存在 |
@@ -136,6 +167,7 @@ ComfyUI 原生 text 控件（工作流真值）
 | 大型词库启停 | `data/large_dictionary.json` | 否 | 不应携带个人选择 |
 | 大型词库 | `data/danbooru_tags.sqlite3` | 否 | 禁止打包或提交 |
 | 助手配置 | ComfyUI 用户目录 `bilingual-prompt-inspector` | 否 | 禁止打包或提交 |
+| 收藏的提示词 | 用户目录 `bilingual-prompt-inspector/saved_prompts/` | 否 | 禁止打包或提交 |
 | 安装身份 | 扩展 `data/runtime/installation_id` | 否 | 禁止打包或提交 |
 
 ## 5. 解析模型
@@ -181,7 +213,8 @@ ComfyUI 原生 text 控件（工作流真值）
 - 助手请求体上限为 256 KB；一般 JSON 上限为 8 MB。
 - 助手最多两个并发任务，默认每分钟最多 30 次请求。
 - 外部非本机 HTTP 地址被拒绝，外部服务要求 HTTPS。
-- Key 只由后端保存；公开配置只返回 `api_key_configured` 布尔值。
+- Key 只由后端保存；公开配置只返回 `ai_api_key_configured` 与 `baidu_secret_key_configured` 布尔值，不返回密钥明文。
+- 收藏配图 `GET /bpi/saved-prompts/{id}/image` 只校验同源（`<img>` 标签带不了自定义请求头，不能要求令牌），只按 id 返回本目录下的图片文件，不做路径拼接。
 
 这套保护用于减少跨站网页和误操作风险，不是登录系统、防火墙或多用户权限隔离。能访问完整 ComfyUI 页面的人仍属于可信用户。不得宣称扩展可以安全地把未认证的 ComfyUI 暴露到公网。
 

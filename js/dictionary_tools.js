@@ -30,27 +30,22 @@ export function preservedSearchScroll(previousQuery, nextQuery, scrollTop) {
 }
 
 export function inspectorNodeTargetHeight({
-  widgetY,
-  widgetMargin = 10,
-  nodeHeight,
-  currentWidgetHeight,
+  baseHeight,
   targetWidgetHeight,
   fallbackBaseHeight = 70,
-  maximumBaseHeight = 320,
   minimumHeight = 360,
 } = {}) {
-  const top = Number(widgetY);
-  const margin = Math.max(0, Number(widgetMargin) || 0);
-  const currentNode = Number(nodeHeight);
-  const currentWidget = Number(currentWidgetHeight);
+  // 节点高 = 「面板顶部以上的稳定基线」+「面板内容高度」。
+  // 基线由调用方按 text 控件真实内容高算好传入，绝不读 ComfyUI arrange 派生的
+  // bilingual_inspector.y —— 那个会被 text.computedHeight 的只增不减反馈一路推高，
+  // 导致 setSize → 文本框可用空间变大 → scrollHeight 变大 → computedHeight 再涨 的
+  // 单调递增死循环（实测每写一次值节点 +10px、永不回缩）。
+  const base = Number(baseHeight);
+  const stableBase = Number.isFinite(base) && base >= 0
+    ? base
+    : Math.max(0, Number(fallbackBaseHeight) || 0);
   const targetWidget = Math.max(0, Number(targetWidgetHeight) || 0);
-  let baseHeight;
-  if (Number.isFinite(top) && top >= 0) baseHeight = top + margin;
-  else if (Number.isFinite(currentNode) && Number.isFinite(currentWidget) && currentWidget > 0
-    && currentNode - currentWidget <= maximumBaseHeight) {
-    baseHeight = Math.max(0, currentNode - currentWidget);
-  } else baseHeight = Math.max(0, Number(fallbackBaseHeight) || 0);
-  return Math.max(Number(minimumHeight) || 0, Math.ceil(baseHeight + targetWidget));
+  return Math.max(Number(minimumHeight) || 0, Math.ceil(stableBase + targetWidget));
 }
 
 export function createClearTextHistoryEntry(currentText, label, categoryView = false) {

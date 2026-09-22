@@ -9,6 +9,7 @@ from functools import wraps
 from urllib.parse import urlparse
 
 from aiohttp import ClientSession, ClientTimeout, web
+from comfy import model_management
 from server import PromptServer
 
 from .assistant_store import (
@@ -23,6 +24,10 @@ from .assistant_store import (
     translation_direction,
 )
 from .dictionary_store import DictionaryStore, normalize_key
+from .saved_prompt_store import (
+    MAX_IMAGE_BYTES,
+    SavedPromptStore,
+)
 
 
 store = DictionaryStore()
@@ -142,7 +147,7 @@ async def _baidu_translate(text, to_lang):
     chunks = baidu_split_query(text)
     if not chunks:
         raise ValueError("待翻译文本为空")
-    timeout = ClientTimeout(total=config["timeout_seconds"])
+    timeout = ClientTimeout(total=config["ai_timeout_seconds"])
     results = []
     async with ClientSession(timeout=timeout) as session:
         for index, chunk in enumerate(chunks):
@@ -166,27 +171,11 @@ async def _baidu_translate(text, to_lang):
     return result
 
 
-async def _call_configured_assistant(action, text, instruction="", connection_test=False):
-    config = assistant_store.config()
-    provider = config["provider"]
-    if provider == "dictionary":
-        if connection_test:
-            return "纯词库模式可用"
-        if action in {"translate_optimize", "optimize"}:
-            raise ValueError("翻译优化和提示词优化需要配置 Ollama 或 OpenAI 兼容接口")
-        return dictionary_translate(text, store) if translation_direction(text) == "to_english" else _dictionary_explain(text)
-    if provider == "baidu":
-        if action in {"translate_optimize", "optimize"}:
-            raise ValueError("百度翻译只执行纯翻译；“翻译并优化”和“优化为 Anima”需要 Ollama 或 OpenAI 兼容接口")
-        if instruction:
-            raise ValueError("百度翻译不支持附加要求，请把要求并入待翻译文本")
-        if connection_test:
-            await _baidu_translate("连接测试", "en")
-            return "百度翻译连接成功"
-        to_lang = "zh" if action == "explain" or translation_direction(text) == "to_chinese" else "en"
-        return await _baidu_translate(text, to_lang)
-    if not config.get("model"):
-        raise ValueError("尚未填写模型名称")
+async def _call_ai_assistant(action, text, instruction, config, connection_test=False):
+    """翻译/优化都走这里。优化类恒走 AI；翻译类在 translate_service=ai 时也走 AI。"""
+    if not config.get("ai_model"):
+        raise ValueError("尚未填写 AI 模型名称（“翻译并优化”“优化为 Anima”以及 AI 翻译都需要）")
+    ai_provider = config["ai_provider"]
     rule = {
         "translate": config["translation_rule"],
         "explain": config["translation_rule"],
@@ -209,17 +198,17 @@ async def _call_configured_assistant(action, text, instruction="", connection_te
         rule = f"{rule}\n\n本次任务：整理现有英文内容，不承担翻译。"
     if instruction:
         rule = f"{rule}\n\n用户本次附加要求优先遵循：{instruction.strip()}"
-    timeout = ClientTimeout(total=config["timeout_seconds"])
-    if provider == "ollama":
-        base = (config.get("base_url") or "http://127.0.0.1:11434").rstrip("/")
+    timeout = ClientTimeout(total=config["ai_timeout_seconds"])
+    if ai_provider == "ollama":
+        base = (config.get("ai_base_url") or "http://127.0.0.1:11434").rstrip("/")
         if base.endswith("/v1"):
             base = base[:-3].rstrip("/")
         endpoint = base if base.endswith("/api/chat") else f"{base}/api/chat"
         payload = {
-            "model": config["model"],
+            "model": config["ai_model"],
             "stream": False,
             "messages": [{"role": "system", "content": rule}, {"role": "user", "content": text}],
-            "options": {"temperature": config["temperature"]},
+            "options": {"temperature": config["ai_temperature"]},
         }
         async with ClientSession(timeout=timeout) as session:
             async with session.post(endpoint, json=payload) as response:
@@ -228,18 +217,18 @@ async def _call_configured_assistant(action, text, instruction="", connection_te
                     raise ValueError(data.get("error") or f"Ollama 请求失败：HTTP {response.status}")
         result = data.get("message", {}).get("content")
     else:
-        if not config.get("base_url"):
+        if not config.get("ai_base_url"):
             raise ValueError("尚未填写 OpenAI 兼容 API 地址")
         headers = {"Content-Type": "application/json"}
-        if config.get("api_key"):
-            headers["Authorization"] = f"Bearer {config['api_key']}"
+        if config.get("ai_api_key"):
+            headers["Authorization"] = f"Bearer {config['ai_api_key']}"
         payload = {
-            "model": config["model"],
-            "temperature": config["temperature"],
+            "model": config["ai_model"],
+            "temperature": config["ai_temperature"],
             "messages": [{"role": "system", "content": rule}, {"role": "user", "content": text}],
         }
         async with ClientSession(timeout=timeout) as session:
-            async with session.post(openai_chat_endpoint(config["base_url"]), headers=headers, json=payload) as response:
+            async with session.post(openai_chat_endpoint(config["ai_base_url"]), headers=headers, json=payload) as response:
                 data = await response.json(content_type=None)
                 if response.status >= 400:
                     detail = data.get("error") if isinstance(data, dict) else None
@@ -256,6 +245,31 @@ async def _call_configured_assistant(action, text, instruction="", connection_te
     if action in {"translate_optimize", "optimize"}:
         result = sanitize_anima_prompt(result)
     return result
+
+
+async def _call_configured_assistant(action, text, instruction="", connection_test=False):
+    config = assistant_store.config()
+    translate_service = config["translate_service"]
+    # “翻译并优化”“优化为 Anima”恒走 AI；翻译/解释在 translate_service=ai 时也走 AI
+    needs_ai = action in {"translate_optimize", "optimize"} or (
+        action in {"translate", "explain"} and translate_service == "ai"
+    )
+    if needs_ai:
+        return await _call_ai_assistant(action, text, instruction, config, connection_test)
+    # 以下只处理 translate/explain 且 translate_service != "ai"
+    if translate_service == "dictionary":
+        if connection_test:
+            return "纯词库模式可用"
+        return dictionary_translate(text, store) if translation_direction(text) == "to_english" else _dictionary_explain(text)
+    if translate_service == "baidu":
+        if instruction:
+            raise ValueError("百度翻译不支持附加要求，请把要求并入待翻译文本")
+        if connection_test:
+            await _baidu_translate("连接测试", "en")
+            return "百度翻译连接成功"
+        to_lang = "zh" if action == "explain" or translation_direction(text) == "to_chinese" else "en"
+        return await _baidu_translate(text, to_lang)
+    raise ValueError("翻译服务配置异常：请在助手设置里选择词库、百度或 AI")
 
 
 @PromptServer.instance.routes.get("/bpi/session")
@@ -333,7 +347,7 @@ async def run_assistant(request):
             result = await _call_configured_assistant(action, text, instruction)
         finally:
             _assistant_slots.release()
-        return web.json_response({"success": True, "data": {"text": result, "provider": assistant_store.config()["provider"]}})
+        return web.json_response({"success": True, "data": {"text": result, "translate_service": assistant_store.config()["translate_service"]}})
     except AssistantLimitError as error:
         return error_response(error, 429)
     except (ValueError, web.HTTPBadRequest) as error:
@@ -497,3 +511,227 @@ async def delete_dictionary_pack(request):
         return error_response(error)
     except OSError as error:
         return error_response(error, 500)
+
+
+# ---------------------------------------------------------------------------
+# 上游输入门
+#
+# 节点接到上游 STRING 时不直接放行，而是把文本交给前端，然后挂起等待确认。
+# 挂起靠 async 节点函数：只要协程不返回，执行器就会把该节点标为 pending
+# 并阻塞下游（execution.py 的 pending_async_nodes）。future 由下面的本地路由
+# 唤醒，唤醒发生在主线程（aiohttp），所以一律走 call_soon_threadsafe。
+# ---------------------------------------------------------------------------
+
+UPSTREAM_ARRIVED_EVENT = "bpi/upstream-arrived"
+# 前端没有接管时（无浏览器、API 调用）的兜底时限，超时后按透传放行
+_UPSTREAM_HANDOFF_TIMEOUT = 20.0
+# 前端已接管后的最长等待，避免挂起的任务永久占用执行线程
+_UPSTREAM_WAIT_TIMEOUT = 3600.0
+_UPSTREAM_POLL_INTERVAL = 0.5
+
+
+class UpstreamGate:
+    """按节点 id 保存一次挂起，future 只能被本地路由唤醒。"""
+
+    def __init__(self, handoff_timeout=_UPSTREAM_HANDOFF_TIMEOUT, wait_timeout=_UPSTREAM_WAIT_TIMEOUT):
+        self.handoff_timeout = handoff_timeout
+        self.wait_timeout = wait_timeout
+        self.pending = {}
+
+    def open(self, node_id, prompt_id, text):
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+        self.pending[node_id] = {
+            "future": future,
+            "loop": loop,
+            "prompt_id": prompt_id,
+            "text": text,
+            "deadline": time.monotonic() + self.handoff_timeout,
+        }
+        return future
+
+    def _entry(self, node_id, prompt_id):
+        entry = self.pending.get(node_id)
+        if entry is None:
+            return None
+        if prompt_id and entry["prompt_id"] and entry["prompt_id"] != prompt_id:
+            return None
+        return entry
+
+    def ack(self, node_id, prompt_id=None):
+        """前端已接管，把时限放宽到等待用户确认。"""
+        entry = self._entry(node_id, prompt_id)
+        if entry is None:
+            return False
+        entry["deadline"] = time.monotonic() + self.wait_timeout
+        return True
+
+    def release(self, node_id, prompt_id=None, text=None, cancelled=False):
+        entry = self._entry(node_id, prompt_id)
+        if entry is None:
+            return False
+        del self.pending[node_id]
+        future = entry["future"]
+        upstream_text = entry["text"]
+        result = text if isinstance(text, str) else upstream_text
+
+        def resolve():
+            if future.done():
+                return
+            if cancelled:
+                future.set_exception(model_management.InterruptProcessingException())
+            else:
+                future.set_result(result)
+
+        entry["loop"].call_soon_threadsafe(resolve)
+        return True
+
+    def drop(self, node_id):
+        entry = self.pending.pop(node_id, None)
+        if entry is None:
+            return
+        future = entry["future"]
+
+        def resolve():
+            if not future.done():
+                future.set_result(None)
+
+        entry["loop"].call_soon_threadsafe(resolve)
+
+    async def wait(self, node_id, future):
+        """等到前端放行；返回 None 表示无人接管，调用方按透传处理。"""
+        while True:
+            if model_management.processing_interrupted():
+                self.drop(node_id)
+                raise model_management.InterruptProcessingException()
+            entry = self.pending.get(node_id)
+            if entry is None:
+                return None
+            remaining = entry["deadline"] - time.monotonic()
+            if remaining <= 0:
+                self.drop(node_id)
+                return None
+            try:
+                return await asyncio.wait_for(
+                    asyncio.shield(future), timeout=min(remaining, _UPSTREAM_POLL_INTERVAL)
+                )
+            except asyncio.TimeoutError:
+                continue
+
+
+upstream_gate = UpstreamGate()
+
+
+def current_prompt_id():
+    try:
+        from comfy_execution.utils import get_executing_context
+
+        context = get_executing_context()
+    except Exception:
+        return None
+    return getattr(context, "prompt_id", None)
+
+
+def announce_upstream(node_id, text):
+    PromptServer.instance.send_sync(UPSTREAM_ARRIVED_EVENT, {"node_id": node_id, "text": text})
+
+
+async def _read_node_payload(request):
+    payload = await _read_json(request)
+    return str(payload.get("node_id") or ""), payload.get("prompt_id"), payload.get("text")
+
+
+@protected_route("post", "/bpi/upstream/ack")
+async def ack_upstream(request):
+    node_id, prompt_id, _ = await _read_node_payload(request)
+    return web.json_response({"success": upstream_gate.ack(node_id, prompt_id)})
+
+
+@protected_route("post", "/bpi/upstream/resume")
+async def resume_upstream(request):
+    node_id, prompt_id, text = await _read_node_payload(request)
+    success = upstream_gate.release(node_id, prompt_id, text=text)
+    return web.json_response({"success": success})
+
+
+@protected_route("post", "/bpi/upstream/cancel")
+async def cancel_upstream(request):
+    node_id, prompt_id, _ = await _read_node_payload(request)
+    success = upstream_gate.release(node_id, prompt_id, cancelled=True)
+    return web.json_response({"success": success})
+
+
+# ---------------------------------------------------------------------------
+# 收藏的提示词：元数据与配图都在 ComfyUI 用户目录，插件仓库不携带。
+# ---------------------------------------------------------------------------
+
+saved_prompt_store = SavedPromptStore()
+# multipart 正文 = 文本字段 + 一张可选图片（图片本身最大 5 MB）
+_MAX_SAVED_PROMPT_BYTES = MAX_IMAGE_BYTES + 512 * 1024
+
+
+@protected_route("get", "/bpi/saved-prompts")
+async def list_saved_prompts(_request):
+    return web.json_response({"success": True, "data": saved_prompt_store.list_prompts()})
+
+
+@protected_route("post", "/bpi/saved-prompts")
+async def create_saved_prompt(request):
+    if request.content_length is not None and request.content_length > _MAX_SAVED_PROMPT_BYTES:
+        return error_response("收藏内容过大（图片最大 5 MB）", 413)
+    name = text = note = None
+    image_bytes = None
+    try:
+        reader = await request.multipart()
+        async for part in reader:
+            if part.name == "image":
+                image_bytes = await part.read(decode=False)
+            elif part.name == "name":
+                name = await part.text()
+            elif part.name == "text":
+                text = await part.text()
+            elif part.name == "note":
+                note = await part.text()
+    except (ValueError, web.HTTPException) as error:
+        return error_response(f"读取表单失败：{error}")
+    try:
+        entry = saved_prompt_store.create_prompt(name, text, note=note, image_bytes=image_bytes)
+        return web.json_response({"success": True, "data": entry})
+    except ValueError as error:
+        return error_response(error)
+
+
+@protected_route("delete", "/bpi/saved-prompts/{prompt_id}")
+async def delete_saved_prompt(request):
+    try:
+        remaining = saved_prompt_store.delete_prompt(request.match_info["prompt_id"])
+        return web.json_response({"success": True, "data": {"remaining": remaining}})
+    except ValueError as error:
+        return error_response(error, 404)
+
+
+# 图片用 <img> 加载，自定义请求头带不进去，所以这里只做同源检查、不走会话令牌。
+@PromptServer.instance.routes.get("/bpi/saved-prompts/{prompt_id}/image")
+async def saved_prompt_image(request):
+    if not _same_origin(request):
+        return error_response("拒绝跨源请求", 403)
+    try:
+        path = saved_prompt_store.image_path(request.match_info["prompt_id"])
+    except ValueError as error:
+        return error_response(error, 404)
+    return web.FileResponse(path, headers={"Cache-Control": "private, max-age=3600"})
+
+
+@protected_route("get", "/bpi/saved-prompts/export")
+async def export_saved_prompts(_request):
+    return web.json_response({"success": True, "data": saved_prompt_store.export_bundle()})
+
+
+@protected_route("post", "/bpi/saved-prompts/import")
+async def import_saved_prompts(request):
+    try:
+        payload = await _read_json(request)
+        result = saved_prompt_store.import_bundle(payload)
+        return web.json_response({"success": True, "data": result})
+    except ValueError as error:
+        return error_response(error)
