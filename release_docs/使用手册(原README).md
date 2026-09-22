@@ -43,7 +43,7 @@ v1.1.0 发布包不携带 `data/user_tags.json`、`data/pack_settings.json`、`d
 普通用户优先下载 GitHub Releases 中的公开 ZIP，不要下载或提交大型数据库。开发者也可以在 `ComfyUI/custom_nodes` 目录执行：
 
 ```powershell
-git clone https://github.com/Qiongyi44/ComfyUI-Bilingual-Prompt-Inspector.git
+git clone https://github.com/mengshengzhijie/ComfyUI-Bilingual-Prompt-Inspector.git
 ```
 
 克隆完成后重启 ComfyUI，并按 `Ctrl+F5`。仓库不包含 API 配置、个人词库、运行时身份和可选大型数据库；这些内容只在用户本机使用时创建。

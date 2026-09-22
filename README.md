@@ -137,6 +137,17 @@ git clone https://github.com/mengshengzhijie/ComfyUI-Bilingual-Prompt-Inspector.
 - 收藏不记录工作流名称与节点编号；载入节点会覆盖节点当前文本，只弹窗确认、不支持撤销。
 - 若 ComfyUI 大幅改动前端文本控件结构，界面适配可能需要更新。
 
+## 报告问题与联系
+
+本插件由 mengshengzhijie 独立维护。遇到问题、有功能建议，请按下面的方式反馈（**不要附带 API Key、密钥、私人词典或完整配置文件**）：
+
+- GitHub Issues：https://github.com/mengshengzhijie/ComfyUI-Bilingual-Prompt-Inspector/issues
+- 邮箱：mengshengzhijie@163.com
+
+反馈时请附上：ComfyUI 版本、前端版本、安装方式（git clone / ComfyUI-Manager / 桌面版）、浏览器或桌面环境、复现步骤，以及去掉敏感信息的报错日志。
+
+安全问题（如密钥泄露风险）请不要开公开 issue，走 [GitHub 私有漏洞报告](https://github.com/mengshengzhijie/ComfyUI-Bilingual-Prompt-Inspector/security/advisories/new) 或发邮件，详见 `SECURITY.md`。
+
 ## 致谢与许可
 
 基于 [Qiongyi44/ComfyUI-Bilingual-Prompt-Inspector](https://github.com/Qiongyi44/ComfyUI-Bilingual-Prompt-Inspector) 二次开发。词库数据来源与授权说明见 `THIRD_PARTY_NOTICE.md`，许可条款见 `LICENSE`。

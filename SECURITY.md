@@ -10,11 +10,16 @@ are not maintained separately.
 Do not post API keys, access tokens, private prompts, personal dictionaries, or full
 configuration files in a public issue.
 
-Use GitHub private vulnerability reporting when it is enabled for the repository. If
-that channel is unavailable, contact the author through the community homepage shown
-in the extension and provide only a minimal reproduction with secrets removed:
+Use GitHub private vulnerability reporting when it is enabled for the repository:
 
-https://space.bilibili.com/697555747
+https://github.com/mengshengzhijie/ComfyUI-Bilingual-Prompt-Inspector/security/advisories/new
+
+If that channel is unavailable, email the maintainer and provide only a minimal
+reproduction with secrets removed:
+
+mengshengzhijie@163.com
+
+Community homepage (non-security questions only): https://space.bilibili.com/697555747
 
 ## Deployment boundary
 

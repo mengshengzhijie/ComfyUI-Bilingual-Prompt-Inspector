@@ -1,0 +1,33 @@
+# 发布到 Comfy Registry 时排除的内容（语法同 .gitignore）
+#
+# 注意：下面两项【必须保留】，排除了插件会直接跑不起来
+#   data/    —— 内置词库 base_tags.json / search_concepts.json / packs/*.json
+#   assets/  —— README 里引用的截图与演示动图
+#   locales/ —— 节点中文名/描述（ComfyUI 界面切中文时用到）
+
+# 测试
+tests/
+pnpm-lock.yaml
+
+# 开发文档与内部记录（README.md、CHANGELOG.md、SECURITY.md 保留）
+docs/
+release_docs/
+DEVELOPMENT_HISTORY.md
+CONTRIBUTING.md
+
+# 开发工具与脚本
+tools/
+
+# 本地生成的数据（本来就不入库，这里只是显式兜底）
+data/user_tags.json
+data/user_config/
+data/runtime/
+data/backups/
+data/pack_settings.json
+data/large_dictionary.json
+data/packs/community_*.json
+
+# 缓存
+__pycache__/
+*.pyc
+.gitattributes

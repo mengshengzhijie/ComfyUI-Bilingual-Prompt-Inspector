@@ -18,3 +18,8 @@ Documentation = "https://github.com/mengshengzhijie/ComfyUI-Bilingual-Prompt-Ins
 PublisherId = "mengshengzhijie"
 DisplayName = "Prompt Translator & Manager"
 requires-comfyui = ">=0.3.40"
+# 前端扩展目录，与 __init__.py 的 WEB_DIRECTORY = "./js" 保持一致
+web = "js"
+# 图标与横幅（可选，填好图片的公开 URL 后取消注释即可）
+# Icon = "https://..."    # 方形，≤400×400，PNG/SVG/JPG/GIF
+# Banner = "https://..."  # 21:9 横幅，PNG/SVG/JPG/GIF
