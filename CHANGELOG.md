@@ -53,6 +53,9 @@
 - 补齐第三批翻译（22 条）：置信度徽章（`Low · pending` / `Medium · pending` / `Medium · session-only`）、收藏星标按钮（★/☆）、`⚠ Not indexed:` 标签提示、Anima 格式说明、`Node #N · N tags` 收藏备注、`Running …` / `Translating unknown tags N/M` / `Translation complete …` 三条运行状态、`Querying dictionary…` / `Searching for more…` / `Paused, waiting for confirmation…`、权重越界诊断、以及词包导入预览与删除确认。
 - 两处组合句改分段翻译：词包导入预览 `Tags N | Sample: …`（示例内容是数据，不该参与翻译）与标签管理节点标题 `Node #N: …`（提示词原文不翻译）。
 - `tests/test_i18n.mjs` 新增 40+ 条「运行时真实形态」断言，把上面这批句子的确切中文结果锁死——以后谁把变量引号去掉或改回直引号，测试会直接失败。
+- 侧边栏标签改为中文「提示词翻译与管理」，悬停说明改为「提示词翻译与管理：标签管理、词库、词包与助手设置」。这两个值是 `registerSidebarTab` 直接写死的字符串、不走翻译层，而且注册发生在启动时（语言设置要等后端配置返回才落地），所以直接写中文而不是走 `t()`。
+- 插件中文名三处统一为「提示词翻译与管理」：侧边栏标签、侧边栏面板标题、节点「关于插件」里的名字（原译名「双语提示词管理器」「双语提示词检查器」各不相同）。
+- 修「关于插件」里的插件名一直是英文：`Bilingual Prompt Manager 1.2.0` 的版本号带点号，会被拆成两个变量而匹配不到译表。改成名字与版本号分开翻译，英文界面也不会多出引号。
 
 ## v1.1.0（2026-09-18）
 

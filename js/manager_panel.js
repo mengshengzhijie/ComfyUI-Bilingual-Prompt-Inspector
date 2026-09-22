@@ -1298,8 +1298,10 @@ app.registerExtension({
     app.extensionManager.registerSidebarTab({
       id: MANAGER_TAB_ID,
       icon: "pi pi-language",
-      title: "Bilingual Prompt Manager",
-      tooltip: "Bilingual Prompt Inspector: Tag Manager, Dictionary, Packs & Assistant Settings",
+      // 侧边栏标签显示的就是插件名，直接写中文：注册发生在启动时，
+      // 语言设置要等后端配置返回才落地，走 t() 会先渲染成英文且不会再刷新。
+      title: "提示词翻译与管理",
+      tooltip: "提示词翻译与管理：标签管理、词库、词包与助手设置",
       type: "custom",
       render: renderTab,
       destroy: destroyTab,

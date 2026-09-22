@@ -65,7 +65,8 @@ function openProjectAbout() {
   const modal = element("div", "bpi-modal bpi-about-modal");
   modal.append(
     element("h3", "", "About plugin"),
-    element("div", "bpi-about-name", `Bilingual Prompt Manager ${EXTENSION_VERSION}`),
+    // 版本号带点号会被拆成多个变量而匹配不到译表，所以名字和版本号分开翻译
+    element("div", "bpi-about-name", `${t("Bilingual Prompt Manager")} ${EXTENSION_VERSION}`),
     element("div", "bpi-config-note", "A ComfyUI community tool for Anima / Danbooru prompt organization, translation, and management."),
     element("div", "bpi-config-note", "Based on Qiongyi44's bilingual prompt inspector; independently maintained."),
   );
@@ -216,7 +217,7 @@ function createPanel(node, textWidget) {
     event.stopPropagation();
     openProjectAbout();
   });
-  aboutFooter.append(element("span", "", `Bilingual Prompt Inspector ${EXTENSION_VERSION}`), aboutButton);
+  aboutFooter.append(element("span", "", `${t("Bilingual Prompt Inspector")} ${EXTENSION_VERSION}`), aboutButton);
 
   const modeSelect = element("select", "bpi-mode");
   for (const [value, label] of [["auto", "Auto-detect"], ["tags", "Tag mode"], ["natural", "Natural language"]]) {

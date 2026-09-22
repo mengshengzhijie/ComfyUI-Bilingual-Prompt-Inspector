@@ -115,6 +115,13 @@ assert.equal(t("Updated"), "已更新");
 assert.equal(t("Imported"), "已导入");
 assert.equal(t("(empty prompt)"), "（空提示词）");
 assert.equal(t("(weight 1.5)"), "（权重 1.5）");
+// 插件名：侧边栏标签写死中文，面板/关于框走译表，三处必须同一个名字
+assert.equal(t("Bilingual Prompt Manager"), "提示词翻译与管理");
+assert.equal(t("Bilingual Prompt Inspector"), "提示词翻译与管理");
+assert.equal(
+  t("Bilingual Prompt Inspector: Tag Manager, Dictionary, Packs & Assistant Settings"),
+  "提示词翻译与管理：标签管理、词库、词包与助手设置",
+);
 assert.equal(t("restored 3 hidden tags; press Ctrl+Z to undo"), "已恢复 3 个隐藏标签；按 Ctrl+Z 可撤销");
 assert.equal(t("Node #3"), "节点 #3");
 

@@ -292,7 +292,7 @@ const ZH = {
     "基于 Qiongyi44 的双语提示词检查器，独立维护。",
 
   // ── 侧边栏管理面板 ──────────────────────────────────────────────────
-  "Bilingual Prompt Manager": "双语提示词管理器",
+  "Bilingual Prompt Manager": "提示词翻译与管理",
   "Tag Manager": "标签管理",
   Dictionary: "词库",
   Packs: "词包",
@@ -482,8 +482,9 @@ const ZH = {
   "Release failed: {}": "放行失败：{}",
   "Discard failed: {}": "放弃失败：{}",
   "Cannot pause for confirmation: {}": "无法暂停等待确认：{}",
-  "Bilingual Prompt Manager {}": "双语提示词管理器 {}",
-  "Bilingual Prompt Inspector {}": "双语提示词检查器 {}",
+  "Bilingual Prompt Manager {}": "提示词翻译与管理 {}",
+  "Bilingual Prompt Inspector {}": "提示词翻译与管理 {}",
+  "Bilingual Prompt Inspector": "提示词翻译与管理",
 
   // ── 侧边栏：词库 / 词包 / 收藏 ──────────────────────────────────────
   Builtin: "内置",
@@ -568,7 +569,7 @@ const ZH = {
   "Node #{}": "节点 #{}",
   "Node #{}: {}": "节点 #{}：{}",
   "Bilingual Prompt Inspector: Tag Manager, Dictionary, Packs & Assistant Settings":
-    "双语提示词检查器：标签管理、词库、词包与助手设置",
+    "提示词翻译与管理：标签管理、词库、词包与助手设置",
 
   // ── 语法诊断（parser.js）────────────────────────────────────────────
   "Manual override": "手动覆盖",
