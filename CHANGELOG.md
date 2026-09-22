@@ -1,6 +1,6 @@
 # 更新记录
 
-## v1.2.0（未发布）
+## v1.2.0（2026-09-23）
 
 - 翻译服务与 AI 后端解耦（schema v3）：翻译/解释可选纯词库 / 百度翻译 / AI；"翻译并优化"与"优化为 Anima"恒走 AI。AI 与百度密钥独立留存，切换翻译服务互不清空——只有 AI 后端/地址变更或换机器时才清 AI Key，百度密钥只在显式清除时才清。
 - 配置面板重写为三段式：翻译服务下拉、百度翻译（APP ID + 密钥，始终可编辑）、AI 服务（后端 + 地址 + 模型 + Key + 温度 + 超时 + LM Studio 预设）。
@@ -29,6 +29,15 @@
 - 收藏数据存在 ComfyUI 用户目录 `user/bilingual-prompt-inspector/saved_prompts/`（`index.json` + 独立图片文件），不写入插件目录，重装插件不丢数据；单图上限 5 MB，最多 2000 条。
 - 收藏不记录工作流信息；「载入节点」先弹窗确认再覆盖节点文本，不进 `Ctrl+Z` 撤销栈。侧边栏「新建」在没有选中节点时提供节点选择器兜底。
 - 新增 `tests/test_saved_prompt_store.py`：覆盖图片魔数校验、超限拒绝、删除连带删图、导出导入往返（保留原顺序）、重复与非法条目跳过、非法时间戳回退等 14 个用例。
+
+- 新增外观模式配置：助手设置里可切换「跟随 ComfyUI ／ 暗色 ／ 亮色」，默认跟随——ComfyUI 用什么主题插件就用什么主题。此前插件把配色硬编码成暗色值，在 ComfyUI 亮色模式下文字与背景几乎无法分辨。
+- 实现上新增一组 `--bpi-*` CSS 变量（面板、文字、边框、按钮、输入框、表格、弹窗），按 `:root`（亮色默认）、`.dark-theme`（跟随 ComfyUI 暗色）、`[data-bpi-theme]`（强制暗／亮）四套定义；配置存在 `assistant_store` 的 `appearance` 字段，切换后即时生效无需刷新。
+- 节点中文同步编辑区的「标签管理」「助手设置」入口已移除（与侧边栏管理面板重复），代码里保留注释说明如何恢复；助手设置里的翻译服务说明改为整行显示，不再挤在表单左列。
+
+- 用户界面英文化：为符合 ComfyUI-Manager 注册要求，节点显示名改为 `Prompt Translator & Manager`，`@title` / `@description` / `RETURN_NAMES` / `CATEGORY` 与约 540 处 JS 界面文字（按钮、提示、状态消息、输入框占位符、语法诊断）全部改为英文。
+- 中文通过 locale 保留：新增 `locales/zh/main.json`（`nodeDefs` 结构），在 ComfyUI 里把界面语言切到中文后，节点名、描述与输入输出名仍显示中文「提示词翻译与管理（英文输出）」——由 ComfyUI 的 `build_translations()` 与前端 `mergeCustomNodesI18n()` 自动合并，无需额外配置。
+- 英文化时有四类内容刻意保留中文：代码注释；匹配用户中文输入的正则模式（如「翻译要求／正文」结构化指令识别）；词库中文分类名匹配表（改掉会导致分类排序失效）；以及「未收录」「自然语言片段（待翻译或确认）」等在中文列显示的翻译数据。
+- 更新 5 个测试文件的断言以匹配新的英文字符串（`test_anima_sorter.mjs`、`test_clear_controls.mjs`、`test_dictionary_tools.mjs`、`test_parser.mjs`、`test_project_link.mjs`）。
 
 ## v1.1.0（2026-09-18）
 
