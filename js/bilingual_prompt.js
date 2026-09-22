@@ -42,6 +42,9 @@ import {
   savePreferences,
   saveTag,
   searchLargeDictionary,
+  setPlaceholder,
+  setText,
+  setTitle,
   UPSTREAM_ARRIVED_EVENT,
 } from "./bpi_shared.js";
 
@@ -120,7 +123,7 @@ function createPanel(node, textWidget) {
   editEnglishButton.type = "button";
   clearEnglishButton.type = "button";
   favoriteButton.type = "button";
-  favoriteButton.title = "Save the current English prompt to favorites in the user directory (a reference image can be attached)";
+  setTitle(favoriteButton, "Save the current English prompt to favorites in the user directory (a reference image can be attached)");
   englishHead.append(englishTitle, englishHint, editEnglishButton, clearEnglishButton, favoriteButton);
   const englishTokenView = element("div", "bpi-english-token-view bpi-hidden");
   englishTokenView.tabIndex = 0;
@@ -128,20 +131,20 @@ function createPanel(node, textWidget) {
   englishTokenView.setAttribute("aria-label", "English prompt tag view");
   englishTokenView.setAttribute("aria-readonly", "true");
   const englishEditor = element("textarea", "bpi-english-editor");
-  englishEditor.placeholder = "Enter the English prompt; after editing, it will be shown as selectable, deletable tags.";
+  setPlaceholder(englishEditor, "Enter the English prompt; after editing, it will be shown as selectable, deletable tags.");
   const englishHiddenBar = element("div", "bpi-hidden-bar bpi-hidden");
-  englishHiddenBar.title = "Hidden tags will not enter the actual output";
+  setTitle(englishHiddenBar, "Hidden tags will not enter the actual output");
   // 上游输入条：只在节点接到上游 prompt 连线时出现
   const sourceBar = element("div", "bpi-source-bar bpi-hidden");
   // 注意别叫 sourceLabel：模块顶层已有同名函数（标签来源文案），会把它遮蔽掉
   const sourceCaption = element("span", "bpi-source-label", "Upstream input");
   const sourceToggle = element("input");
   sourceToggle.type = "checkbox";
-  sourceToggle.title = "When on, intercepts upstream text and pauses for confirmation; when off, upstream text passes through unchanged";
+  setTitle(sourceToggle, "When on, intercepts upstream text and pauses for confirmation; when off, upstream text passes through unchanged");
   const sourceToggleLabel = element("label", "bpi-source-toggle");
   sourceToggleLabel.append(sourceToggle, element("span", "", "Intercept upstream text"));
   const sourceSelect = element("select", "bpi-source-select");
-  sourceSelect.title = "Determines when upstream text overwrites the node content";
+  setTitle(sourceSelect, "Determines when upstream text overwrites the node content");
   for (const item of IMPORT_POLICIES) {
     const option = element("option", "", item.label);
     option.value = item.value;
@@ -179,7 +182,7 @@ function createPanel(node, textWidget) {
   chineseMirror.setAttribute("aria-label", "Per-tag Chinese sync view");
   chineseMirror.setAttribute("aria-readonly", "true");
   const chineseEditor = element("textarea", "bpi-chinese-editor bpi-hidden");
-  chineseEditor.placeholder = "Enter Chinese, English, or mixed text; use“Translate”or“Translate & optimize” then sync to the English output separately after confirming.";
+  setPlaceholder(chineseEditor, "Enter Chinese, English, or mixed text; use “Translate” or “Translate & optimize”, then sync to the English output separately after confirming.");
   mirrorSection.append(mirrorHead, chineseMirror, chineseEditor);
   const detailsBody = element("div", "bpi-details-body");
   const detailsHiddenBar = element("div", "bpi-hidden-bar bpi-hidden");
@@ -190,7 +193,7 @@ function createPanel(node, textWidget) {
   const searchLabel = element("strong", "bpi-search-label", "Dictionary search");
   const search = element("input", "bpi-search");
   search.type = "search";
-  search.placeholder = "Enter Chinese, English, alias, or concept; click a result to insert the English tag";
+  setPlaceholder(search, "Enter Chinese, English, alias, or concept; click a result to insert the English tag");
   const results = element("div", "bpi-results");
   const summary = element("div", "bpi-summary");
   const counts = element("span");
@@ -205,7 +208,7 @@ function createPanel(node, textWidget) {
   const aboutFooter = element("div", "bpi-about-footer");
   const aboutButton = element("button", "bpi-about-button", "About plugin");
   aboutButton.type = "button";
-  aboutButton.title = "View plugin version and project repository";
+  setTitle(aboutButton, "View plugin version and project repository");
   aboutButton.addEventListener("mousedown", (event) => event.stopPropagation());
   aboutButton.addEventListener("click", (event) => {
     event.preventDefault();
@@ -281,7 +284,7 @@ function createPanel(node, textWidget) {
   };
 
   const setStatus = (message, kind = "") => {
-    status.textContent = message;
+    setText(status, message);
     status.dataset.kind = kind;
   };
 
@@ -487,7 +490,7 @@ function createPanel(node, textWidget) {
   };
 
   const updateEnglishClearButton = () => {
-    clearEnglishButton.textContent = clearButtonLabel(state.englishClearState);
+    setText(clearEnglishButton, clearButtonLabel(state.englishClearState));
     clearEnglishButton.disabled = state.englishClearState === "idle" && !String(textWidget.value ?? "");
   };
   const resetEnglishClearState = () => {
@@ -527,8 +530,8 @@ function createPanel(node, textWidget) {
       englishEditor.value = String(textWidget.value ?? "");
       englishEditor.classList.remove("bpi-hidden");
       englishTokenView.classList.add("bpi-hidden");
-      editEnglishButton.textContent = "Done";
-      englishHint.textContent = "Text mode while typing; parsed into tags when done";
+      setText(editEnglishButton, "Done");
+      setText(englishHint, "Text mode while typing; parsed into tags when done");
       requestAnimationFrame(() => {
         englishEditor.focus();
         englishEditor.setSelectionRange(englishEditor.value.length, englishEditor.value.length);
@@ -540,7 +543,7 @@ function createPanel(node, textWidget) {
     if (!nextText.trim()) {
       state.englishEditing = true;
       state.englishEditingExplicit = false;
-      englishHint.textContent = "Content is empty; enter the English prompt directly";
+      setText(englishHint, "Content is empty; enter the English prompt directly");
       return;
     }
     state.englishEditing = false;
@@ -548,8 +551,8 @@ function createPanel(node, textWidget) {
     state.englishEditorDirty = false;
     englishEditor.classList.add("bpi-hidden");
     englishTokenView.classList.remove("bpi-hidden");
-    editEnglishButton.textContent = "Edit text";
-    englishHint.textContent = "Click tags to link; select then press Delete";
+    setText(editEnglishButton, "Edit text");
+    setText(englishHint, "Click tags to link; select then press Delete");
     scheduleRender(true);
     requestAnimationFrame(() => englishTokenView.focus({ preventScroll: true }));
   };
@@ -559,9 +562,9 @@ function createPanel(node, textWidget) {
     const value = chineseEditor.value.trim();
     const syncable = Boolean(value) && !containsChinese(value);
     syncTextButton.disabled = state.assistantBusy || !state.chineseEditing || !syncable;
-    syncTextButton.title = syncable
+    setTitle(syncTextButton, syncable
       ? "Write the current English result to the actual output above after preview"
-      : "Only the English result in the green editing area can be synced to the actual output";
+      : "Only the English result in the green editing area can be synced to the actual output");
   };
   const setStagedResult = (text, label, requireAnima = false) => {
     const value = String(text ?? "").trim();
@@ -571,11 +574,11 @@ function createPanel(node, textWidget) {
     chineseEditor.value = value;
     chineseMirror.classList.add("bpi-hidden");
     chineseEditor.classList.remove("bpi-hidden");
-    editChineseButton.textContent = "Back to link";
-    mirrorTitle.textContent = `Text processing result: ${label}`;
-    mirrorHint.textContent = containsChinese(value)
+    setText(editChineseButton, "Back to link");
+    setText(mirrorTitle, `Text processing result: ${label}`);
+    setText(mirrorHint, containsChinese(value)
       ? "Chinese results are for reading only; to generate images, continue with translation or optimization"
-      : "result not yet written to the model; after confirming, click“Sync to English output”";
+      : "result not yet written to the model; after confirming, click “Sync to English output”");
     updateStageControls();
     autoFitActiveGreenArea();
   };
@@ -591,7 +594,7 @@ function createPanel(node, textWidget) {
       if (label === "Anima official sort") {
         state.categoryView = true;
         render();
-        mirrorHint.textContent = "Category table view | click tags to link; category names are not written to the prompt";
+        setText(mirrorHint, "Category table view | click tags to link; category names are not written to the prompt");
       }
       setStatus("No content change", "ok");
       return false;
@@ -615,22 +618,22 @@ function createPanel(node, textWidget) {
     state.stagedText = null;
     chineseEditor.classList.add("bpi-hidden");
     chineseMirror.classList.remove("bpi-hidden");
-    editChineseButton.textContent = "Edit text";
-    mirrorTitle.textContent = "Chinese sync editor (per-tag composition)";
-    mirrorHint.textContent = state.categoryView
+    setText(editChineseButton, "Edit text");
+    setText(mirrorTitle, "Chinese sync editor (per-tag composition)");
+    setText(mirrorHint, state.categoryView
       ? "Category table view | click tags to link; category names are not written to the prompt"
-      : "Click to link | select then press Delete";
+      : "Click to link | select then press Delete");
     state.englishEditing = false;
     state.englishEditingExplicit = false;
     state.englishEditorDirty = false;
     englishEditor.value = after;
     englishEditor.classList.add("bpi-hidden");
     englishTokenView.classList.remove("bpi-hidden");
-    editEnglishButton.textContent = "Edit text";
-    englishHint.textContent = "Click tags to link; select then press Delete";
+    setText(editEnglishButton, "Edit text");
+    setText(englishHint, "Click tags to link; select then press Delete");
     updateStageControls();
     updateText(after);
-    setStatus(`applied${label}; press Ctrl+Z ; Ctrl+Z to undo`, "ok");
+    setStatus(`applied ${label}; press Ctrl+Z to undo`, "ok");
     return true;
   };
 
@@ -644,7 +647,7 @@ function createPanel(node, textWidget) {
     if (action === "confirm") {
       state.englishClearState = "confirm";
       updateEnglishClearButton();
-      setStatus("Click again“Confirm clear”to clear the English actual output", "busy");
+      setStatus("Click “Confirm clear” again to clear the English actual output", "busy");
       return;
     }
     if (action === "undo") {
@@ -676,12 +679,12 @@ function createPanel(node, textWidget) {
     englishEditor.value = "";
     englishEditor.classList.remove("bpi-hidden");
     englishTokenView.classList.add("bpi-hidden");
-    editEnglishButton.textContent = "Done";
+    setText(editEnglishButton, "Done");
     state.englishClearState = "cleared";
     state.clearedEnglishEntry = entry;
     updateEnglishClearButton();
     updateText("", 0, { preserveClearState: true });
-    setStatus("English actual output cleared; click“undo”can be restored immediately", "ok");
+    setStatus("English actual output cleared; click “undo” to restore immediately", "ok");
     requestAnimationFrame(() => englishEditor.focus({ preventScroll: true }));
   };
 
@@ -768,13 +771,13 @@ function createPanel(node, textWidget) {
       beforeStart: token.start,
       beforeEnd: token.end,
       afterCursor: result.cursor,
-      label: `Delete“${token.term}”`,
+      label: `Delete “${token.term}”`,
     });
     if (state.undoStack.length > 50) state.undoStack.shift();
     state.redoStack = [];
     state.pinned = null;
     updateText(result.text, result.cursor);
-    setStatus(`deleted“${token.term}”; press Ctrl+Z ; Ctrl+Z to undo`, "ok");
+    setStatus(`deleted “${token.term}”; press Ctrl+Z to undo`, "ok");
   };
 
   const applyTokenWeight = (token, weight) => {
@@ -785,8 +788,8 @@ function createPanel(node, textWidget) {
       return false;
     }
     const action = weight === null
-      ? `Clear“${token.term}”weight`
-      : `will“${token.term}”weight set to ${Number(weight)}`;
+      ? `Clear “${token.term}” weight`
+      : `will set “${token.term}” weight to ${Number(weight)}`;
     state.undoStack.push({
       before,
       after: result.text,
@@ -799,7 +802,7 @@ function createPanel(node, textWidget) {
     state.redoStack = [];
     state.pinned = null;
     updateText(result.text, result.cursor);
-    setStatus(`${action}; press Ctrl+Z ; Ctrl+Z to undo`, "ok");
+    setStatus(`${action}; press Ctrl+Z to undo`, "ok");
     return true;
   };
 
@@ -817,13 +820,13 @@ function createPanel(node, textWidget) {
       beforeStart: token.start,
       beforeEnd: token.end,
       afterCursor: result.cursor,
-      label: `Move“${token.term}”`,
+      label: `Move “${token.term}”`,
     });
     if (state.undoStack.length > 50) state.undoStack.shift();
     state.redoStack = [];
     state.pinned = null;
     updateText(result.text, result.cursor);
-    setStatus(`moved“${token.term}”; press Ctrl+Z ; Ctrl+Z to undo`, "ok");
+    setStatus(`moved “${token.term}”; press Ctrl+Z to undo`, "ok");
     return true;
   };
 
@@ -867,7 +870,7 @@ function createPanel(node, textWidget) {
       beforeStart: token.start,
       beforeEnd: token.end,
       afterCursor: result.cursor,
-      label: `Hide“${token.term}”`,
+      label: `Hide “${token.term}”`,
       hiddenBefore: hidden.slice(),
       hiddenAfter: hidden.concat([{
         raw: token.raw,
@@ -879,7 +882,7 @@ function createPanel(node, textWidget) {
     setHiddenTags(entry.hiddenAfter);
     state.pinned = null;
     updateText(result.text, result.cursor);
-    setStatus(`hidden“${token.term}” (excluded from actual output); can be restored anytime in the hidden section; press Ctrl+Z undo`, "ok");
+    setStatus(`hidden “${token.term}” (excluded from actual output); can be restored anytime in the hidden section; press Ctrl+Z to undo`, "ok");
     return true;
   };
 
@@ -896,14 +899,14 @@ function createPanel(node, textWidget) {
       beforeStart: 0,
       beforeEnd: before.length,
       afterCursor: result.cursor,
-      label: `restore“${item.raw}”`,
+      label: `restore “${item.raw}”`,
       hiddenBefore: hidden.slice(),
       hiddenAfter: hidden.filter((_, i) => i !== index),
     };
     pushHistoryWithHidden(entry);
     setHiddenTags(entry.hiddenAfter);
     updateText(result.text, result.cursor);
-    setStatus(`restored“${item.raw}” to original position; press Ctrl+Z ; Ctrl+Z to undo`, "ok");
+    setStatus(`restored “${item.raw}” to its original position; press Ctrl+Z to undo`, "ok");
     return true;
   };
 
@@ -934,7 +937,7 @@ function createPanel(node, textWidget) {
     setHiddenTags([]);
     state.pinned = null;
     updateText(text, text.length);
-    setStatus(`restored ${hidden.length}  hidden tags; press Ctrl+Z ; Ctrl+Z to undo`, "ok");
+    setStatus(`restored ${hidden.length} hidden tags; press Ctrl+Z to undo`, "ok");
     return true;
   };
 
@@ -1026,7 +1029,7 @@ function createPanel(node, textWidget) {
     event.stopPropagation();
     const upward = event.key === "ArrowUp";
     const moved = moveTokenTo(token, upward ? index - 1 : index + 2);
-    if (!moved) setStatus(upward ? `“${token.term}”is already at the front` : `“${token.term}”is already at the back`, "");
+    if (!moved) setStatus(upward ? `“${token.term}” is already at the front` : `“${token.term}” is already at the back`, "");
     return true;
   };
 
@@ -1063,7 +1066,7 @@ function createPanel(node, textWidget) {
     const apply = () => {
       const numeric = Number(input.value);
       if (!input.value.trim() || !Number.isFinite(numeric) || numeric < 0 || numeric > 3) {
-        setStatus("Weight must be 0 to 3  to 3", "error");
+        setStatus("Weight must be between 0 and 3", "error");
         input.focus();
         return;
       }
@@ -1267,7 +1270,7 @@ function createPanel(node, textWidget) {
     if (!persist) {
       state.localOverrides.set(token.key, { text: chinese, source: "session" });
       state.editing = null;
-      setStatus(`temporarily modified“${token.term}”; not saved to dictionary`, "ok");
+      setStatus(`temporarily modified “${token.term}”; not saved to dictionary`, "ok");
       render();
       return;
     }
@@ -1288,7 +1291,7 @@ function createPanel(node, textWidget) {
       deleteMachineTranslation(token.key);
       state.editing = null;
       await refreshDictionary();
-      setStatus(`saved“${token.term}”saved to personal dictionary`, "ok");
+      setStatus(`saved “${token.term}” to personal dictionary`, "ok");
     } catch (error) {
       setStatus(error.message, "error");
     }
@@ -1322,7 +1325,7 @@ function createPanel(node, textWidget) {
         source: "bpi-assistant",
         createdAt: Date.now(),
       });
-      setStatus(`translated“${token.term}”; can save after confirming`, "ok");
+      setStatus(`translated “${token.term}”; can save after confirming`, "ok");
       return true;
     } catch (error) {
       setStatus(error.message, "error");
@@ -1343,13 +1346,13 @@ function createPanel(node, textWidget) {
     state.chineseEditing = Boolean(editing);
     chineseMirror.classList.toggle("bpi-hidden", state.chineseEditing);
     chineseEditor.classList.toggle("bpi-hidden", !state.chineseEditing);
-    editChineseButton.textContent = state.chineseEditing ? "Back to link" : "Edit text";
-    mirrorTitle.textContent = state.chineseEditing ? "Text editing & processing (mixed CN/EN supported)" : "Chinese sync editor (per-tag composition)";
-    mirrorHint.textContent = state.chineseEditing
+    setText(editChineseButton, state.chineseEditing ? "Back to link" : "Edit text");
+    setText(mirrorTitle, state.chineseEditing ? "Text editing & processing (mixed CN/EN supported)" : "Chinese sync editor (per-tag composition)");
+    setText(mirrorHint, state.chineseEditing
       ? "Processing results stay here; click Sync to write to the English output above"
       : state.categoryView
         ? "Category table view | click tags to link; category names are not written to the prompt"
-        : "Click to link | select then press Delete";
+        : "Click to link | select then press Delete");
     if (state.chineseEditing) {
       if (!state.editorInitialized) {
         chineseEditor.value = chineseDraftFromTokens();
@@ -1386,7 +1389,7 @@ function createPanel(node, textWidget) {
       return;
     }
     if (action === "optimize" && containsChinese(source)) {
-      setStatus("“Optimize to Anima”only processes English; for Chinese or mixed content, use“Translate & optimize”", "error");
+      setStatus("“Optimize to Anima” only processes English; for Chinese or mixed content, use “Translate & optimize”", "error");
       return;
     }
     setAssistantBusy(true);
@@ -1461,7 +1464,7 @@ function createPanel(node, textWidget) {
       if (result.text === source) {
         state.categoryView = true;
         render();
-        mirrorHint.textContent = "Category table view | click tags to link; category names are not written to the prompt";
+        setText(mirrorHint, "Category table view | click tags to link; category names are not written to the prompt");
         setStatus(`already matches Anima order${result.uncertain.length ? ` | pending ${result.uncertain.length} items` : ""}`, "ok");
         return;
       }
@@ -1472,7 +1475,7 @@ function createPanel(node, textWidget) {
         groups.appendChild(row);
       }
       groups.prepend(element("div", "bpi-config-note", `relocated ${result.moved}  | pending categories ${result.uncertain.length}  tags. Sorting only moves tags; content is not rewritten.`));
-      openTextPreview("Anima Anima official order preview", result.text, groups, "Anima official sort");
+      openTextPreview("Anima official order preview", result.text, groups, "Anima official sort");
       setStatus("Sorting complete; please confirm in the preview window", "ok");
     } catch (error) {
       setStatus(error.message, "error");
@@ -1490,10 +1493,10 @@ function createPanel(node, textWidget) {
     }
     englishEditor.classList.toggle("bpi-hidden", !state.englishEditing);
     englishTokenView.classList.toggle("bpi-hidden", state.englishEditing);
-    editEnglishButton.textContent = state.englishEditing ? "Done" : "Edit text";
-    englishHint.textContent = state.englishEditing
+    setText(editEnglishButton, state.englishEditing ? "Done" : "Edit text");
+    setText(englishHint, state.englishEditing
       ? (hasText ? "Text mode while typing; parsed into tags when done" : "Content is empty; enter the English prompt directly")
-      : "Click tags to link; select then press Delete";
+      : "Click tags to link; select then press Delete");
     if (state.englishEditing) {
       if (document.activeElement !== englishEditor && !state.englishEditorDirty) englishEditor.value = text;
       return;
@@ -1510,14 +1513,14 @@ function createPanel(node, textWidget) {
       const label = token.raw.trim() || token.term;
       const chip = element("span", classes.join(" "), label);
       chip.dataset.tokenId = String(token.id);
-      chip.title = token.segmentKind === "natural"
-        ? `${token.term} ↔ ${token.chinese} | natural language supports only whole-segment editing; can drag to reorder the whole segment`
-        : `${token.term} ↔ ${token.chinese} | click to link; double-click to edit weight; select then press Delete ; drag to reorder or Alt+↑/↓ nudge`;
+      setTitle(chip, token.segmentKind === "natural"
+        ? `“${token.term}” ↔ “${token.chinese}” | natural language supports only whole-segment editing; can drag to reorder the whole segment`
+        : `“${token.term}” ↔ “${token.chinese}” | click to link; double-click to edit weight; select then press Delete; drag to reorder or Alt+↑/↓ to nudge`);
       attachChipDrag(chip, token);
       if (canHideTokens()) {
         const hideCorner = element("span", "bpi-chip-hide");
         hideCorner.appendChild(buildEyeIcon());
-        hideCorner.title = `Hide“${token.raw}”: excluded from actual output; can be restored in the hidden section`;
+        setTitle(hideCorner, `Hide “${token.raw}”: excluded from actual output; can be restored in the hidden section`);
         hideCorner.addEventListener("pointerdown", (event) => event.stopPropagation());
         hideCorner.addEventListener("click", (event) => {
           event.preventDefault();
@@ -1543,7 +1546,7 @@ function createPanel(node, textWidget) {
       });
       if (state.pinned === token.id && ["tags", "mixed"].includes(state.modeInfo.mode) && token.segmentKind !== "natural") {
         const remove = element("span", "bpi-mirror-delete", "×");
-        remove.title = `Delete ${token.term}`;
+        setTitle(remove, `Delete “${token.term}”`);
         remove.addEventListener("click", (event) => {
           event.stopPropagation();
           deleteTokenOccurrence(token);
@@ -1562,9 +1565,9 @@ function createPanel(node, textWidget) {
 
   const renderChineseMirror = (text) => {
     if (!state.chineseEditing) {
-      mirrorHint.textContent = state.categoryView
+      setText(mirrorHint, state.categoryView
         ? "Category table view | click tags to link; category names are not written to the prompt"
-        : "Click to link | select then press Delete";
+        : "Click to link | select then press Delete");
     }
     chineseMirror.replaceChildren();
     if (!state.tokens.length) {
@@ -1580,11 +1583,11 @@ function createPanel(node, textWidget) {
         : `${token.chinese}${token.weight === null ? "" : ` (weight ${token.weight}）`}`;
       const chip = element("span", classes.join(" "), label);
       chip.dataset.tokenId = String(token.id);
-      chip.title = token.segmentKind === "natural"
-        ? `${token.raw} ↔ ${token.chinese} | natural language supports only whole-segment editing or translation`
+      setTitle(chip, token.segmentKind === "natural"
+        ? `“${token.raw}” ↔ “${token.chinese}” | natural language supports only whole-segment editing or translation`
         : token.status === "unknown"
-          ? `Unknown English tag: ${token.term} | click to locate; double-click to edit weight`
-          : `${token.raw} ↔ ${token.chinese} | click to locate; double-click to edit weight; select then press Delete`;
+          ? `Unknown English tag: “${token.term}” | click to locate; double-click to edit weight`
+          : `“${token.raw}” ↔ “${token.chinese}” | click to locate; double-click to edit weight; select then press Delete`);
       chip.addEventListener("click", (event) => {
         event.stopPropagation();
         if (token.status === "unknown") state.tableFilter = "unknown";
@@ -1604,7 +1607,7 @@ function createPanel(node, textWidget) {
       });
       if (state.pinned === token.id && ["tags", "mixed"].includes(state.modeInfo.mode) && token.segmentKind !== "natural") {
         const remove = element("span", "bpi-mirror-delete", "×");
-        remove.title = `Delete ${token.term}`;
+        setTitle(remove, `Delete “${token.term}”`);
         remove.addEventListener("click", (event) => {
           event.stopPropagation();
           deleteTokenOccurrence(token);
@@ -1645,7 +1648,7 @@ function createPanel(node, textWidget) {
   // the table auto-scrolls near its edges while dragging.
   const buildRowDragHandle = (row, token) => {
     const handle = element("span", "bpi-drag-handle", "⠿");
-    handle.title = "Drag to reorder tags; or select then press Alt+↑/↓  nudge;Ctrl+Z ; Ctrl+Z to undo";
+    setTitle(handle, "Drag to reorder tags; or select then press Alt+↑/↓ to nudge; Ctrl+Z to undo");
     handle.addEventListener("click", (event) => event.stopPropagation());
     handle.addEventListener("pointerdown", (event) => {
       if (event.button !== 0) return;
@@ -1734,7 +1737,7 @@ function createPanel(node, textWidget) {
   const buildRowHideButton = (token) => {
     const hide = element("span", "bpi-hide-btn");
     hide.appendChild(buildEyeIcon());
-    hide.title = `Hide“${token.raw}”: removed from actual output but kept in this list; can be restored to original position at any time`;
+    setTitle(hide, `Hide “${token.raw}”: removed from actual output but kept in this list; can be restored to original position at any time`);
     hide.addEventListener("click", (event) => {
       event.stopPropagation();
       hideToken(token);
@@ -1754,11 +1757,11 @@ function createPanel(node, textWidget) {
     }
     container.classList.remove("bpi-hidden");
     const label = element("span", "bpi-hidden-label", `hidden (${hidden.length})`);
-    label.title = "These tags will not enter the actual output; click a tag to restore it to its original position";
+    setTitle(label, "These tags will not enter the actual output; click a tag to restore it to its original position");
     container.appendChild(label);
     for (const [index, item] of hidden.entries()) {
       const chip = element("span", "bpi-hidden-chip");
-      chip.title = `Click to restore“${item.raw}”to original position`;
+      setTitle(chip, `Click to restore “${item.raw}” to its original position`);
       chip.appendChild(element("span", "bpi-hidden-en", item.raw));
       if (item.chinese) chip.appendChild(element("span", "bpi-hidden-zh", item.chinese));
       chip.appendChild(element("span", "bpi-hidden-restore", "↩"));
@@ -1769,7 +1772,7 @@ function createPanel(node, textWidget) {
       container.appendChild(chip);
     }
     const restoreAll = button("Restore all", () => restoreAllHiddenTags(), "bpi-mini bpi-hidden-all");
-    restoreAll.title = `Restore all ${hidden.length}  hidden tags to their original positions`;
+    setTitle(restoreAll, `Restore all ${hidden.length} hidden tags to their original positions`);
     container.appendChild(restoreAll);
   };
 
@@ -1803,11 +1806,11 @@ function createPanel(node, textWidget) {
     sourceSelect.value = settings.importPolicy;
     sourceSelect.disabled = !settings.takeOver || waiting;
     sourceToggle.disabled = waiting;
-    sourceState.textContent = waiting
+    setText(sourceState, waiting
       ? "Paused, waiting for confirmation…"
       : settings.takeOver
         ? "Intercept upstream text; output after confirmation"
-        : "Direct passthrough: upstream output as-is, no import, no pause";
+        : "Direct passthrough: upstream output as-is, no import, no pause");
     sourceState.classList.toggle("bpi-source-waiting-text", waiting);
     sourceBar.classList.toggle("bpi-source-waiting", waiting);
     resumeButton.classList.toggle("bpi-hidden", !waiting);
@@ -1953,7 +1956,7 @@ function createPanel(node, textWidget) {
         }
         const chineseCell = element("div", "bpi-cell bpi-zh");
         const englishText = element("span", "", token.raw);
-        englishText.title = `Query: ${token.term}${token.weight === null ? "" : ` | weight: ${token.weight}`}`;
+        setTitle(englishText, `Query: “${token.term}”${token.weight === null ? "" : ` | weight: ${token.weight}`}`);
         englishText.addEventListener("dblclick", (event) => {
           event.stopPropagation();
           setEnglishEditing(true);
@@ -1968,7 +1971,7 @@ function createPanel(node, textWidget) {
         if (isEditing) {
           const editor = element("input", "bpi-inline-editor");
           editor.value = state.editing.value;
-          editor.placeholder = "Enter Chinese explanation";
+          setPlaceholder(editor, "Enter Chinese explanation");
           editor.addEventListener("input", () => { state.editing.value = editor.value; });
           editor.addEventListener("click", (event) => event.stopPropagation());
           editor.addEventListener("keydown", (event) => {
@@ -1994,7 +1997,7 @@ function createPanel(node, textWidget) {
           continue;
         }
         const chineseText = element("span", "", token.chinese);
-        chineseText.title = "Double-click to edit Chinese explanation";
+        setTitle(chineseText, "Double-click to edit Chinese explanation");
         chineseText.addEventListener("dblclick", (event) => {
           event.stopPropagation();
           if (token.syntax === "tag" && token.status !== "special") beginInlineEdit(token);
@@ -2011,14 +2014,14 @@ function createPanel(node, textWidget) {
         if (token.weight !== null) chineseCell.appendChild(element("span", "bpi-badge", `Weight ${token.weight}`));
         const origin = token.entry?.pack_name ?? sourceLabel(token.source, token.status);
         const sourceBadge = element("span", "bpi-badge bpi-source", origin);
-        sourceBadge.title = token.status === "machine"
+        setTitle(sourceBadge, token.status === "machine"
           ? "Generated by the assistant currently configured in the bilingual inspector; not yet saved to the personal dictionary"
-          : `Explanation source: ${origin}`;
+          : `Explanation source: “${origin}”`);
         chineseCell.appendChild(sourceBadge);
         const confidenceBadge = element("span", `bpi-badge bpi-confidence-${token.confidence}`, token.confidenceLabel);
-        confidenceBadge.title = token.status === "machine"
+        setTitle(confidenceBadge, token.status === "machine"
           ? "Machine translation not yet human-verified"
-          : token.status === "unknown" ? "Dictionary cannot determine" : "Estimated from dictionary source and verification status";
+          : token.status === "unknown" ? "Dictionary cannot determine" : "Estimated from dictionary source and verification status");
         chineseCell.appendChild(confidenceBadge);
 
         const actions = element("span", "bpi-inline-actions");
@@ -2053,8 +2056,8 @@ function createPanel(node, textWidget) {
           });
           actions.append(searchButton, addButton, translateButton);
         } else if (token.status === "unknown" && /[\u3400-\u9fff]/.test(token.term)) {
-          const hint = element("span", "bpi-badge", "use the“Edit text”processing");
-          hint.title = "Click“Edit text”, then use the inspector's own“Translate”or“Translate & optimize”";
+          const hint = element("span", "bpi-badge", "Use “Edit text” to process it");
+          setTitle(hint, "Click “Edit text”, then use the inspector's own “Translate” or “Translate & optimize”");
           actions.appendChild(hint);
         } else if (token.status === "machine") {
           const saveButton = element("button", "bpi-mini", "Confirm & save");
@@ -2082,7 +2085,7 @@ function createPanel(node, textWidget) {
         if (token.key) {
           // 别叫 favoriteButton——外层「收藏」按钮已经是这个名字，遮蔽后很难查
           const starButton = element("button", `bpi-mini bpi-star${isFavorite(token.term) ? " bpi-starred" : ""}`, isFavorite(token.term) ? "★" : "☆");
-          starButton.title = isFavorite(token.term) ? "Unfavorite" : "Favorite";
+          setTitle(starButton, isFavorite(token.term) ? "Unfavorite" : "Favorite");
           starButton.addEventListener("click", (event) => {
             event.stopPropagation();
             changeFavorite(token.term);
@@ -2090,10 +2093,10 @@ function createPanel(node, textWidget) {
             renderSearch();
           });
           const copyButton = element("button", "bpi-mini", "Copy");
-          copyButton.title = "Copy English + Chinese mapping";
+          setTitle(copyButton, "Copy English + Chinese mapping");
           copyButton.addEventListener("click", (event) => {
             event.stopPropagation();
-            copyText(`${token.raw}\t${token.chinese}`, `Copied“${token.term}” CN/EN mapping`);
+            copyText(`${token.raw}\t${token.chinese}`, `Copied “${token.term}” CN/EN mapping`);
           });
           actions.append(starButton, copyButton);
         }
@@ -2102,7 +2105,7 @@ function createPanel(node, textWidget) {
           const restoreButton = element("button", "bpi-mini", hasBuiltin ? "Restore built-in" : "Delete personal");
           restoreButton.addEventListener("click", async (event) => {
             event.stopPropagation();
-            if (!window.confirm(`${hasBuiltin ? "Delete personal override and restore built-in explanation" : "Delete personal tag"}“${token.term}”？`)) return;
+            if (!window.confirm(`${hasBuiltin ? "Delete personal override and restore built-in explanation" : "Delete personal tag"}“${token.term}”?`)) return;
             try {
               await deletePersonalTag(token.term);
               await refreshDictionary();
@@ -2123,9 +2126,9 @@ function createPanel(node, textWidget) {
     const unknown = state.tokens.filter((token) => token.status === "unknown").length;
     const machine = state.tokens.filter((token) => token.status === "machine").length;
     const warningCount = state.issues.filter((item) => item.severity !== "info").length;
-    counts.textContent = `items ${state.tokens.length} | recognized ${known} | unknown ${unknown}${machine ? ` | pending ${machine}` : ""}${warningCount ? ` | issues ${warningCount}` : ""}`;
+    setText(counts, `items ${state.tokens.length} | recognized ${known} | unknown ${unknown}${machine ? ` | pending ${machine}` : ""}${warningCount ? ` | issues ${warningCount}` : ""}`);
     const modeLabels = { tags: "Tag", mixed: "Tag + Natural language", natural: "Natural language", instruction: "Instruction" };
-    modeInfo.textContent = `Mode: ${modeLabels[state.modeInfo.mode]}（${state.modeInfo.reason}）`;
+    setText(modeInfo, `Mode: “${modeLabels[state.modeInfo.mode]}”${state.modeInfo.reason ? ` | “${state.modeInfo.reason}”` : ""}`);
     for (const [filter, control] of state.filterButtons) control.classList.toggle("bpi-filter-active", filter === state.tableFilter);
     renderHiddenBar(detailsHiddenBar);
     renderHiddenBar(englishHiddenBar);
@@ -2247,7 +2250,7 @@ function createPanel(node, textWidget) {
       meta.appendChild(element("span", "", `${tag.category} · ${tag.pack_name ?? sourceLabel(tag.source)}${format ? ` · ${format}` : ""}${usage}`));
       meta.appendChild(element("span", "bpi-search-reason", match.reason));
       const star = element("span", `bpi-result-star${isFavorite(tag.english) ? " bpi-starred" : ""}`, isFavorite(tag.english) ? "★" : "☆");
-      star.title = isFavorite(tag.english) ? "Unfavorite" : "Favorite tag";
+      setTitle(star, isFavorite(tag.english) ? "Unfavorite" : "Favorite tag");
       star.addEventListener("click", (event) => {
         event.stopPropagation();
         changeFavorite(tag.english);
@@ -2256,7 +2259,7 @@ function createPanel(node, textWidget) {
       });
       meta.appendChild(star);
       result.append(element("span", "bpi-result-en", tag.english), element("span", "bpi-result-zh", tag.chinese), meta);
-      result.title = `Click to insert the English tag${tag.aliases?.length ? ` | aliases: ${tag.aliases.join("、")}` : ""}`;
+      setTitle(result, `Click to insert the English tag${tag.aliases?.length ? ` | aliases: ${tag.aliases.join("、")}` : ""}`);
       result.addEventListener("mouseenter", () => { state.searchIndex = index; });
       result.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -2361,10 +2364,10 @@ function createPanel(node, textWidget) {
     event.stopPropagation();
     deleteTokenOccurrence(token);
   });
-  chineseMirror.title = "Click tags to link with the English view above and the detail table below";
-  englishTokenView.title = "Click English tags to link with the Chinese view and the detail table below";
-  englishEditor.title = "Stay in text editing while typing; switch to tag view on blur or after clicking Done";
-  chineseEditor.title = "Enter Chinese, English, or mixed text; drag the bottom-right corner to resize (auto-saved)";
+  setTitle(chineseMirror, "Click tags to link with the English view above and the detail table below");
+  setTitle(englishTokenView, "Click English tags to link with the Chinese view and the detail table below");
+  setTitle(englishEditor, "Stay in text editing while typing; switch to tag view on blur or after clicking Done");
+  setTitle(chineseEditor, "Enter Chinese, English, or mixed text; drag the bottom-right corner to resize (auto-saved)");
   englishTokenView.addEventListener("click", (event) => {
     if (event.target !== englishTokenView) return;
     state.pinned = null;
@@ -2380,13 +2383,13 @@ function createPanel(node, textWidget) {
     event.stopPropagation();
     action();
   });
-  editChineseButton.title = "Switch between the tag-linked view and the bilingual text editor";
-  expandChineseButton.title = "Edit Chinese or mixed content in a larger popup";
-  translateChineseButton.title = "Auto-detect language and translate faithfully; no optimization, no auto-sync";
-  translateOptimizeButton.title = "auto-translate then optimize to Anima -compliant English prompt";
-  optimizeChineseButton.title = "Only optimizes existing English; does not translate";
-  sortPromptButton.title = "press Anima stable sort by recommended categories, one row per non-empty category; natural language and BREAK/AND kept intact";
-  // assistantSettingsButton.title = "在侧边栏管理面板中配置纯词库、百度翻译、Ollama 或 OpenAI 兼容 API 与自定义规则";
+  setTitle(editChineseButton, "Switch between the tag-linked view and the bilingual text editor");
+  setTitle(expandChineseButton, "Edit Chinese or mixed content in a larger popup");
+  setTitle(translateChineseButton, "Auto-detect language and translate faithfully; no optimization, no auto-sync");
+  setTitle(translateOptimizeButton, "auto-translate then optimize to Anima -compliant English prompt");
+  setTitle(optimizeChineseButton, "Only optimizes existing English; does not translate");
+  setTitle(sortPromptButton, "press Anima stable sort by recommended categories, one row per non-empty category; natural language and BREAK/AND kept intact");
+  // setTitle(assistantSettingsButton, "在侧边栏管理面板中配置纯词库、百度翻译、Ollama 或 OpenAI 兼容 API 与自定义规则");
   bindMirrorAction(editChineseButton, () => setChineseEditing(!state.chineseEditing));
   bindMirrorAction(expandChineseButton, openExpandedChineseEditor);
   bindMirrorAction(translateChineseButton, () => runTextAssistant("translate"));
@@ -2396,9 +2399,9 @@ function createPanel(node, textWidget) {
   bindMirrorAction(sortPromptButton, sortByAnimaOrder);
   // bindMirrorAction(assistantSettingsButton, () => openManagerPanel("assistant"));
   // bindMirrorAction(tagManagerButton, () => openManagerPanel("tag-manager", node.id));
-  // tagManagerButton.title = "在侧边栏管理面板中打开本节点的标签翻译与词库搜索";
-  editEnglishButton.title = "Switch between the English text editor and the linked tag view";
-  clearEnglishButton.title = "Requires a second click to clear the actual English output; after clearing, click the same button or press Ctrl+Z to undo";
+  // setTitle(tagManagerButton, "在侧边栏管理面板中打开本节点的标签翻译与词库搜索");
+  setTitle(editEnglishButton, "Switch between the English text editor and the linked tag view");
+  setTitle(clearEnglishButton, "Requires a second click to clear the actual English output; after clearing, click the same button or press Ctrl+Z to undo");
   editEnglishButton.addEventListener("mousedown", (event) => {
     event.preventDefault();
     event.stopPropagation();
@@ -2457,10 +2460,10 @@ function createPanel(node, textWidget) {
       label: "Manual edit",
       requireAnima: state.stagedText?.requireAnima === true,
     };
-    mirrorTitle.textContent = "Text editing & processing (mixed CN/EN supported)";
-    mirrorHint.textContent = containsChinese(chineseEditor.value)
-      ? "Chinese or mixed content detected; use“Translate”or“Translate & optimize”"
-      : "English content can be synced directly, or optimized to Anima";
+    setText(mirrorTitle, "Text editing & processing (mixed CN/EN supported)");
+    setText(mirrorHint, containsChinese(chineseEditor.value)
+      ? "Chinese or mixed content detected; use “Translate” or “Translate & optimize”"
+      : "English content can be synced directly, or optimized to Anima");
     autoFitGreenArea(chineseEditor, 110);
     updateStageControls();
   });

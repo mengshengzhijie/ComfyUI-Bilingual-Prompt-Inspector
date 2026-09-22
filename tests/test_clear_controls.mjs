@@ -8,7 +8,7 @@ assert.match(shared, /const PREFERENCES_KEY = "bpi\.dictionary\.preferences\.v1"
 assert.doesNotMatch(source, /hideNativeEnglishWidget/);
 assert.doesNotMatch(source, /options\.hidden\s*=\s*true/);
 assert.match(source, /clearButtonLabel\(state\.englishClearState\)/);
-assert.match(source, /Click again.*Confirm clear.*to clear the English actual output/);
+assert.match(source, /Click.*Confirm clear.*again to clear the English actual output/);
 assert.match(source, /English clear undone/);
 assert.doesNotMatch(source, /clearChineseButton|clearChineseDraft|chineseClearState/);
 

@@ -33,8 +33,12 @@ import {
   saveAssistantConfig,
   savePreferences,
   searchLargeDictionary,
+  setLanguageMode,
   setLargeDictionaryEnabled,
   setPackEnabled,
+  setPlaceholder,
+  setText,
+  setTitle,
   testAssistantConnection,
 } from "./bpi_shared.js";
 
@@ -70,7 +74,7 @@ let refs = {};
 
 function setStatus(message, kind = "") {
   if (!refs.status) return;
-  refs.status.textContent = message;
+  setText(refs.status, message);
   refs.status.dataset.kind = kind;
 }
 
@@ -251,7 +255,7 @@ function renderRows() {
       renderRows();
     });
     const english = element("span", "bpm-row-en", tag.english);
-    english.title = tag.aliases?.length ? `Aliases: ${tag.aliases.join(", ")}` : tag.english;
+    setTitle(english, tag.aliases?.length ? `Aliases: ${tag.aliases.join(", ")}` : tag.english);
     top.append(checkbox, english);
     if (tag.category) top.appendChild(element("span", "bpi-badge", tag.category));
     item.appendChild(top);
@@ -289,7 +293,7 @@ function renderRows() {
       if (kind === "personal") {
         const hasBuiltin = manager.data.builtin.some((item2) => normalizeKey(item2.english) === normalizeKey(tag.english));
         actions.appendChild(button(hasBuiltin ? "Reset Built-in" : "Delete", async () => {
-          if (!window.confirm(`${hasBuiltin ? "Delete override & restore built-in" : "Delete Personal Tag"}“${tag.english}”？`)) return;
+          if (!window.confirm(`${hasBuiltin ? "Delete override & restore built-in" : "Delete Personal Tag"}“${tag.english}”?`)) return;
           try {
             await deletePersonalTag(tag.english);
             manager.selected.delete(id);
@@ -312,7 +316,7 @@ function renderRows() {
   const large = manager.data.large_dictionary;
   const largeSummary = large?.available ? ` | Large ${large.count} (${large.enabled ? "on-demand" : "disabled"})` : " | Large not installed";
   const enabledPacks = (manager.data.packs ?? []).filter((pack) => pack.enabled).length;
-  refs.summary.textContent = `Showing ${rows.length} | Selected ${manager.selected.size} | Enabled packs ${enabledPacks}/${manager.data.packs?.length ?? 0} | Built-in ${manager.data.builtin.length}${largeSummary} | Personal ${manager.data.user.length} | Pending ${machineRows().length}`;
+  setText(refs.summary, `Showing ${rows.length} | Selected ${manager.selected.size} | Enabled packs ${enabledPacks}/${manager.data.packs?.length ?? 0} | Built-in ${manager.data.builtin.length}${largeSummary} | Personal ${manager.data.user.length} | Pending ${machineRows().length}`);
 }
 
 function renderPacks() {
@@ -331,7 +335,7 @@ function renderPacks() {
     toggle.type = "checkbox";
     toggle.checked = Boolean(large.enabled);
     toggle.disabled = !large.available;
-    toggle.title = large.available ? "Enable or disable large dictionary on-demand lookup" : "Large dictionary database not installed";
+    setTitle(toggle, large.available ? "Enable or disable large dictionary on-demand lookup" : "Large dictionary database not installed");
     toggle.addEventListener("change", async () => {
       toggle.disabled = true;
       try {
@@ -350,7 +354,7 @@ function renderPacks() {
     body.append(
       element("div", "bpi-pack-name", large.name),
       element("div", "bpi-pack-meta", large.available
-        ? `${large.count} items | v${large.version} | ${large.source} | read-only, on-demand`
+        ? `${large.count} items | v“${large.version}” | “${large.source}” | read-only, on-demand`
         : "Database not installed | small dictionaries unaffected"),
     );
     const controls = element("div", "bpi-pack-controls", large.available ? "Read-only" : "Unavailable");
@@ -362,14 +366,14 @@ function renderPacks() {
     const toggle = element("input", "bpi-switch");
     toggle.type = "checkbox";
     toggle.checked = Boolean(pack.enabled);
-    toggle.title = pack.enabled ? "Click to disable this pack" : "Click to enable this pack";
+    setTitle(toggle, pack.enabled ? "Click to disable this pack" : "Click to enable this pack");
     toggle.addEventListener("change", async () => {
       toggle.disabled = true;
       try {
         await setPackEnabled(pack.id, toggle.checked);
         await refresh();
         manager.selected.clear();
-        setStatus(`${toggle.checked ? "Enabled" : "Disabled"}“${pack.name}”`, "ok");
+        setStatus(`${toggle.checked ? "Enabled" : "Disabled"} “${pack.name}”`, "ok");
       } catch (error) {
         setStatus(error.message, "error");
         toggle.checked = !toggle.checked;
@@ -379,7 +383,7 @@ function renderPacks() {
     const body = element("div");
     body.append(
       element("div", "bpi-pack-name", pack.name),
-      element("div", "bpi-pack-meta", `${pack.count} items | v${pack.version} | ${pack.source}${pack.license ? ` | License ${pack.license}` : ""}`),
+      element("div", "bpi-pack-meta", `${pack.count} items | v“${pack.version}” | “${pack.source}”${pack.license ? ` | License “${pack.license}”` : ""}`),
     );
     const controls = element("div", "bpi-pack-controls");
     controls.appendChild(button("Export", async () => {
@@ -428,13 +432,13 @@ function openCommunityPackPreview(payload, filename) {
     form.appendChild(element("label", "", label));
     const input = element("input");
     input.value = value;
-    input.placeholder = placeholder;
+    setPlaceholder(input, placeholder);
     fields[key] = input;
     form.appendChild(input);
   }
   modal.appendChild(form);
   const preview = element("div", "bpi-community-preview");
-  preview.textContent = `Tags ${payload.tags.length} | Sample: ${payload.tags.slice(0, 8).map((tag) => `${tag?.english ?? "?"} → ${tag?.chinese ?? "?"}`).join("; ")}`;
+  setText(preview, `Tags ${payload.tags.length} | Sample: ${payload.tags.slice(0, 8).map((tag) => `${tag?.english ?? "?"} → ${tag?.chinese ?? "?"}`).join("; ")}`);
   modal.appendChild(preview);
   const overwriteLine = element("label", "bpm-toolbar");
   const overwrite = element("input");
@@ -447,7 +451,7 @@ function openCommunityPackPreview(payload, filename) {
   const actions = element("div", "bpi-modal-actions");
   const close = () => shade.remove();
   const confirm = button("Import Community Pack", async () => {
-    if (!fields.name.value.trim()) { error.textContent = "Pack name cannot be empty"; return; }
+    if (!fields.name.value.trim()) { setText(error, "Pack name cannot be empty"); return; }
     confirm.disabled = true;
     try {
       const result = await importCommunityPack({
@@ -466,7 +470,7 @@ function openCommunityPackPreview(payload, filename) {
       await refresh();
       setStatus(`${result.replaced ? "Updated" : "Imported"} community pack "${result.name}", ${result.count} items`, "ok");
     } catch (importError) {
-      error.textContent = importError.message;
+      setText(error, importError.message);
       confirm.disabled = false;
     }
   }, "bpi-primary");
@@ -541,13 +545,13 @@ function openImportPreview(payload) {
       await refresh();
       setStatus(`Import complete: added ${imported.added}, overwrote ${imported.replaced}, skipped ${imported.skipped} | auto-backed up`, "ok");
     } catch (importError) {
-      error.textContent = importError.message;
+      setText(error, importError.message);
       confirm.disabled = false;
     }
   }, "bpi-primary");
   if (report.invalid) {
     confirm.disabled = true;
-    error.textContent = "Import file contains invalid entries missing English or Chinese; please fix the file first.";
+    setText(error, "Import file contains invalid entries missing English or Chinese; please fix the file first.");
   }
   actions.append(button("Cancel", close), confirm);
   modal.appendChild(actions);
@@ -565,7 +569,7 @@ async function buildAssistantSection(section) {
   try {
     config = await getAssistantConfig();
   } catch (error) {
-    loading.textContent = error.message;
+    setText(loading, error.message);
     loading.classList.add("bpi-danger-text");
     return;
   }
@@ -631,7 +635,7 @@ async function buildAssistantSection(section) {
   const lmStudioPreset = button("Use LM Studio Local Preset", () => {
     aiProvider.value = "openai_compatible";
     baseUrl.value = "http://127.0.0.1:1234/v1";
-    error.textContent = "LM Studio default URL filled; select a loaded model ID, then Save & Test";
+    setText(error, "LM Studio default URL filled; select a loaded model ID, then Save & Test");
     error.dataset.kind = "ok";
   });
   presetLine.append(lmStudioPreset, element("span", "bpi-config-note", "Connects to localhost:1234 by default; no external API required."));
@@ -669,6 +673,24 @@ async function buildAssistantSection(section) {
   appearanceSelect.value = config.appearance || "auto";
   form.append(appearanceLabel, appearanceSelect);
 
+  // 界面语言：auto 跟随 ComfyUI 的 Comfy.Locale，zh / en 强制指定
+  const languageLabel = element("label", "", "Language");
+  const languageSelect = element("select");
+  for (const [value, label] of [
+    ["auto", "Follow ComfyUI language setting"],
+    ["zh", "Chinese"],
+    ["en", "English"],
+  ]) {
+    const option = element("option", "", label);
+    option.value = value;
+    languageSelect.appendChild(option);
+  }
+  languageSelect.value = config.language || "auto";
+  form.append(languageLabel, languageSelect);
+  const languageNote = element("div", "bpi-config-note", "Choose the language for this plugin's own panels. \"Follow ComfyUI\" reads the ComfyUI language setting; \"Chinese\" and \"English\" force one. Applied to open panels right away; reload the page if anything still shows the old language.");
+  languageNote.style.gridColumn = "1 / -1";
+  form.append(languageNote);
+
   // 规则
   const addRule = (labelText, value) => {
     const labelElement = element("label", "", labelText);
@@ -689,20 +711,21 @@ async function buildAssistantSection(section) {
     translationRule.textarea.value = config.default_translation_rule;
     translateOptimizeRule.textarea.value = config.default_translate_optimize_rule;
     optimizationRule.textarea.value = config.default_optimization_rule;
-    error.textContent = "Defaults restored in editor; click Save to apply";
+    setText(error, "Defaults restored in editor; click Save to apply");
     error.dataset.kind = "ok";
   });
   const testButton = button("Save & Test Connection", async () => {
     testButton.disabled = true;
-    error.textContent = "Testing...";
+    setText(error, "Testing...");
     error.dataset.kind = "busy";
     try {
       config = await saveAssistantConfig(payload());
+      setLanguageMode(config.language);
       const result = await testAssistantConnection();
-      error.textContent = `Connection OK: ${result.message}`;
+      setText(error, `Connection OK: ${result.message}`);
       error.dataset.kind = "ok";
     } catch (testError) {
-      error.textContent = testError.message;
+      setText(error, testError.message);
       error.dataset.kind = "error";
     } finally {
       testButton.disabled = false;
@@ -713,10 +736,11 @@ async function buildAssistantSection(section) {
     try {
       config = await saveAssistantConfig(payload());
       applyBpiAppearance(config.appearance);
-      error.textContent = "Assistant settings saved";
+      setLanguageMode(config.language);
+      setText(error, "Assistant settings saved");
       error.dataset.kind = "ok";
     } catch (saveError) {
-      error.textContent = saveError.message;
+      setText(error, saveError.message);
       error.dataset.kind = "error";
     } finally {
       saveButton.disabled = false;
@@ -737,6 +761,7 @@ async function buildAssistantSection(section) {
     ai_temperature: temperature.value,
     ai_timeout_seconds: timeout.value,
     appearance: appearanceSelect.value,
+    language: languageSelect.value,
     translation_rule: translationRule.textarea.value,
     translate_optimize_rule: translateOptimizeRule.textarea.value,
     optimization_rule: optimizationRule.textarea.value,
@@ -838,7 +863,7 @@ function favoriteCard(item) {
   const card = element("div", "bpi-fav-card");
   const thumb = element("div", "bpi-fav-thumb");
   if (item.image) thumb.style.backgroundImage = `url("${savedPromptImageUrl(item.id)}")`;
-  else thumb.textContent = "No image";
+  else setText(thumb, "No image");
   const info = element("div", "bpi-fav-info");
   const name = element("span", "bpi-fav-name", item.name ?? "Untitled");
   name.appendChild(element("span", "bpi-fav-date", favoriteDate(item.created_at)));
@@ -957,7 +982,7 @@ function buildFavoritesSection() {
   const toolbar = element("div", "bpm-toolbar");
   refs.favoritesSearch = element("input", "bpi-search");
   refs.favoritesSearch.type = "search";
-  refs.favoritesSearch.placeholder = "Search by name or content";
+  setPlaceholder(refs.favoritesSearch, "Search by name or content");
   refs.favoritesSearch.addEventListener("input", renderFavorites);
   const importInput = element("input");
   importInput.type = "file";
@@ -1119,7 +1144,7 @@ function buildTagsSection() {
   const toolbar = element("div", "bpm-toolbar");
   refs.search = element("input", "bpi-search");
   refs.search.type = "search";
-  refs.search.placeholder = "Search English, Chinese, aliases or category";
+  setPlaceholder(refs.search, "Search English, Chinese, aliases or category");
   refs.source = element("select", "bpi-mode");
   refs.category = element("select", "bpi-mode");
   toolbar.append(refs.search, refs.source, refs.category);
@@ -1242,7 +1267,13 @@ function destroyTab() {
 
 injectBpiStyles();
 installBpiWheelGuard();
-getAssistantConfig().then((cfg) => applyBpiAppearance(cfg.appearance)).catch(() => {});
+// 启动时把后端保存的外观 / 语言设置拉下来；语言还会顺带整树重刷一次已渲染的面板
+getAssistantConfig()
+  .then((cfg) => {
+    applyBpiAppearance(cfg.appearance);
+    setLanguageMode(cfg.language);
+  })
+  .catch(() => {});
 
 app.registerExtension({
   name: "ComfyUI.BilingualPromptInspector.ManagerPanel",

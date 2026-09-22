@@ -1,5 +1,18 @@
 import { app } from "../../scripts/app.js";
 import { normalizePreferences } from "./dictionary_tools.js";
+import {
+  LANGUAGE_CHANGED_EVENT,
+  applyLanguageToDom,
+  getLanguageMode,
+  loadStoredLanguage,
+  markText,
+  registerLocaleReader,
+  setLanguageMode,
+  setPlaceholder,
+  setText,
+  setTitle,
+  t,
+} from "./i18n.js";
 
 const API_ROOT = "/bpi";
 const PREFERENCES_KEY = "bpi.dictionary.preferences.v1";
@@ -10,6 +23,11 @@ const UPSTREAM_ARRIVED_EVENT = "bpi/upstream-arrived";
 
 let sessionTokenPromise = null;
 let dictionaryPromise = null;
+
+// 插件语言：ComfyUI 自带的 locale 只翻译 nodeDefs，面板文案得自己来。
+// 「跟随 ComfyUI」读 ComfyUI 的 Comfy.Locale 设置，中文系语言走中文，其余走英文。
+registerLocaleReader(() => app?.ui?.settings?.getSettingValue?.("Comfy.Locale"));
+loadStoredLanguage();
 
 async function getSessionToken(force = false) {
   if (!sessionTokenPromise || force) {
@@ -88,12 +106,16 @@ function loadDictionary(force = false) {
 function element(tagName, className, text) {
   const item = document.createElement(tagName);
   if (className) item.className = className;
-  if (text !== undefined) item.textContent = text;
+  if (text !== undefined) {
+    item.textContent = t(text);
+    markText(item, text);
+  }
   return item;
 }
 
 function button(label, action, className = "") {
-  const item = element("button", `bpi-button ${className}`.trim(), label);
+  const item = element("button", `bpi-button ${className}`.trim(), t(label));
+  markText(item, label); // 记住英文原文，切换语言时可整树重刷
   item.type = "button";
   item.addEventListener("click", (event) => {
     event.preventDefault();
@@ -110,7 +132,7 @@ function field(form, labelText, name, value = "", placeholder = "") {
   input.id = label.htmlFor;
   input.name = name;
   input.value = value ?? "";
-  input.placeholder = placeholder;
+  setPlaceholder(input, placeholder);
   form.append(label, input);
   return input;
 }
@@ -369,7 +391,7 @@ function openSavePromptDialog({ name = "", text = "", note = "" } = {}, onSaved)
     imageFile = file;
     previewImage.src = URL.createObjectURL(file);
     previewImage.style.display = "block";
-    fileInfo.textContent = `${file.name || "image"} · ${Math.max(1, Math.round(file.size / 1024))} KB`;
+    setText(fileInfo, `${file.name || "image"} · ${Math.max(1, Math.round(file.size / 1024))} KB`);
   };
   drop.addEventListener("click", () => picker.click());
   picker.addEventListener("change", () => {
@@ -401,7 +423,7 @@ function openSavePromptDialog({ name = "", text = "", note = "" } = {}, onSaved)
   const actions = element("div", "bpi-modal-actions");
   const saveButton = button("Save", async () => {
     if (!text.trim()) {
-      error.textContent = "Prompt is empty, cannot save";
+      setText(error, "Prompt is empty, cannot save");
       return;
     }
     saveButton.disabled = true;
@@ -588,10 +610,12 @@ function applyBpiAppearance(appearance) {
 
 export {
   API_ROOT,
+  LANGUAGE_CHANGED_EVENT,
   MANAGER_TAB_ID,
   MANAGER_OPEN_EVENT,
   UPSTREAM_ARRIVED_EVENT,
   applyBpiAppearance,
+  applyLanguageToDom,
   button,
   createSavedPrompt,
   deleteCommunityPack,
@@ -604,6 +628,7 @@ export {
   exportSavedPrompts,
   field,
   getAssistantConfig,
+  getLanguageMode,
   importCommunityPack,
   importSavedPrompts,
   importTags,
@@ -623,7 +648,12 @@ export {
   savePreferences,
   saveTag,
   searchLargeDictionary,
+  setLanguageMode,
   setLargeDictionaryEnabled,
   setPackEnabled,
+  setPlaceholder,
+  setText,
+  setTitle,
+  t,
   testAssistantConnection,
 };

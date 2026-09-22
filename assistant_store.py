@@ -61,6 +61,8 @@ DEFAULT_CONFIG = {
     "baidu_appid": "",
     "baidu_secret_key": "",
     "appearance": "auto",  # auto | dark | light
+    # 插件面板自己的界面语言：auto 跟随 ComfyUI 的 Comfy.Locale，zh / en 强制指定
+    "language": "auto",  # auto | zh | en
     "translation_rule": DEFAULT_TRANSLATION_RULE,
     "translate_optimize_rule": DEFAULT_TRANSLATE_OPTIMIZE_RULE,
     "optimization_rule": DEFAULT_OPTIMIZATION_RULE,
@@ -402,6 +404,9 @@ class AssistantStore:
         appearance = str(payload.get("appearance", current.get("appearance", "auto"))).strip().lower()
         if appearance not in {"auto", "dark", "light"}:
             raise ValueError("外观模式仅支持 auto / dark / light")
+        language = str(payload.get("language", current.get("language", "auto"))).strip().lower()
+        if language not in {"auto", "zh", "en"}:
+            raise ValueError("界面语言仅支持 auto / zh / en")
         result = {
             "schema_version": 3,
             "translate_service": translate_service,
@@ -414,6 +419,7 @@ class AssistantStore:
             "baidu_appid": baidu_appid,
             "baidu_secret_key": baidu_secret,
             "appearance": appearance,
+            "language": language,
             "translation_rule": self._clean_rule(payload.get("translation_rule"), current["translation_rule"]),
             "translate_optimize_rule": self._clean_rule(payload.get("translate_optimize_rule"), current["translate_optimize_rule"]),
             "optimization_rule": self._clean_rule(payload.get("optimization_rule"), current["optimization_rule"]),

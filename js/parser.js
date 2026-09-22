@@ -640,12 +640,12 @@ function bracketIssues(text) {
     else if (closing.has(char)) {
       const open = stack.pop();
       if (!open || pairs[open] !== char) {
-        issues.push(issue("error", "bracket-mismatch", `Bracket mismatch: extra or misplaced ${char}`));
+        issues.push(issue("error", "bracket-mismatch", `Bracket mismatch: extra or misplaced “${char}”`));
         break;
       }
     }
   }
-  if (stack.length) issues.push(issue("error", "bracket-unclosed", `Unclosed bracket: missing ${pairs[stack.at(-1)]}`));
+  if (stack.length) issues.push(issue("error", "bracket-unclosed", `Unclosed bracket: missing “${pairs[stack.at(-1)]}”`));
   return issues;
 }
 
@@ -672,13 +672,13 @@ export function analyzePromptSyntax(text, tokens, modeInfo = detectInputMode(tex
     if (!keys.has(token.key)) keys.set(token.key, []);
     keys.get(token.key).push(token);
     if (/^\([\s\S]+:[^)]*\)$/.test(token.raw.trim()) && token.weight === null) {
-      issues.push(issue("error", "invalid-weight", `Invalid weight format: ${token.raw.trim()}`, [token.key]));
+      issues.push(issue("error", "invalid-weight", `Invalid weight format: “${token.raw.trim()}”`, [token.key]));
     } else if (token.weight !== null && (token.weight < 0 || token.weight > 3)) {
       issues.push(issue("warning", "unusual-weight", `Weight ${token.weight} outside common range 0–3`, [token.key]));
     }
   }
   for (const [key, matches] of keys) {
-    if (matches.length > 1) issues.push(issue("warning", "duplicate", `Duplicate tag: ${matches[0].term}`, [key]));
+    if (matches.length > 1) issues.push(issue("warning", "duplicate", `Duplicate tag: “${matches[0].term}”`, [key]));
   }
 
   const present = new Set(keys.keys());
@@ -686,7 +686,7 @@ export function analyzePromptSyntax(text, tokens, modeInfo = detectInputMode(tex
     const left = group.left.filter((key) => present.has(normalizeKey(key)));
     const right = group.right.filter((key) => present.has(normalizeKey(key)));
     if (left.length && right.length) {
-      issues.push(issue("warning", "conflict", `Possible conflict: ${group.label} (${left[0]} ↔ ${right[0]})`, [...left, ...right].map(normalizeKey)));
+      issues.push(issue("warning", "conflict", `Possible conflict: “${group.label}” (“${left[0]}” ↔ “${right[0]}”)`, [...left, ...right].map(normalizeKey)));
     }
   }
 
