@@ -52,9 +52,9 @@ assert.equal(clearButtonAction("idle", true), "confirm");
 assert.equal(clearButtonAction("confirm", true), "clear");
 assert.equal(clearButtonAction("cleared", false), "undo");
 assert.equal(clearButtonAction("idle", false), "empty");
-assert.equal(clearButtonLabel("idle"), "清空");
-assert.equal(clearButtonLabel("confirm"), "确认清空");
-assert.equal(clearButtonLabel("cleared"), "撤销");
+assert.equal(clearButtonLabel("idle"), "Clear");
+assert.equal(clearButtonLabel("confirm"), "Confirm clear");
+assert.equal(clearButtonLabel("cleared"), "Undo");
 preferences = toggleFavorite(preferences, "from_front");
 preferences = recordRecent(preferences, "looking at viewer");
 assert.deepEqual(preferences.favorites, ["from front"]);
@@ -92,7 +92,7 @@ const hosiery = [
 ];
 const fuzzy = rankDictionaryMatches(hosiery, "丝袜", {}, 40, conceptConfig);
 assert.deepEqual(fuzzy.map((item) => item.tag.english), ["pantyhose", "black pantyhose", "thighhighs"]);
-assert.match(fuzzy[0].reason, /概念关联/);
+assert.match(fuzzy[0].reason, /Concept link/);
 assert.equal(rankDictionaryTags(hosiery, "黑丝袜", {}, 40, conceptConfig)[0].english, "black pantyhose");
 
 console.log("dictionary tools tests: OK");

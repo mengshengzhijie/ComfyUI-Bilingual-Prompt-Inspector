@@ -57,7 +57,7 @@ export function createClearTextHistoryEntry(currentText, label, categoryView = f
     beforeStart: 0,
     beforeEnd: before.length,
     afterCursor: 0,
-    label: String(label || "清空文本"),
+    label: String(label || "Clear text"),
     beforeCategoryView: Boolean(categoryView),
     afterCategoryView: false,
   };
@@ -71,9 +71,9 @@ export function clearButtonAction(state, hasContent) {
 }
 
 export function clearButtonLabel(state) {
-  if (state === "confirm") return "确认清空";
-  if (state === "cleared") return "撤销";
-  return "清空";
+  if (state === "confirm") return "Confirm clear";
+  if (state === "cleared") return "Undo";
+  return "Clear";
 }
 
 export function recordRecent(preferences, english) {
@@ -135,7 +135,7 @@ export function searchQueryVariants(query, searchConcepts = {}) {
     const queries = Array.isArray(concept?.queries) ? concept.queries.map((item) => String(item ?? "").trim()).filter(Boolean) : [];
     const matchedQuery = queries.find((item) => normalizeKey(item) === normalizedQuery || rawQuery.toLowerCase().includes(item.toLowerCase()));
     if (!matchedQuery) continue;
-    const label = String(concept.label ?? concept.id ?? "相关概念");
+    const label = String(concept.label ?? concept.id ?? "Related concept");
     const residual = rawQuery.toLowerCase().replace(matchedQuery.toLowerCase(), "").trim();
     const modifiers = [];
     for (const [modifier, values] of Object.entries(searchConcepts?.modifiers ?? {})) {
@@ -159,11 +159,11 @@ export function searchQueryVariants(query, searchConcepts = {}) {
 }
 
 function matchReason(score, variant) {
-  if (variant.relation === "concept-modified") return `限定概念：${variant.label}`;
-  if (variant.relation === "concept") return `概念关联：${variant.label}`;
-  if (score <= 1) return "完全匹配";
-  if (score <= 5) return "前缀或别名匹配";
-  return "包含匹配";
+  if (variant.relation === "concept-modified") return `Concept modified: ${variant.label}`;
+  if (variant.relation === "concept") return `Concept link: ${variant.label}`;
+  if (score <= 1) return "Exact match";
+  if (score <= 5) return "Prefix or alias match";
+  return "Substring match";
 }
 
 export function rankDictionaryMatches(tags, query, preferences = {}, limit = 40, searchConcepts = {}) {

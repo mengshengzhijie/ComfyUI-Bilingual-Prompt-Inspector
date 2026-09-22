@@ -1,0 +1,21 @@
+{
+  "nodeDefs": {
+    "BilingualPromptInspector": {
+      "display_name": "提示词翻译与管理（英文输出）",
+      "description": "中英对照的提示词整理与管理节点，支持标签联动视图、拖拽排序、临时隐藏、多种翻译服务与侧边栏词库管理。可接管上游传来的提示词，确认后再输出。实际输出始终与英文提示词一致。",
+      "inputs": {
+        "text": {
+          "name": "英文提示词"
+        },
+        "prompt": {
+          "name": "上游提示词"
+        }
+      },
+      "outputs": {
+        "english_prompt": {
+          "name": "英文提示词"
+        }
+      }
+    }
+  }
+}

@@ -60,6 +60,7 @@ DEFAULT_CONFIG = {
     # 百度翻译独立配置，不随翻译服务切换而清空
     "baidu_appid": "",
     "baidu_secret_key": "",
+    "appearance": "auto",  # auto | dark | light
     "translation_rule": DEFAULT_TRANSLATION_RULE,
     "translate_optimize_rule": DEFAULT_TRANSLATE_OPTIMIZE_RULE,
     "optimization_rule": DEFAULT_OPTIMIZATION_RULE,
@@ -398,6 +399,9 @@ class AssistantStore:
                 baidu_secret = incoming_secret
         ai_credential_binding = self._credential_binding(ai_provider, ai_base_url) if ai_api_key else ""
         baidu_credential_binding = self._credential_binding("baidu", "") if baidu_secret else ""
+        appearance = str(payload.get("appearance", current.get("appearance", "auto"))).strip().lower()
+        if appearance not in {"auto", "dark", "light"}:
+            raise ValueError("外观模式仅支持 auto / dark / light")
         result = {
             "schema_version": 3,
             "translate_service": translate_service,
@@ -409,6 +413,7 @@ class AssistantStore:
             "ai_timeout_seconds": ai_timeout_seconds,
             "baidu_appid": baidu_appid,
             "baidu_secret_key": baidu_secret,
+            "appearance": appearance,
             "translation_rule": self._clean_rule(payload.get("translation_rule"), current["translation_rule"]),
             "translate_optimize_rule": self._clean_rule(payload.get("translate_optimize_rule"), current["translate_optimize_rule"]),
             "optimization_rule": self._clean_rule(payload.get("optimization_rule"), current["optimization_rule"]),

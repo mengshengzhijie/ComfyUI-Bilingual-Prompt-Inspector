@@ -113,7 +113,7 @@ assert.equal(
   "tags",
 );
 assert.equal(detectInputMode("A woman sits on a bed, asking for a hug.").mode, "natural");
-assert.equal(detectInputMode("whatever", "natural").reason, "手动指定");
+assert.equal(detectInputMode("whatever", "natural").reason, "Manual override");
 const instructed = "翻译要求：转换为 Anima 标签\n正文：一位成年女性站在雨中";
 assert.equal(detectInputMode(instructed).mode, "instruction");
 assert.equal(extractInstructionBody(instructed).body, "一位成年女性站在雨中");

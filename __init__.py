@@ -7,7 +7,7 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "BilingualPromptInspector": "提示词翻译与管理（英文输出）",
+    "BilingualPromptInspector": "Prompt Translator & Manager",
 }
 
 WEB_DIRECTORY = "./js"

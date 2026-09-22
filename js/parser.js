@@ -421,12 +421,12 @@ function trailingTagStart(segments, afterIndex) {
 export function detectInputMode(text, requestedMode = "auto") {
   const value = String(text ?? "").trim();
   if (["tags", "natural"].includes(requestedMode)) {
-    return { mode: requestedMode, reason: "手动指定", confidence: "high" };
+    return { mode: requestedMode, reason: "Manual override", confidence: "high" };
   }
-  if (!value) return { mode: "tags", reason: "空输入", confidence: "high" };
+  if (!value) return { mode: "tags", reason: "Empty input", confidence: "high" };
   const instruction = extractInstructionBody(value);
   if (instruction.matched) {
-    return { mode: "instruction", reason: instruction.format === "structured" ? "检测到翻译要求/正文" : "检测到翻译指令前缀", confidence: "high" };
+    return { mode: "instruction", reason: instruction.format === "structured" ? "Structured translation request/body detected" : "Translation directive prefix detected", confidence: "high" };
   }
 
   const words = value.match(/[A-Za-z]+(?:[-'][A-Za-z]+)*/g) ?? [];
@@ -446,7 +446,7 @@ export function detectInputMode(text, requestedMode = "auto") {
   const naturalStart = strongNaturalStart >= 0 ? strongNaturalStart : punctuationNaturalStart;
   const naturalEnd = naturalStart >= 0 ? trailingTagStart(commaSegments, naturalStart + 1) : commaSegments.length;
   if (commaSegments.length >= 3 && naturalStart === 0 && naturalEnd < commaSegments.length) {
-    return { mode: "mixed", reason: "检测到自然语言后跟标签列表", confidence: "high", naturalStart, naturalEnd };
+    return { mode: "mixed", reason: "Natural language followed by tag list", confidence: "high", naturalStart, naturalEnd };
   }
   if (commaSegments.length >= 3 && naturalStart > 0) {
     const shortBefore = commaSegments.slice(0, naturalStart).filter((item) =>
@@ -455,7 +455,7 @@ export function detectInputMode(text, requestedMode = "auto") {
     if (shortBefore >= Math.max(2, Math.ceil(naturalStart * 0.6))) {
       return {
         mode: "mixed",
-        reason: naturalEnd < commaSegments.length ? "检测到标签之间的自然语言描述" : "检测到短标签后跟自然语言描述",
+        reason: naturalEnd < commaSegments.length ? "Natural language between tags" : "Short tags followed by natural language",
         confidence: "high",
         naturalStart,
         naturalEnd,
@@ -463,12 +463,12 @@ export function detectInputMode(text, requestedMode = "auto") {
     }
   }
   if (!hasSentenceEnd && commaSegments.length >= 3 && !longCommaSegment) {
-    return { mode: "tags", reason: "检测到多个短标签", confidence: "high" };
+    return { mode: "tags", reason: "Multiple short tags", confidence: "high" };
   }
   if (hasSentenceEnd || words.length >= 12 && (commaSegments.length <= 2 || hasNaturalGrammar || longCommaSegment)) {
-    return { mode: "natural", reason: hasSentenceEnd ? "检测到完整句子" : "检测到自然语言语法", confidence: "medium" };
+    return { mode: "natural", reason: hasSentenceEnd ? "Complete sentence" : "Natural language grammar", confidence: "medium" };
   }
-  return { mode: "tags", reason: "检测到标签式输入", confidence: commaSegments.length > 1 ? "high" : "medium" };
+  return { mode: "tags", reason: "Tag-style input", confidence: commaSegments.length > 1 ? "high" : "medium" };
 }
 
 export function splitMixedText(text, naturalStart, naturalEnd) {
@@ -518,7 +518,7 @@ function countMatches(value, expression) {
 export function validateTranslationResult(source, translated, options = {}) {
   const original = String(source ?? "").trim();
   const result = String(translated ?? "").trim();
-  if (!result) return { ok: false, reason: "译文为空" };
+  if (!result) return { ok: false, reason: "Translation is empty" };
 
   const naturalLanguage = Boolean(options.naturalLanguage);
 
@@ -526,22 +526,22 @@ export function validateTranslationResult(source, translated, options = {}) {
     ? Math.max(240, original.length * 8 + 100)
     : Math.max(80, original.length * 6 + 20);
   if (result.length > maximumLength) {
-    return { ok: false, reason: `译文异常过长（${result.length} 字符）` };
+    return { ok: false, reason: `Translation too long (${result.length} chars)` };
   }
   if (!naturalLanguage && !/[\r\n]/.test(original) && /[\r\n]/.test(result)) {
-    return { ok: false, reason: "单个标签被扩展成了多行内容" };
+    return { ok: false, reason: "Single tag expanded to multiple lines" };
   }
 
   const sourceCommas = countMatches(original, /[,，]/g);
   const resultCommas = countMatches(result, /[,，]/g);
   if (!naturalLanguage && resultCommas > sourceCommas) {
-    return { ok: false, reason: `单个标签被扩展成了 ${resultCommas + 1} 个标签` };
+    return { ok: false, reason: `Single tag expanded to ${resultCommas + 1} tags` };
   }
 
   const sourceWeights = countMatches(original, /:\s*-?(?:\d+(?:\.\d*)?|\.\d+)/g);
   const resultWeights = countMatches(result, /:\s*-?(?:\d+(?:\.\d*)?|\.\d+)/g);
   if (!naturalLanguage && resultWeights > sourceWeights) {
-    return { ok: false, reason: "译文增加了原文没有的权重" };
+    return { ok: false, reason: "Translation added weights not in source" };
   }
 
   const pairs = [["(", ")"], ["[", "]"], ["{", "}"]];
@@ -549,23 +549,23 @@ export function validateTranslationResult(source, translated, options = {}) {
     const sourceCount = original.split(open).length + original.split(close).length;
     const resultCount = result.split(open).length + result.split(close).length;
     if (!naturalLanguage && resultCount > sourceCount) {
-      return { ok: false, reason: "译文增加了原文没有的括号结构" };
+      return { ok: false, reason: "Translation added brackets not in source" };
     }
   }
 
   if (/^(翻译结果|译文|以下是|translation)\s*[:：]/i.test(result)) {
-    return { ok: false, reason: "译文包含解释性前缀" };
+    return { ok: false, reason: "Translation has explanatory prefix" };
   }
   return { ok: true, text: result };
 }
 
 function confidenceFor(status, entry) {
-  if (status === "machine") return { confidence: "low", confidenceLabel: "低可信·待确认" };
-  if (status === "unverified") return { confidence: "medium", confidenceLabel: "中可信·待确认" };
-  if (status === "unknown") return { confidence: "none", confidenceLabel: "未判断" };
-  if (status === "special") return { confidence: "high", confidenceLabel: "高可信" };
-  if (entry?.source === "user" || entry?.verified !== false) return { confidence: "high", confidenceLabel: "高可信" };
-  return { confidence: "medium", confidenceLabel: "中可信" };
+  if (status === "machine") return { confidence: "low", confidenceLabel: "Low · pending" };
+  if (status === "unverified") return { confidence: "medium", confidenceLabel: "Medium · pending" };
+  if (status === "unknown") return { confidence: "none", confidenceLabel: "Not judged" };
+  if (status === "special") return { confidence: "high", confidenceLabel: "High" };
+  if (entry?.source === "user" || entry?.verified !== false) return { confidence: "high", confidenceLabel: "High" };
+  return { confidence: "medium", confidenceLabel: "Medium" };
 }
 
 export function parsePrompt(text, dictionaryIndex, machineTranslations = new Map(), options = {}) {
@@ -640,31 +640,31 @@ function bracketIssues(text) {
     else if (closing.has(char)) {
       const open = stack.pop();
       if (!open || pairs[open] !== char) {
-        issues.push(issue("error", "bracket-mismatch", `括号不匹配：发现多余或错位的 ${char}`));
+        issues.push(issue("error", "bracket-mismatch", `Bracket mismatch: extra or misplaced ${char}`));
         break;
       }
     }
   }
-  if (stack.length) issues.push(issue("error", "bracket-unclosed", `括号未闭合：缺少 ${pairs[stack.at(-1)]}`));
+  if (stack.length) issues.push(issue("error", "bracket-unclosed", `Unclosed bracket: missing ${pairs[stack.at(-1)]}`));
   return issues;
 }
 
 const CONFLICT_GROUPS = [
-  { left: ["1girl", "solo"], right: ["2girls", "multiple girls", "multiple people", "group"], label: "单人与多人物标签" },
-  { left: ["from front", "front view"], right: ["from behind", "back view"], label: "正面与背面视角" },
-  { left: ["facing left"], right: ["facing right"], label: "朝向左与朝向右" },
-  { left: ["standing"], right: ["sitting", "lying", "kneeling"], label: "站立与其他主体姿势" },
-  { left: ["eyes closed", "closed eyes"], right: ["looking at viewer"], label: "闭眼与看向镜头" },
-  { left: ["full body"], right: ["extreme close-up", "close-up"], label: "全身与特写景别" },
+  { left: ["1girl", "solo"], right: ["2girls", "multiple girls", "multiple people", "group"], label: "Solo vs multiple subjects" },
+  { left: ["from front", "front view"], right: ["from behind", "back view"], label: "Front vs back view" },
+  { left: ["facing left"], right: ["facing right"], label: "Facing left vs right" },
+  { left: ["standing"], right: ["sitting", "lying", "kneeling"], label: "Standing vs other poses" },
+  { left: ["eyes closed", "closed eyes"], right: ["looking at viewer"], label: "Eyes closed vs looking at viewer" },
+  { left: ["full body"], right: ["extreme close-up", "close-up"], label: "Full body vs close-up" },
 ];
 
 export function analyzePromptSyntax(text, tokens, modeInfo = detectInputMode(text)) {
   const value = String(text ?? "");
   const issues = bracketIssues(value);
-  if (/[，、]/.test(value)) issues.push(issue("warning", "fullwidth-separator", "检测到中文分隔符；Anima 标签流通常使用英文半角逗号"));
+  if (/[，、]/.test(value)) issues.push(issue("warning", "fullwidth-separator", "Full-width separator detected; Anima tag flow usually uses ASCII commas"));
   const hasConsecutiveEmptyTag = /(?:^|,)[ \t]*,/m.test(value);
   const hasTrailingEmptyTag = /,[ \t]*$/m.test(value) && !["mixed", "natural", "instruction"].includes(modeInfo.mode);
-  if (hasConsecutiveEmptyTag || hasTrailingEmptyTag) issues.push(issue("warning", "empty-tag", "检测到连续逗号或空标签"));
+  if (hasConsecutiveEmptyTag || hasTrailingEmptyTag) issues.push(issue("warning", "empty-tag", "Consecutive commas or empty tags detected"));
 
   const keys = new Map();
   for (const token of tokens ?? []) {
@@ -672,13 +672,13 @@ export function analyzePromptSyntax(text, tokens, modeInfo = detectInputMode(tex
     if (!keys.has(token.key)) keys.set(token.key, []);
     keys.get(token.key).push(token);
     if (/^\([\s\S]+:[^)]*\)$/.test(token.raw.trim()) && token.weight === null) {
-      issues.push(issue("error", "invalid-weight", `权重格式可能无效：${token.raw.trim()}`, [token.key]));
+      issues.push(issue("error", "invalid-weight", `Invalid weight format: ${token.raw.trim()}`, [token.key]));
     } else if (token.weight !== null && (token.weight < 0 || token.weight > 3)) {
-      issues.push(issue("warning", "unusual-weight", `权重 ${token.weight} 超出常用检查范围 0–3`, [token.key]));
+      issues.push(issue("warning", "unusual-weight", `Weight ${token.weight} outside common range 0–3`, [token.key]));
     }
   }
   for (const [key, matches] of keys) {
-    if (matches.length > 1) issues.push(issue("warning", "duplicate", `重复标签：${matches[0].term}`, [key]));
+    if (matches.length > 1) issues.push(issue("warning", "duplicate", `Duplicate tag: ${matches[0].term}`, [key]));
   }
 
   const present = new Set(keys.keys());
@@ -686,16 +686,16 @@ export function analyzePromptSyntax(text, tokens, modeInfo = detectInputMode(tex
     const left = group.left.filter((key) => present.has(normalizeKey(key)));
     const right = group.right.filter((key) => present.has(normalizeKey(key)));
     if (left.length && right.length) {
-      issues.push(issue("warning", "conflict", `可能冲突：${group.label}（${left[0]} ↔ ${right[0]}）`, [...left, ...right].map(normalizeKey)));
+      issues.push(issue("warning", "conflict", `Possible conflict: ${group.label} (${left[0]} ↔ ${right[0]})`, [...left, ...right].map(normalizeKey)));
     }
   }
 
   if (modeInfo.mode === "natural") {
-    issues.push(issue("info", "natural-mode", "当前按自然语言分句检查，不会按每个逗号拆成独立标签"));
+    issues.push(issue("info", "natural-mode", "Checking by natural language sentences; commas do not split into separate tags"));
   } else if (modeInfo.mode === "mixed") {
-    issues.push(issue("info", "mixed-mode", "已识别标签与自然语言混合格式：短标签逐项检查，末尾描述保持为完整片段"));
+    issues.push(issue("info", "mixed-mode", "Mixed tags + natural language detected: short tags checked individually, trailing description kept as one segment"));
   } else if (modeInfo.mode === "instruction") {
-    issues.push(issue("info", "instruction-mode", "已识别附带翻译指令，检查器只分析正文部分"));
+    issues.push(issue("info", "instruction-mode", "Translation instruction detected; checker analyzes body only"));
   }
   return issues;
 }

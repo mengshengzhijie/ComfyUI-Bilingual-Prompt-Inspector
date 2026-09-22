@@ -5,7 +5,7 @@ class BilingualPromptInspector:
     """
     @title: Prompt Translator & Manager
     @nickname: Prompt Translator
-    @description: 中英对照的提示词整理与管理节点，支持标签联动视图、拖拽排序、临时隐藏、多种翻译服务与侧边栏词库管理。可接管上游传来的提示词，确认后再输出。实际输出始终与英文提示词一致。
+    @description: Bilingual prompt inspector and manager node. Features tag-linked views, drag-to-reorder, temporary hide, multiple translation services, and a sidebar dictionary panel. Can intercept upstream prompts for review before passing them downstream. Output always matches the English prompt text.
     """
 
     @classmethod
@@ -28,10 +28,10 @@ class BilingualPromptInspector:
         }
 
     RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("英文提示词",)
+    RETURN_NAMES = ("english_prompt",)
     FUNCTION = "pass_through"
-    CATEGORY = "文本/提示词工具"
-    DESCRIPTION = "中英对照整理与管理提示词：标签联动视图、拖拽排序、临时隐藏、可接管上游提示词并暂停确认；输出始终与英文提示词一致。"
+    CATEGORY = "text/prompt"
+    DESCRIPTION = "Bilingual prompt inspector and manager: tag-linked views, drag-to-reorder, temporary hide, upstream intercept with pause-to-confirm. Output always matches the English prompt text."
 
     async def pass_through(self, text, prompt=None, unique_id=None):
         # 没有上游时保持原来的直通行为：协程立即返回，执行器不会挂起。

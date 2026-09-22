@@ -21,6 +21,7 @@ import {
   importSavedPrompts,
   importTags,
   bulkUpdateTags,
+  applyBpiAppearance,
   injectBpiStyles,
   listSavedPrompts,
   loadDictionary,
@@ -38,11 +39,11 @@ import {
 } from "./bpi_shared.js";
 
 const SECTIONS = [
-  ["tag-manager", "标签管理"],
-  ["tags", "词库"],
-  ["packs", "词库包"],
-  ["assistant", "助手设置"],
-  ["favorites", "收藏"],
+  ["tag-manager", "Tag Manager"],
+  ["tags", "Dictionary"],
+  ["packs", "Packs"],
+  ["assistant", "Assistant Settings"],
+  ["favorites", "Favorites"],
 ];
 
 const manager = {
@@ -91,7 +92,7 @@ function machineRows() {
       english: item.english ?? key,
       chinese: item.text,
       aliases: [],
-      category: "待确认",
+      category: "Unconfirmed",
       models: ["general", "anima"],
       source: "bpi-assistant",
       verified: false,
@@ -126,12 +127,12 @@ function rebuildSourceOptions() {
   const current = refs.source.value;
   refs.source.replaceChildren();
   const options = [
-    ["all", "全部词库"],
-    ["builtin", "已启用内置包"],
-    ["personal", "个人词库"],
-    ...(manager.data.large_dictionary?.available ? [["large", "Danbooru 大型词库"]] : []),
-    ["machine", "待确认机器译"],
-    ["favorites", "收藏"],
+    ["all", "All Packs"],
+    ["builtin", "Built-in pack enabled"],
+    ["personal", "Personal"],
+    ...(manager.data.large_dictionary?.available ? [["large", "Danbooru Large Dict"]] : []),
+    ["machine", "Pending Machine"],
+    ["favorites", "Favorites"],
     ...(manager.data.packs ?? []).map((pack) => [`pack:${pack.id}`, `${pack.enabled ? "✓" : "○"} ${pack.name}`]),
   ];
   for (const [value, label] of options) {
@@ -145,7 +146,7 @@ function rebuildSourceOptions() {
 function rebuildCategoryOptions() {
   const current = refs.category.value;
   refs.category.replaceChildren();
-  const all = element("option", "", "全部分类");
+  const all = element("option", "", "All Categories");
   all.value = "all";
   refs.category.appendChild(all);
   const categories = [...new Set(managerRows().map((row) => row.tag.category).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-CN"));
@@ -165,7 +166,7 @@ function deleteMachineTranslation(key) {
 
 async function confirmMachineRows(rows) {
   if (!rows.length) {
-    setStatus("请先勾选待确认机器译", "error");
+    setStatus("Please check unconfirmed machine translations first", "error");
     return;
   }
   try {
@@ -175,19 +176,19 @@ async function confirmMachineRows(rows) {
       manager.selected.delete(`machine:${row.key}`);
     }
     await refresh();
-    setStatus(`已确认 ${imported.added + imported.replaced} 项，并自动备份个人词库`, "ok");
+    setStatus(`Confirmed ${imported.added + imported.replaced} entries; personal dictionary backed up`, "ok");
   } catch (error) {
     setStatus(error.message, "error");
   }
 }
 
 async function retranslateMachineRow(row) {
-  setStatus(`正在翻译：${row.tag.english}`, "busy");
+  setStatus(`Translating: ${row.english}`, "busy");
   try {
     const translated = await runInspectorAssistant("translate", row.tag.english);
     const validation = validateTranslationResult(row.tag.english, translated, {});
     if (!validation.ok) {
-      setStatus(`已拒绝异常译文：${validation.reason}`, "error");
+      setStatus(`Rejected invalid translation: ${validation.reason}`, "error");
       return;
     }
     panelSyncHub.machineTranslations.set(row.key, {
@@ -197,7 +198,7 @@ async function retranslateMachineRow(row) {
       createdAt: Date.now(),
     });
     panelSyncHub.notify("machine", manager.syncSource);
-    setStatus(`已重新翻译“${row.tag.english}”`, "ok");
+    setStatus(`Re-translated "${row.tag.english}"`, "ok");
   } catch (error) {
     setStatus(error.message, "error");
   }
@@ -234,7 +235,7 @@ function renderRows() {
   });
   const header = element("div", "bpm-row");
   const headerTop = element("div", "bpm-row-top");
-  headerTop.append(selectAll, element("span", "bpm-row-en", `全选（当前 ${rows.length} 项）`));
+  headerTop.append(selectAll, element("span", "bpm-row-en", `Select all (${rows.length} items)`));
   header.appendChild(headerTop);
   refs.rows.appendChild(header);
   for (const row of rows) {
@@ -250,50 +251,50 @@ function renderRows() {
       renderRows();
     });
     const english = element("span", "bpm-row-en", tag.english);
-    english.title = tag.aliases?.length ? `别名：${tag.aliases.join("、")}` : tag.english;
+    english.title = tag.aliases?.length ? `Aliases: ${tag.aliases.join(", ")}` : tag.english;
     top.append(checkbox, english);
     if (tag.category) top.appendChild(element("span", "bpi-badge", tag.category));
     item.appendChild(top);
     item.appendChild(element("div", "bpm-row-zh", tag.chinese));
     const meta = element("div", "bpm-row-meta");
-    const sourceName = kind === "machine" ? "机器译" : kind === "personal" ? "个人词库" : kind === "large" ? "Danbooru 大型词库" : (tag.pack_name ?? "内置词库");
+    const sourceName = kind === "machine" ? "Machine" : kind === "personal" ? "Personal" : kind === "large" ? "Danbooru Large Dict" : (tag.pack_name ?? "Built-in");
     meta.appendChild(element("span", "", sourceName));
-    const star = button(isFavorite(tag.english) ? "★ 取消收藏" : "☆ 收藏", () => {
+    const star = button(isFavorite(tag.english) ? "★ Unfavorite" : "☆ Favorite", () => {
       changeFavorite(tag.english);
       renderRows();
     }, `bpi-mini${isFavorite(tag.english) ? " bpi-star bpi-starred" : ""}`);
     meta.appendChild(star);
     item.appendChild(meta);
     const actions = element("div", "bpm-actions");
-    actions.appendChild(button("复制", async () => {
+    actions.appendChild(button("Copy", async () => {
       try {
         await navigator.clipboard.writeText(tag.english);
-        setStatus(`已复制 ${tag.english}`, "ok");
+        setStatus(`Copied ${tag.english}`, "ok");
       } catch {
-        setStatus("浏览器未允许写入剪贴板", "error");
+        setStatus("Browser denied clipboard write", "error");
       }
     }, "bpi-mini"));
     if (kind === "machine") {
       actions.append(
-        button("确认", () => confirmMachineRows([row]), "bpi-mini bpi-primary"),
-        button("重译", () => retranslateMachineRow(row), "bpi-mini"),
-        button("删除待确认", () => {
+        button("Confirm", () => confirmMachineRows([row]), "bpi-mini bpi-primary"),
+        button("Re-translate", () => retranslateMachineRow(row), "bpi-mini"),
+        button("Delete pending", () => {
           deleteMachineTranslation(key);
           manager.selected.delete(id);
           renderRows();
         }, "bpi-mini"),
       );
     } else {
-      actions.appendChild(button(kind === "large" ? "保存个人" : "编辑", () => openTagDialog(tag, refresh), "bpi-mini"));
+      actions.appendChild(button(kind === "large" ? "Save Personal" : "Edit", () => openTagDialog(tag, refresh), "bpi-mini"));
       if (kind === "personal") {
         const hasBuiltin = manager.data.builtin.some((item2) => normalizeKey(item2.english) === normalizeKey(tag.english));
-        actions.appendChild(button(hasBuiltin ? "恢复内置" : "删除", async () => {
-          if (!window.confirm(`${hasBuiltin ? "删除个人覆盖并恢复内置解释" : "删除个人标签"}“${tag.english}”？`)) return;
+        actions.appendChild(button(hasBuiltin ? "Reset Built-in" : "Delete", async () => {
+          if (!window.confirm(`${hasBuiltin ? "Delete override & restore built-in" : "Delete Personal Tag"}“${tag.english}”？`)) return;
           try {
             await deletePersonalTag(tag.english);
             manager.selected.delete(id);
             await refresh();
-            setStatus(`已处理“${tag.english}”`, "ok");
+            setStatus(`Processed "${tag.english}"`, "ok");
           } catch (error) { setStatus(error.message, "error"); }
         }, "bpi-mini bpi-danger"));
       }
@@ -301,27 +302,27 @@ function renderRows() {
     item.appendChild(actions);
     refs.rows.appendChild(item);
   }
-  if (manager.largeLoading) refs.rows.appendChild(element("div", "bpm-loading", "正在按需查询 Danbooru 大型词库…"));
+  if (manager.largeLoading) refs.rows.appendChild(element("div", "bpm-loading", "Querying Danbooru large dictionary..."));
   if (!rows.length && !manager.largeLoading) {
     const emptyText = source === "large" && !query
-      ? "大型词库不会整库加载，请在上方输入英文或中文关键词。"
-      : "当前筛选条件下没有词条。";
+      ? "Large dictionary loads on demand; enter English or Chinese keywords above."
+      : "No entries match the current filter.";
     refs.rows.appendChild(element("div", "bpm-loading", emptyText));
   }
   const large = manager.data.large_dictionary;
-  const largeSummary = large?.available ? `｜大型库 ${large.count}（${large.enabled ? "按需启用" : "已停用"}）` : "｜大型库未安装";
+  const largeSummary = large?.available ? ` | Large ${large.count} (${large.enabled ? "on-demand" : "disabled"})` : " | Large not installed";
   const enabledPacks = (manager.data.packs ?? []).filter((pack) => pack.enabled).length;
-  refs.summary.textContent = `显示 ${rows.length} 项｜已选 ${manager.selected.size} 项｜已启用包 ${enabledPacks}/${manager.data.packs?.length ?? 0}｜内置有效 ${manager.data.builtin.length}${largeSummary}｜个人 ${manager.data.user.length}｜待确认 ${machineRows().length}`;
+  refs.summary.textContent = `Showing ${rows.length} | Selected ${manager.selected.size} | Enabled packs ${enabledPacks}/${manager.data.packs?.length ?? 0} | Built-in ${manager.data.builtin.length}${largeSummary} | Personal ${manager.data.user.length} | Pending ${machineRows().length}`;
 }
 
 function renderPacks() {
   if (!refs.packList) return;
   refs.packList.replaceChildren();
   const personalCard = element("div", "bpi-pack-card bpi-pack-personal");
-  const personalMarker = element("span", "bpi-badge bpi-confidence-high", "最高");
+  const personalMarker = element("span", "bpi-badge bpi-confidence-high", "Highest");
   const personalBody = element("div");
-  personalBody.append(element("div", "bpi-pack-name", "个人词库"), element("div", "bpi-pack-meta", `${manager.data.user.length} 项｜本机用户｜始终启用并覆盖所有同名词条`));
-  personalCard.append(personalMarker, personalBody, element("div", "bpi-pack-controls", "不可停用"));
+  personalBody.append(element("div", "bpi-pack-name", "Personal"), element("div", "bpi-pack-meta", `${manager.data.user.length} items | Local user | Always enabled, overrides same-name entries`));
+  personalCard.append(personalMarker, personalBody, element("div", "bpi-pack-controls", "Cannot disable"));
   refs.packList.appendChild(personalCard);
   const large = manager.data.large_dictionary;
   if (large) {
@@ -330,7 +331,7 @@ function renderPacks() {
     toggle.type = "checkbox";
     toggle.checked = Boolean(large.enabled);
     toggle.disabled = !large.available;
-    toggle.title = large.available ? "启用或停用大型词库按需查询" : "尚未安装大型词库数据库";
+    toggle.title = large.available ? "Enable or disable large dictionary on-demand lookup" : "Large dictionary database not installed";
     toggle.addEventListener("change", async () => {
       toggle.disabled = true;
       try {
@@ -338,7 +339,7 @@ function renderPacks() {
         await refresh();
         manager.largeMatches = [];
         manager.largeQuery = "";
-        setStatus(`${toggle.checked ? "已启用" : "已停用"} Danbooru 大型词库`, "ok");
+        setStatus(`${toggle.checked ? "Enabled" : "Disabled"} Danbooru Large Dict`, "ok");
       } catch (error) {
         setStatus(error.message, "error");
         toggle.checked = !toggle.checked;
@@ -349,10 +350,10 @@ function renderPacks() {
     body.append(
       element("div", "bpi-pack-name", large.name),
       element("div", "bpi-pack-meta", large.available
-        ? `${large.count} 项｜版本 ${large.version}｜${large.source}｜只读、按需查询`
-        : "尚未安装数据库｜不会影响现有小型词库"),
+        ? `${large.count} items | v${large.version} | ${large.source} | read-only, on-demand`
+        : "Database not installed | small dictionaries unaffected"),
     );
-    const controls = element("div", "bpi-pack-controls", large.available ? "只读" : "不可用");
+    const controls = element("div", "bpi-pack-controls", large.available ? "Read-only" : "Unavailable");
     card.append(toggle, body, controls);
     refs.packList.appendChild(card);
   }
@@ -361,14 +362,14 @@ function renderPacks() {
     const toggle = element("input", "bpi-switch");
     toggle.type = "checkbox";
     toggle.checked = Boolean(pack.enabled);
-    toggle.title = pack.enabled ? "点击停用此词库包" : "点击启用此词库包";
+    toggle.title = pack.enabled ? "Click to disable this pack" : "Click to enable this pack";
     toggle.addEventListener("change", async () => {
       toggle.disabled = true;
       try {
         await setPackEnabled(pack.id, toggle.checked);
         await refresh();
         manager.selected.clear();
-        setStatus(`${toggle.checked ? "已启用" : "已停用"}“${pack.name}”`, "ok");
+        setStatus(`${toggle.checked ? "Enabled" : "Disabled"}“${pack.name}”`, "ok");
       } catch (error) {
         setStatus(error.message, "error");
         toggle.checked = !toggle.checked;
@@ -378,24 +379,24 @@ function renderPacks() {
     const body = element("div");
     body.append(
       element("div", "bpi-pack-name", pack.name),
-      element("div", "bpi-pack-meta", `${pack.count} 项｜版本 ${pack.version}｜${pack.source}${pack.license ? `｜许可 ${pack.license}` : ""}`),
+      element("div", "bpi-pack-meta", `${pack.count} items | v${pack.version} | ${pack.source}${pack.license ? ` | License ${pack.license}` : ""}`),
     );
     const controls = element("div", "bpi-pack-controls");
-    controls.appendChild(button("导出", async () => {
+    controls.appendChild(button("Export", async () => {
       try {
         const payload = await exportDictionaryPack(pack.id);
         downloadJson(payload, `bpi-pack-${pack.id}-${new Date().toISOString().slice(0, 10)}.json`);
-        setStatus(`已导出“${pack.name}”`, "ok");
+        setStatus(`Exported "${pack.name}"`, "ok");
       } catch (error) { setStatus(error.message, "error"); }
     }, "bpi-mini"));
     if (!pack.readonly) {
-      controls.appendChild(button("删除", async () => {
-        if (!window.confirm(`删除社区词库包“${pack.name}”？文件会先备份，可从 data/backups 恢复。`)) return;
+      controls.appendChild(button("Delete", async () => {
+        if (!window.confirm(`Delete community pack "${pack.name}"? File is backed up first; recoverable from data/backups.`)) return;
         try {
           await deleteCommunityPack(pack.id);
           await refresh();
           manager.selected.clear();
-          setStatus(`已删除并备份“${pack.name}”`, "ok");
+          setStatus(`Deleted and backed up "${pack.name}"`, "ok");
         } catch (error) { setStatus(error.message, "error"); }
       }, "bpi-mini bpi-danger"));
     }
@@ -406,23 +407,23 @@ function renderPacks() {
 
 function openCommunityPackPreview(payload, filename) {
   if (!payload || !Array.isArray(payload.tags)) {
-    setStatus("社区词库文件必须包含 tags 数组", "error");
+    setStatus("Community dictionary file must contain a tags array", "error");
     return;
   }
   const shade = element("div", "bpi-modal-shade");
   const modal = element("div", "bpi-modal");
-  modal.appendChild(element("h3", "", "导入为独立社区词库包"));
+  modal.appendChild(element("h3", "", "Import as community pack"));
   const form = element("div", "bpi-community-form");
   const metadata = payload.pack && typeof payload.pack === "object" ? payload.pack : {};
   const fallbackName = String(filename ?? "community-pack.json").replace(/\.json$/i, "");
   const fields = {};
   for (const [key, label, value, placeholder] of [
-    ["name", "词库包名称", metadata.name ?? fallbackName, "例如：社区姿势扩展"],
-    ["id", "包ID（可选）", metadata.id ?? "", "英文、数字、横线"],
-    ["version", "版本", metadata.version ?? "1.0.0", "例如：1.0.0"],
-    ["source", "来源", metadata.source ?? "社区导入", "社区或作者名称"],
-    ["license", "许可（可选）", metadata.license ?? "", "例如：CC BY 4.0"],
-    ["homepage", "主页（可选）", metadata.homepage ?? "", "仅记录来源，不自动访问"],
+    ["name", "Pack Name", metadata.name ?? fallbackName, "e.g.: community pose extension"],
+    ["id", "Pack ID (optional)", metadata.id ?? "", "English, numbers, hyphens"],
+    ["version", "Version", metadata.version ?? "1.0.0", "e.g.: 1.0.0"],
+    ["source", "Source", metadata.source ?? "Community Import", "Community or author name"],
+    ["license", "License (optional)", metadata.license ?? "", "e.g.: CC BY 4.0"],
+    ["homepage", "Homepage (optional)", metadata.homepage ?? "", "Records source only; no automatic access"],
   ]) {
     form.appendChild(element("label", "", label));
     const input = element("input");
@@ -433,20 +434,20 @@ function openCommunityPackPreview(payload, filename) {
   }
   modal.appendChild(form);
   const preview = element("div", "bpi-community-preview");
-  preview.textContent = `词条 ${payload.tags.length} 项｜示例：${payload.tags.slice(0, 8).map((tag) => `${tag?.english ?? "?"} → ${tag?.chinese ?? "?"}`).join("；")}`;
+  preview.textContent = `Tags ${payload.tags.length} | Sample: ${payload.tags.slice(0, 8).map((tag) => `${tag?.english ?? "?"} → ${tag?.chinese ?? "?"}`).join("; ")}`;
   modal.appendChild(preview);
   const overwriteLine = element("label", "bpm-toolbar");
   const overwrite = element("input");
   overwrite.type = "checkbox";
-  overwriteLine.append(overwrite, element("span", "", "同ID社区包已存在时覆盖更新（更新前自动备份）"));
+  overwriteLine.append(overwrite, element("span", "", "Overwrite if same pack ID exists (auto-backup before update)"));
   modal.appendChild(overwriteLine);
   const error = element("div", "bpi-status");
   error.dataset.kind = "error";
   modal.appendChild(error);
   const actions = element("div", "bpi-modal-actions");
   const close = () => shade.remove();
-  const confirm = button("导入社区包", async () => {
-    if (!fields.name.value.trim()) { error.textContent = "词库包名称不能为空"; return; }
+  const confirm = button("Import Community Pack", async () => {
+    if (!fields.name.value.trim()) { error.textContent = "Pack name cannot be empty"; return; }
     confirm.disabled = true;
     try {
       const result = await importCommunityPack({
@@ -463,13 +464,13 @@ function openCommunityPackPreview(payload, filename) {
       }, overwrite.checked);
       close();
       await refresh();
-      setStatus(`${result.replaced ? "已更新" : "已导入"}社区包“${result.name}”，共 ${result.count} 项`, "ok");
+      setStatus(`${result.replaced ? "Updated" : "Imported"} community pack "${result.name}", ${result.count} items`, "ok");
     } catch (importError) {
       error.textContent = importError.message;
       confirm.disabled = false;
     }
   }, "bpi-primary");
-  actions.append(button("取消", close), confirm);
+  actions.append(button("Cancel", close), confirm);
   modal.appendChild(actions);
   shade.appendChild(modal);
   document.body.appendChild(shade);
@@ -480,28 +481,28 @@ function openCommunityPackPreview(payload, filename) {
 
 function openImportPreview(payload) {
   if (!payload || !Array.isArray(payload.tags)) {
-    setStatus("文件中没有 tags 数组", "error");
+    setStatus("No tags array in file", "error");
     return;
   }
   const report = previewImport(payload.tags, manager.data.tags);
   const shade = element("div", "bpi-modal-shade");
   const modal = element("div", "bpi-modal");
-  modal.appendChild(element("h3", "", "导入个人词库预览"));
+  modal.appendChild(element("h3", "", "Import Personal Dictionary Preview"));
   const stats = element("div", "bpi-import-stat");
   stats.append(
-    element("span", "", `总计 ${report.total}`),
-    element("span", "", `新增 ${report.added}`),
-    element("span", "", `冲突 ${report.conflicts.length}`),
-    element("span", "", `重复 ${report.duplicates}`),
-    element("span", report.invalid ? "bpi-danger-text" : "", `无效 ${report.invalid}`),
+    element("span", "", `Total ${report.total}`),
+    element("span", "", `Added ${report.added}`),
+    element("span", "", `Conflicts ${report.conflicts.length}`),
+    element("span", "", `Duplicates ${report.duplicates}`),
+    element("span", report.invalid ? "bpi-danger-text" : "", `Invalid ${report.invalid}`),
   );
   modal.appendChild(stats);
-  const explanation = element("p", "", "导入前会自动备份当前个人词库。你可以保留当前解释、使用导入解释，或把不同的导入中文合并为别名。内置词库文件始终不会被修改。");
+  const explanation = element("p", "", "Current personal dictionary is backed up before import. You can keep current explanations, use imported ones, or merge different Chinese texts as aliases. Built-in files are never modified.");
   modal.appendChild(explanation);
   if (report.conflicts.length) {
     const conflicts = element("div", "bpi-import-conflicts");
     const header = element("div", "bpi-import-conflict");
-    header.append(element("strong", "", "英文"), element("strong", "", "当前有效解释"), element("strong", "", "导入解释"));
+    header.append(element("strong", "", "English"), element("strong", "", "Current explanation"), element("strong", "", "Imported explanation"));
     conflicts.appendChild(header);
     for (const conflict of report.conflicts.slice(0, 100)) {
       const row = element("div", "bpi-import-conflict");
@@ -511,9 +512,9 @@ function openImportPreview(payload) {
     modal.appendChild(conflicts);
   }
   const modeLine = element("div", "bpm-toolbar");
-  const modeLabel = element("label", "", "同名冲突：");
+  const modeLabel = element("label", "", "Conflict:");
   const mode = element("select", "bpi-mode");
-  for (const [value, label] of [["skip", "保留当前解释"], ["overwrite", "使用导入解释"], ["alias", "导入为中文别名"]]) {
+  for (const [value, label] of [["skip", "Keep current explanations"], ["overwrite", "Use imported explanations"], ["alias", "Import as Chinese aliases"]]) {
     const option = element("option", "", label);
     option.value = value;
     mode.appendChild(option);
@@ -525,7 +526,7 @@ function openImportPreview(payload) {
   modal.appendChild(error);
   const actions = element("div", "bpi-modal-actions");
   const close = () => shade.remove();
-  const confirm = button("确认导入", async () => {
+  const confirm = button("Confirm Import", async () => {
     if (report.invalid) return;
     confirm.disabled = true;
     try {
@@ -538,7 +539,7 @@ function openImportPreview(payload) {
       const imported = await importTags(importValues, importMode);
       close();
       await refresh();
-      setStatus(`导入完成：新增 ${imported.added}，覆盖 ${imported.replaced}，跳过 ${imported.skipped}｜已自动备份`, "ok");
+      setStatus(`Import complete: added ${imported.added}, overwrote ${imported.replaced}, skipped ${imported.skipped} | auto-backed up`, "ok");
     } catch (importError) {
       error.textContent = importError.message;
       confirm.disabled = false;
@@ -546,9 +547,9 @@ function openImportPreview(payload) {
   }, "bpi-primary");
   if (report.invalid) {
     confirm.disabled = true;
-    error.textContent = "导入文件包含缺少英文或中文的无效词条，请先修正文件。";
+    error.textContent = "Import file contains invalid entries missing English or Chinese; please fix the file first.";
   }
-  actions.append(button("取消", close), confirm);
+  actions.append(button("Cancel", close), confirm);
   modal.appendChild(actions);
   shade.appendChild(modal);
   document.body.appendChild(shade);
@@ -558,7 +559,7 @@ function openImportPreview(payload) {
 
 async function buildAssistantSection(section) {
   section.replaceChildren();
-  const loading = element("div", "bpm-loading", "正在读取设置…");
+  const loading = element("div", "bpm-loading", "Loading settings...");
   section.appendChild(loading);
   let config;
   try {
@@ -569,6 +570,7 @@ async function buildAssistantSection(section) {
     return;
   }
   manager.assistantLoaded = true;
+  applyBpiAppearance(config.appearance);
   section.replaceChildren();
   const form = element("form", "bpi-form");
   form.addEventListener("submit", (event) => event.preventDefault());
@@ -576,12 +578,12 @@ async function buildAssistantSection(section) {
   error.style.gridColumn = "1 / -1";
 
   // 翻译服务：翻译/解释按此选择；“翻译并优化”“优化为 Anima”恒走 AI
-  const serviceLabel = element("label", "", "翻译服务");
+  const serviceLabel = element("label", "", "Translation Service");
   const service = element("select");
   for (const [value, label] of [
-    ["dictionary", "纯词库（无需 API）"],
-    ["baidu", "百度翻译"],
-    ["ai", "AI（OpenAI 兼容 / Ollama）"],
+    ["dictionary", "Dictionary only (no API)"],
+    ["baidu", "Baidu Translate"],
+    ["ai", "AI (OpenAI-compatible / Ollama)"],
   ]) {
     const option = element("option", "", label);
     option.value = value;
@@ -589,68 +591,83 @@ async function buildAssistantSection(section) {
   }
   service.value = config.translate_service;
   form.append(serviceLabel, service);
-  const serviceNote = element("div", "bpi-config-note", "翻译/解释按此选择；“翻译并优化”与“优化为 Anima”恒走 AI，与此处无关。要测 AI 连接请临时把翻译服务设为 AI 再点测试（密钥不会丢）。");
+  const serviceNote = element("div", "bpi-config-note", 'Translation/explanation uses this choice. "Translate & Optimize" and "Optimize to Anima" always use AI, unrelated here. To test AI connection, temporarily set translation service to AI then click test (key preserved).');
   serviceNote.style.gridColumn = "1 / -1";
   form.append(serviceNote);
 
   // 百度翻译（独立留存，切翻译服务不清）
   const baiduHead = element("div", "bpm-toolbar");
   baiduHead.style.gridColumn = "1 / -1";
-  baiduHead.append(element("strong", "", "百度翻译"));
+  baiduHead.append(element("strong", "", "Baidu Translate"));
   form.append(baiduHead);
-  const baiduAppId = field(form, "APP ID", "assistant-baidu-appid", config.baidu_appid, "百度智能云“通用文本翻译”的 APP ID");
-  const baiduSecretKey = field(form, "密钥", "assistant-baidu-secret", "", config.baidu_secret_key_configured ? "已保存；留空保持不变" : "百度智能云“通用文本翻译”的密钥");
+  const baiduAppId = field(form, "APP ID", "assistant-baidu-appid", config.baidu_appid, 'Baidu Cloud "General Text Translation" APP ID');
+  const baiduSecretKey = field(form, "Secret Key", "assistant-baidu-secret", "", config.baidu_secret_key_configured ? "Saved; leave empty to keep" : 'Baidu Cloud "General Text Translation" Secret Key');
   baiduSecretKey.type = "password";
   const clearBaiduLine = element("label", "bpm-toolbar");
   const clearBaiduSecretKey = element("input");
   clearBaiduSecretKey.type = "checkbox";
-  clearBaiduLine.append(clearBaiduSecretKey, element("span", "", "清除已保存的百度密钥"));
+  clearBaiduLine.append(clearBaiduSecretKey, element("span", "", "Clear saved Baidu secret"));
   const baiduSpacer = element("span");
   form.append(baiduSpacer, clearBaiduLine);
 
   // AI 服务（优化恒走它；翻译在选 AI 时也走它）
   const aiHead = element("div", "bpm-toolbar");
   aiHead.style.gridColumn = "1 / -1";
-  aiHead.append(element("strong", "", "AI 服务（翻译并优化 / 优化为 Anima / AI 翻译）"));
+  aiHead.append(element("strong", "", "AI Service (Translate & Optimize / Optimize / AI Translate)"));
   form.append(aiHead);
-  const aiProviderLabel = element("label", "", "AI 后端");
+  const aiProviderLabel = element("label", "", "AI Backend");
   const aiProvider = element("select");
-  for (const [value, label] of [["openai_compatible", "OpenAI 兼容 API"], ["ollama", "Ollama 本地模型"]]) {
+  for (const [value, label] of [["openai_compatible", "OpenAI-compatible API"], ["ollama", "Ollama (local)"]]) {
     const option = element("option", "", label);
     option.value = value;
     aiProvider.appendChild(option);
   }
   aiProvider.value = config.ai_provider;
   form.append(aiProviderLabel, aiProvider);
-  const baseUrl = field(form, "API 地址", "assistant-base-url", config.ai_base_url, "Ollama 可留空；兼容接口示例 https://host/v1");
-  const model = field(form, "模型名称", "assistant-model", config.ai_model, "例如 qwen3:8b 或服务商模型 ID");
+  const baseUrl = field(form, "API URL", "assistant-base-url", config.ai_base_url, "Optional for Ollama; e.g.: https://host/v1");
+  const model = field(form, "Model Name", "assistant-model", config.ai_model, "e.g.: qwen3:8b or provider model ID");
   const presetLine = element("div", "bpm-toolbar");
   presetLine.style.gridColumn = "1 / -1";
-  const lmStudioPreset = button("使用 LM Studio 本地预设", () => {
+  const lmStudioPreset = button("Use LM Studio Local Preset", () => {
     aiProvider.value = "openai_compatible";
     baseUrl.value = "http://127.0.0.1:1234/v1";
-    error.textContent = "已填入 LM Studio 默认地址；请选择已加载模型的 ID，再保存并测试连接";
+    error.textContent = "LM Studio default URL filled; select a loaded model ID, then Save & Test";
     error.dataset.kind = "ok";
   });
-  presetLine.append(lmStudioPreset, element("span", "bpi-config-note", "默认连接本机 1234 端口，不要求购买外部 API。"));
+  presetLine.append(lmStudioPreset, element("span", "bpi-config-note", "Connects to localhost:1234 by default; no external API required."));
   form.append(presetLine);
-  const apiKey = field(form, "API Key", "assistant-api-key", "", config.ai_api_key_configured ? "已保存；留空保持不变" : "本地 Ollama / LM Studio 可留空");
+  const apiKey = field(form, "API Key", "assistant-api-key", "", config.ai_api_key_configured ? "Saved; leave empty to keep" : "Optional for local Ollama / LM Studio");
   apiKey.type = "password";
   const clearLine = element("label", "bpm-toolbar");
   const clearApiKey = element("input");
   clearApiKey.type = "checkbox";
-  clearLine.append(clearApiKey, element("span", "", "清除已保存的 API Key"));
+  clearLine.append(clearApiKey, element("span", "", "Clear saved API Key"));
   const apiKeySpacer = element("span");
   form.append(apiKeySpacer, clearLine);
-  const temperature = field(form, "温度", "assistant-temperature", config.ai_temperature, "0–2");
+  const temperature = field(form, "Temperature", "assistant-temperature", config.ai_temperature, "0–2");
   temperature.type = "number";
   temperature.min = "0";
   temperature.max = "2";
   temperature.step = "0.05";
-  const timeout = field(form, "超时（秒）", "assistant-timeout", config.ai_timeout_seconds, "5–600");
+  const timeout = field(form, "Timeout (s)", "assistant-timeout", config.ai_timeout_seconds, "5–600");
   timeout.type = "number";
   timeout.min = "5";
   timeout.max = "600";
+
+  // 外观模式
+  const appearanceLabel = element("label", "", "Appearance");
+  const appearanceSelect = element("select");
+  for (const [value, label] of [
+    ["auto", "Follow ComfyUI"],
+    ["dark", "Dark"],
+    ["light", "Light"],
+  ]) {
+    const option = element("option", "", label);
+    option.value = value;
+    appearanceSelect.appendChild(option);
+  }
+  appearanceSelect.value = config.appearance || "auto";
+  form.append(appearanceLabel, appearanceSelect);
 
   // 规则
   const addRule = (labelText, value) => {
@@ -660,29 +677,29 @@ async function buildAssistantSection(section) {
     form.append(labelElement, textarea);
     return { labelElement, textarea };
   };
-  const translationRule = addRule("仅翻译规则", config.translation_rule);
-  const translateOptimizeRule = addRule("翻译并优化规则", config.translate_optimize_rule);
-  const optimizationRule = addRule("优化为 Anima 规则", config.optimization_rule);
+  const translationRule = addRule("Translation Rule", config.translation_rule);
+  const translateOptimizeRule = addRule("Translate & Optimize Rule", config.translate_optimize_rule);
+  const optimizationRule = addRule("Optimize Rule", config.optimization_rule);
   form.appendChild(error);
 
   section.appendChild(form);
-  section.appendChild(element("div", "bpi-config-note", "设置保存在当前 ComfyUI 用户目录。AI Key 与百度密钥独立留存，切换翻译服务互不清空；仅在 AI 后端/地址变更或换机器时才清 AI Key。两者均不写入工作流、不返回浏览器。"));
+  section.appendChild(element("div", "bpi-config-note", "Settings are stored in the ComfyUI user directory. AI key and Baidu secret are retained independently; switching service never clears either. AI key is only cleared when AI backend/URL changes or on a different machine. Neither is written to workflows or returned to the browser."));
   const actions = element("div", "bpm-assistant-actions");
-  const resetButton = button("恢复默认规则", () => {
+  const resetButton = button("Reset to Default Rules", () => {
     translationRule.textarea.value = config.default_translation_rule;
     translateOptimizeRule.textarea.value = config.default_translate_optimize_rule;
     optimizationRule.textarea.value = config.default_optimization_rule;
-    error.textContent = "已在编辑框恢复默认值，点击保存后生效";
+    error.textContent = "Defaults restored in editor; click Save to apply";
     error.dataset.kind = "ok";
   });
-  const testButton = button("保存并测试连接", async () => {
+  const testButton = button("Save & Test Connection", async () => {
     testButton.disabled = true;
-    error.textContent = "正在测试…";
+    error.textContent = "Testing...";
     error.dataset.kind = "busy";
     try {
       config = await saveAssistantConfig(payload());
       const result = await testAssistantConnection();
-      error.textContent = `连接正常：${result.message}`;
+      error.textContent = `Connection OK: ${result.message}`;
       error.dataset.kind = "ok";
     } catch (testError) {
       error.textContent = testError.message;
@@ -691,11 +708,12 @@ async function buildAssistantSection(section) {
       testButton.disabled = false;
     }
   });
-  const saveButton = button("保存设置", async () => {
+  const saveButton = button("Save Settings", async () => {
     saveButton.disabled = true;
     try {
       config = await saveAssistantConfig(payload());
-      error.textContent = "助手设置已保存";
+      applyBpiAppearance(config.appearance);
+      error.textContent = "Assistant settings saved";
       error.dataset.kind = "ok";
     } catch (saveError) {
       error.textContent = saveError.message;
@@ -718,6 +736,7 @@ async function buildAssistantSection(section) {
     clear_baidu_secret_key: clearBaiduSecretKey.checked,
     ai_temperature: temperature.value,
     ai_timeout_seconds: timeout.value,
+    appearance: appearanceSelect.value,
     translation_rule: translationRule.textarea.value,
     translate_optimize_rule: translateOptimizeRule.textarea.value,
     optimization_rule: optimizationRule.textarea.value,
@@ -760,7 +779,7 @@ function targetInspectorNode() {
     ?? null;
 }
 
-function confirmDialog(title, message, confirmLabel = "确定") {
+function confirmDialog(title, message, confirmLabel = "OK") {
   return new Promise((resolve) => {
     const shade = element("div", "bpi-modal-shade");
     const modal = element("div", "bpi-modal");
@@ -769,7 +788,7 @@ function confirmDialog(title, message, confirmLabel = "确定") {
       shade.remove();
       resolve(value);
     };
-    actions.append(button("取消", () => close(false)), button(confirmLabel, () => close(true), "bpi-primary"));
+    actions.append(button("Cancel", () => close(false)), button(confirmLabel, () => close(true), "bpi-primary"));
     modal.append(element("h3", "", title), element("div", "bpi-preview-text", message), actions);
     shade.appendChild(modal);
     document.body.appendChild(shade);
@@ -783,7 +802,7 @@ function confirmDialog(title, message, confirmLabel = "确定") {
 async function pickInspectorNode() {
   const nodes = inspectorNodes();
   if (!nodes.length) {
-    setStatus("画布上没有检查器节点", "error");
+    setStatus("No inspector node on canvas", "error");
     return null;
   }
   if (nodes.length === 1) return nodes[0];
@@ -798,11 +817,11 @@ async function pickInspectorNode() {
       }));
     }
     const actions = element("div", "bpi-modal-actions");
-    actions.append(button("取消", () => {
+    actions.append(button("Cancel", () => {
       shade.remove();
       resolve(null);
     }));
-    modal.append(element("h3", "", "选择要收藏的节点"), list, actions);
+    modal.append(element("h3", "", "Select a node to save"), list, actions);
     shade.appendChild(modal);
     document.body.appendChild(shade);
     shade.addEventListener("mousedown", (event) => {
@@ -819,20 +838,20 @@ function favoriteCard(item) {
   const card = element("div", "bpi-fav-card");
   const thumb = element("div", "bpi-fav-thumb");
   if (item.image) thumb.style.backgroundImage = `url("${savedPromptImageUrl(item.id)}")`;
-  else thumb.textContent = "无配图";
+  else thumb.textContent = "No image";
   const info = element("div", "bpi-fav-info");
-  const name = element("span", "bpi-fav-name", item.name ?? "未命名收藏");
+  const name = element("span", "bpi-fav-name", item.name ?? "Untitled");
   name.appendChild(element("span", "bpi-fav-date", favoriteDate(item.created_at)));
   const actions = element("div", "bpi-fav-actions");
   actions.append(
-    button("载入到节点", () => loadFavoriteIntoNode(item), "bpi-primary"),
-    button("复制", () => copyFavorite(item)),
-    button("删除", () => removeFavorite(item), "bpi-danger"),
+    button("Load to Node", () => loadFavoriteIntoNode(item), "bpi-primary"),
+    button("Copy", () => copyFavorite(item)),
+    button("Delete", () => removeFavorite(item), "bpi-danger"),
   );
   info.append(
     name,
     element("div", "bpi-fav-text", item.text ?? ""),
-    element("div", "bpi-fav-meta", item.note || "未记录来源节点"),
+    element("div", "bpi-fav-meta", item.note || "Source node not recorded"),
     actions,
   );
   card.append(thumb, info);
@@ -849,8 +868,8 @@ function renderFavorites() {
   list.replaceChildren();
   if (!items.length) {
     list.appendChild(element("div", "bpi-empty", manager.favorites.length
-      ? "没有匹配的收藏。"
-      : "还没有收藏。在节点上点「收藏」即可保存当前提示词。"));
+      ? "No matching favorites."
+      : "No favorites yet. Click the star button on a node to save the current prompt."));
     return;
   }
   for (const item of items) list.appendChild(favoriteCard(item));
@@ -869,34 +888,34 @@ async function refreshFavorites() {
 async function copyFavorite(item) {
   try {
     await navigator.clipboard.writeText(item.text ?? "");
-    setStatus("提示词已复制到剪贴板", "ok");
+    setStatus("Prompt copied to clipboard", "ok");
   } catch {
-    setStatus("浏览器拒绝了剪贴板访问", "error");
+    setStatus("Browser denied clipboard access", "error");
   }
 }
 
 async function loadFavoriteIntoNode(item) {
   const target = targetInspectorNode();
   if (!target) {
-    setStatus("画布上没有检查器节点", "error");
+    setStatus("No inspector node on canvas", "error");
     return;
   }
   const confirmed = await confirmDialog(
-    "载入收藏",
-    `将用这条收藏覆盖节点 #${target.id} 的英文提示词，此操作无法用 Ctrl+Z 撤销。`,
+    "Load",
+    `This will overwrite node #${target.id} prompt. Cannot be undone with Ctrl+Z.`,
   );
   if (!confirmed) return;
   target._bilingualPromptInspector?.setText?.(item.text ?? "");
-  setStatus(`已载入到节点 #${target.id}`, "ok");
+  setStatus(`Loaded to node #${target.id}`, "ok");
 }
 
 async function removeFavorite(item) {
-  const confirmed = await confirmDialog("删除收藏", `删除「${item.name ?? "未命名收藏"}」，配图会一并删除。`);
+  const confirmed = await confirmDialog("Delete", `Delete "${item.name ?? "Untitled"}"? Reference image will be deleted too.`);
   if (!confirmed) return;
   try {
     await deleteSavedPrompt(item.id);
     await refreshFavorites();
-    setStatus("已删除收藏", "ok");
+    setStatus("Deleted", "ok");
   } catch (error) {
     setStatus(error.message, "error");
   }
@@ -906,9 +925,9 @@ async function createFavoriteFromNode() {
   const node = await pickInspectorNode();
   if (!node) return;
   const text = String(node.widgets?.find((widget) => widget.name === "text")?.value ?? "");
-  openSavePromptDialog({ text, note: `节点 #${node.id}` }, async () => {
+  openSavePromptDialog({ text, note: `Node #${node.id}` }, async () => {
     await refreshFavorites();
-    setStatus("已保存收藏", "ok");
+    setStatus("Saved", "ok");
   });
 }
 
@@ -916,7 +935,7 @@ async function exportFavorites() {
   try {
     const bundle = await exportSavedPrompts();
     downloadJson(bundle, `saved-prompts-${new Date().toISOString().slice(0, 10)}.json`);
-    setStatus("已导出收藏", "ok");
+    setStatus("Exported", "ok");
   } catch (error) {
     setStatus(error.message, "error");
   }
@@ -926,7 +945,7 @@ async function importFavoritesFile(file) {
   try {
     const result = await importSavedPrompts(JSON.parse(await file.text()));
     await refreshFavorites();
-    setStatus(`导入完成，新增 ${result?.imported ?? 0} 条`, "ok");
+    setStatus(`Import complete: ${result?.imported ?? 0} added`, "ok");
   } catch (error) {
     setStatus(error.message, "error");
   }
@@ -938,7 +957,7 @@ function buildFavoritesSection() {
   const toolbar = element("div", "bpm-toolbar");
   refs.favoritesSearch = element("input", "bpi-search");
   refs.favoritesSearch.type = "search";
-  refs.favoritesSearch.placeholder = "按名称或内容搜索";
+  refs.favoritesSearch.placeholder = "Search by name or content";
   refs.favoritesSearch.addEventListener("input", renderFavorites);
   const importInput = element("input");
   importInput.type = "file";
@@ -951,9 +970,9 @@ function buildFavoritesSection() {
   });
   toolbar.append(
     refs.favoritesSearch,
-    button("新建收藏", () => createFavoriteFromNode(), "bpi-primary"),
-    button("导出", () => exportFavorites()),
-    button("导入", () => importInput.click()),
+    button("New", () => createFavoriteFromNode(), "bpi-primary"),
+    button("Export", () => exportFavorites()),
+    button("Import", () => importInput.click()),
     importInput,
   );
   refs.favoritesList = element("div", "bpm-rows");
@@ -1003,7 +1022,7 @@ function inspectorNodes() {
 
 function tagNodeLabel(node) {
   const text = String(node.widgets?.find((widget) => widget.name === "text")?.value ?? "").trim();
-  return `节点 #${node.id}：${text ? text.slice(0, 30) : "（空提示词）"}`;
+  return `Node #${node.id}: ${text ? text.slice(0, 30) : "(empty prompt)"}`;
 }
 
 function buildTagManagerSection() {
@@ -1013,9 +1032,9 @@ function buildTagManagerSection() {
   const toolbar = element("div", "bpm-toolbar");
   const select = element("select", "bpi-mode");
   select.style.minWidth = "220px";
-  const refresh = button("刷新节点列表", () => rebuildTagManagerSection());
-  toolbar.append(element("span", "", "检查器节点："), select, refresh,
-    element("span", "bpi-config-note", "标签翻译、词库搜索与逐标签操作在下方编辑当前选中的节点。"));
+  const refresh = button("Refresh node list", () => rebuildTagManagerSection());
+  toolbar.append(element("span", "", "Inspector node:"), select, refresh,
+    element("span", "bpi-config-note", "Tag translation, dictionary search and per-tag operations edit the selected node below."));
   select.addEventListener("change", () => {
     // ComfyUI 前端 1.16+ 的 node.id 是字符串（见 litegraph 的 toNodeId），
     // 用 Number() 会变成数字，导致下面 find 的严格比较永远失败、退回第一个节点。
@@ -1038,10 +1057,10 @@ function rebuildTagManagerSection() {
   select.replaceChildren();
   if (!nodes.length) {
     select.disabled = true;
-    const option = element("option", "", "画布上没有检查器节点");
+    const option = element("option", "", "No inspector node on canvas");
     option.value = "";
     select.appendChild(option);
-    host.appendChild(element("div", "bpi-empty", "添加或选中一个「双语提示词检查器」节点后，这里会显示它的标签管理界面。"));
+    host.appendChild(element("div", "bpi-empty", "Add or select a BilingualPromptInspector node to see its tag manager here."));
     manager.tagManagerNodeId = null;
     return;
   }
@@ -1065,7 +1084,7 @@ function build() {
   root = element("div", "bpm-panel");
   const head = element("div", "bpm-head");
   refs.status = element("span", "bpi-status");
-  head.append(element("strong", "", "双语提示词管理"), refs.status);
+  head.append(element("strong", "", "Bilingual Prompt Manager"), refs.status);
   refs.tabs = element("div", "bpm-tabs");
   for (const [id, label] of SECTIONS) {
     const tab = button(label, () => setSection(id), `bpm-tab${id === manager.section ? " bpm-tab-active" : ""}`);
@@ -1100,7 +1119,7 @@ function buildTagsSection() {
   const toolbar = element("div", "bpm-toolbar");
   refs.search = element("input", "bpi-search");
   refs.search.type = "search";
-  refs.search.placeholder = "搜索英文、中文、别名或分类";
+  refs.search.placeholder = "Search English, Chinese, aliases or category";
   refs.source = element("select", "bpi-mode");
   refs.category = element("select", "bpi-mode");
   toolbar.append(refs.search, refs.source, refs.category);
@@ -1124,17 +1143,17 @@ function buildTagsSection() {
     }
   });
   left.append(
-    button("新增标签", () => openTagDialog({}, refresh), "bpi-primary"),
-    button("确认所选机器译", () => {
+    button("New Tag", () => openTagDialog({}, refresh), "bpi-primary"),
+    button("Confirm selected", () => {
       const rows = managerRows().filter((row) => row.kind === "machine" && manager.selected.has(`machine:${row.key}`));
       confirmMachineRows(rows);
     }),
-    button("批量分类/模型", async () => {
+    button("Bulk Category/Models", async () => {
       const rows = managerRows().filter((row) => row.kind === "personal" && manager.selected.has(`personal:${row.key}`));
-      if (!rows.length) { setStatus("批量修改仅适用于已勾选的个人词条", "error"); return; }
-      const category = window.prompt("新的分类（留空表示不修改分类）：", rows[0].tag.category ?? "");
+      if (!rows.length) { setStatus("Bulk edit applies only to checked personal entries", "error"); return; }
+      const category = window.prompt("New category (empty = no change):", rows[0].tag.category ?? "");
       if (category === null) return;
-      const models = window.prompt("适用模型，用逗号分隔（留空表示不修改模型）：", (rows[0].tag.models ?? []).join(", "));
+      const models = window.prompt("Applicable models, comma-separated (empty = no change):", (rows[0].tag.models ?? []).join(", "));
       if (models === null) return;
       const updates = {};
       if (category.trim()) updates.category = category.trim();
@@ -1143,19 +1162,19 @@ function buildTagsSection() {
       try {
         const result = await bulkUpdateTags(rows.map((row) => row.tag.english), updates);
         await refresh();
-        setStatus(`已批量修改 ${result.updated} 项，并自动备份个人词库`, "ok");
+        setStatus(`Updated ${result.updated} entries; personal dictionary backed up`, "ok");
       } catch (error) { setStatus(error.message, "error"); }
     }),
-    button("导入", () => importInput.click()),
-    button("导出", async () => {
+    button("Import", () => importInput.click()),
+    button("Export", async () => {
       try {
         const payload = await exportPersonalDictionary();
         downloadJson(payload, `bpi-user-tags-${new Date().toISOString().slice(0, 10)}.json`);
-        setStatus(`已导出 ${payload.tags?.length ?? 0} 个个人标签`, "ok");
+        setStatus(`Exported ${payload.tags?.length ?? 0} personal tags`, "ok");
       } catch (error) { setStatus(error.message, "error"); }
     }),
   );
-  right.append(button("刷新", () => refresh()));
+  right.append(button("Refresh", () => refresh()));
   footer.append(left, right);
   refs.search.addEventListener("input", () => {
     renderRows();
@@ -1183,12 +1202,12 @@ function buildPacksSection() {
     try {
       openCommunityPackPreview(JSON.parse(await file.text()), file.name);
     } catch (error) {
-      setStatus(`社区包文件读取失败：${error.message}`, "error");
+      setStatus(`Community pack read failed: ${error.message}`, "error");
     }
   });
   toolbar.append(
-    button("导入社区词库包", () => communityInput.click(), "bpi-primary"),
-    button("刷新", () => refresh()),
+    button("Import Community Pack", () => communityInput.click(), "bpi-primary"),
+    button("Refresh", () => refresh()),
   );
   refs.packList = element("div", "bpi-pack-list");
   section.append(toolbar, refs.packList, communityInput);
@@ -1199,7 +1218,7 @@ function buildAssistantPlaceholder() {
   const section = element("div", "bpm-section");
   section.dataset.section = "assistant";
   section.hidden = true;
-  section.appendChild(element("div", "bpm-loading", "切换到本页时读取设置…"));
+  section.appendChild(element("div", "bpm-loading", "Settings load on first visit..."));
   return section;
 }
 
@@ -1223,19 +1242,20 @@ function destroyTab() {
 
 injectBpiStyles();
 installBpiWheelGuard();
+getAssistantConfig().then((cfg) => applyBpiAppearance(cfg.appearance)).catch(() => {});
 
 app.registerExtension({
   name: "ComfyUI.BilingualPromptInspector.ManagerPanel",
   async setup() {
     if (!app.extensionManager?.registerSidebarTab) {
-      console.warn("[BilingualPromptInspector] 当前 ComfyUI 前端不支持侧边栏，管理面板不可用");
+      console.warn("[BilingualPromptInspector] Current frontend does not support sidebar; panel unavailable");
       return;
     }
     app.extensionManager.registerSidebarTab({
       id: MANAGER_TAB_ID,
       icon: "pi pi-language",
-      title: "双语提示词管理",
-      tooltip: "双语提示词检查器：标签管理、词库、词库包与助手设置",
+      title: "Bilingual Prompt Manager",
+      tooltip: "Bilingual Prompt Inspector: Tag Manager, Dictionary, Packs & Assistant Settings",
       type: "custom",
       render: renderTab,
       destroy: destroyTab,

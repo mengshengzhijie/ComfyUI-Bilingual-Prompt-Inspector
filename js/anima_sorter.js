@@ -1,18 +1,18 @@
 import { normalizeKey } from "./parser.js";
 
 export const ANIMA_SLOTS = [
-  { id: "quality", label: "质量／元数据／年份／安全" },
-  { id: "people", label: "人数" },
-  { id: "character", label: "角色" },
-  { id: "copyright", label: "作品／系列" },
-  { id: "artist", label: "画师" },
-  { id: "appearance", label: "外观／服装" },
-  { id: "action", label: "表情／动作／姿势" },
-  { id: "camera", label: "镜头／构图" },
-  { id: "style", label: "画风" },
-  { id: "environment", label: "场景／背景／光照" },
-  { id: "natural", label: "自然语言描述" },
-  { id: "uncertain", label: "待确认分类" },
+  { id: "quality", label: "Quality / Meta / Year / Rating" },
+  { id: "people", label: "People count" },
+  { id: "character", label: "Character" },
+  { id: "copyright", label: "Copyright / Series" },
+  { id: "artist", label: "Artist" },
+  { id: "appearance", label: "Appearance / Clothing" },
+  { id: "action", label: "Expression / Action / Pose" },
+  { id: "camera", label: "Camera / Composition" },
+  { id: "style", label: "Style" },
+  { id: "environment", label: "Scene / Background / Lighting" },
+  { id: "natural", label: "Natural language" },
+  { id: "uncertain", label: "Uncertain" },
 ];
 
 const SLOT_INDEX = new Map(ANIMA_SLOTS.map((slot, index) => [slot.id, index]));
@@ -82,13 +82,13 @@ export function groupAnimaTokensForDisplay(tokens) {
   const groups = [];
   for (const token of tokens ?? []) {
     if (token.syntax === "operator") {
-      groups.push({ id: "operator", label: "分段／组合", tokens: [token] });
+      groups.push({ id: "operator", label: "Separator / Group", tokens: [token] });
       continue;
     }
     const slot = classifyAnimaToken(token).slot;
     const previous = groups.at(-1);
     if (previous?.id === slot) previous.tokens.push(token);
-    else groups.push({ id: slot, label: labels.get(slot) ?? "待确认分类", tokens: [token] });
+    else groups.push({ id: slot, label: labels.get(slot) ?? "Uncertain", tokens: [token] });
   }
   return groups;
 }

@@ -32,7 +32,7 @@ assert.equal(grouped.text, [
   "white background",
   ". She is holding a gift box.",
 ].join("\n"));
-assert.ok(!grouped.text.includes("质量／"));
+assert.ok(!grouped.text.includes("Quality /"));
 
 const naturalSource = "masterpiece, 1girl. She is standing by a window, holding a cup of tea.";
 const natural = sortAnimaPrompt(parsePrompt(naturalSource, index, new Map(), { mode: "auto" }), { groupLines: true });
@@ -46,6 +46,6 @@ assert.equal(groupedSegments.text, "1girl\nwhite background\nBREAK\nmasterpiece\
 const displayGroups = groupAnimaTokensForDisplay(
   parsePrompt(groupedSegments.text, index, new Map(), { mode: "tags" }),
 );
-assert.deepEqual(displayGroups.map((group) => group.label), ["人数", "场景／背景／光照", "分段／组合", "质量／元数据／年份／安全", "场景／背景／光照"]);
+assert.deepEqual(displayGroups.map((group) => group.label), ["People count", "Scene / Background / Lighting", "Separator / Group", "Quality / Meta / Year / Rating", "Scene / Background / Lighting"]);
 
 console.log("anima sorter tests: OK");
