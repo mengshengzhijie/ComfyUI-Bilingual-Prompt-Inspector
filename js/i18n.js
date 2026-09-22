@@ -495,8 +495,8 @@ const ZH = {
   "Select all ({} items)": "全选（{} 条）",
   "pack:": "词包：",
   "Copied {}": "已复制 {}",
-  "Processed \"{}\"": "已处理「{}」",
-  "Re-translated \"{}\"": "已重新翻译「{}」",
+  "Processed {}": "已处理「{}」",
+  "Re-translated {}": "已重新翻译「{}」",
   "Confirmed {} entries; personal dictionary backed up": "已确认 {} 条；个人词库已备份",
   "Rejected invalid translation: {}": "已拒绝无效翻译：{}",
   "Large dictionary loads on demand; enter English or Chinese keywords above.": "大词库按需加载；在上面输入英文或中文关键词。",
@@ -521,11 +521,11 @@ const ZH = {
   "Read-only": "只读",
   Unavailable: "不可用",
   "{} items | v{} | {}": "{} 条｜v{}｜{}",
-  "Exported \"{}\"": "已导出「{}」",
+  "Exported {}": "已导出「{}」",
   "Delete community pack \"{}\"? File is backed up first; recoverable from data/backups.":
     "删除社区词包「{}」？文件会先备份，可从 data/backups 恢复。",
-  "Deleted and backed up \"{}\"": "已删除并备份「{}」",
-  "{} community pack \"{}\", {} items": "{} 社区词包「{}」，{} 条",
+  "Deleted and backed up {}": "已删除并备份「{}」",
+  "{} community pack {}, {} items": "{} 社区词包「{}」，{} 条",
   "Total {}": "共 {}",
   "Added {}": "新增 {}",
   "Conflicts {}": "冲突 {}",
@@ -564,7 +564,7 @@ const ZH = {
     "还没有收藏。点节点上的星标按钮即可保存当前提示词。",
   "This will overwrite node #{} prompt. Cannot be undone with Ctrl+Z.": "这会覆盖节点 #{} 的提示词，Ctrl+Z 无法撤销。",
   "Loaded to node #{}": "已载入到节点 #{}",
-  "Delete \"{}\"? Reference image will be deleted too.": "删除「{}」？参考图也会一并删除。",
+  "Delete {}? Reference image will be deleted too.": "删除「{}」？参考图也会一并删除。",
   "Node #{}": "节点 #{}",
   "Node #{}: {}": "节点 #{}：{}",
   "Bilingual Prompt Inspector: Tag Manager, Dictionary, Packs & Assistant Settings":
@@ -669,6 +669,38 @@ const ZH = {
   "Disabled Danbooru Large Dict": "已停用 Danbooru 大词库",
   "{} items | v{} | {} | License {}": "{} 条｜v{}｜{}｜授权 {}",
   "Possible conflict: {} ({} ↔ {})": "可能存在冲突：{}（{} ↔ {}）",
+
+  // ── 第三批：自由文本变量包裹后的组合形态与遗漏项 ──────────────────────
+  "Low": "低",
+  "Low · pending": "低 · 待确认",
+  "Medium · pending": "中 · 待确认",
+  "Medium · session-only": "中 · 仅本次会话",
+  "★ Unfavorite": "★ 取消收藏",
+  "☆ Favorite": "☆ 收藏",
+  "Paused, waiting for confirmation…": "已暂停，等待确认…",
+  "Querying dictionary…": "正在查询词库…",
+  "Searching for more…": "正在搜索更多…",
+  "⚠ Not indexed: {}": "⚠ 未收录：{}",
+  "tag: {} | Anima format: (Tag:Weight)": "标签：{}｜Anima 格式：(标签:权重)",
+  "Node #{} · {}  tags": "节点 #{} · {} 个标签",
+  "Running {}…": "正在运行 {}…",
+  "Translating unknown tags {}/{}：{}": "正在翻译未收录标签 {}/{}：{}",
+  "Translation complete {} items, rejected abnormal results {} items": "翻译完成 {} 条，已拒绝异常结果 {} 条",
+  "uses {}": "使用 {} 次",
+  "{} · {} KB": "{} · {} KB",
+  "Weight {} outside common range {}–{}": "权重 {} 超出常见范围 {}–{}",
+  "Tags {}": "标签 {} 条",
+  "Sample": "示例",
+  "(empty prompt)": "（空提示词）",
+  "(weight {})": "（权重 {}）",
+  "Delete community pack {}? File is backed up first; recoverable from data/backups.": "删除社区词包「{}」？会先备份文件，可从 data/backups 恢复。",
+
+
+  // ── 第四批：分段翻译后需要的片段 ────────────────────────────────────
+  "community pack {}, {} items": "社区词包「{}」，{} 条",
+  Updated: "已更新",
+  Imported: "已导入",
+
 };
 
 let mode = "auto";

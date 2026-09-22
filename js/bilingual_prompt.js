@@ -576,7 +576,7 @@ function createPanel(node, textWidget) {
     chineseMirror.classList.add("bpi-hidden");
     chineseEditor.classList.remove("bpi-hidden");
     setText(editChineseButton, "Back to link");
-    setText(mirrorTitle, `Text processing result: ${label}`);
+    setText(mirrorTitle, `Text processing result: “${label}”`);
     setText(mirrorHint, containsChinese(value)
       ? "Chinese results are for reading only; to generate images, continue with translation or optimization"
       : "result not yet written to the model; after confirming, click “Sync to English output”");
@@ -634,7 +634,7 @@ function createPanel(node, textWidget) {
     setText(englishHint, "Click tags to link; select then press Delete");
     updateStageControls();
     updateText(after);
-    setStatus(`applied ${label}; press Ctrl+Z to undo`, "ok");
+    setStatus(`applied “${label}”; press Ctrl+Z to undo`, "ok");
     return true;
   };
 
@@ -1043,7 +1043,7 @@ function createPanel(node, textWidget) {
     const shade = element("div", "bpi-modal-shade");
     const modal = element("div", "bpi-modal");
     modal.appendChild(element("h3", "", "Edit tag weight"));
-    modal.appendChild(element("div", "bpi-config-note", `tag: ${token.term}｜Anima format: (Tag:Weight)`));
+    modal.appendChild(element("div", "bpi-config-note", `tag: “${token.term}” | Anima format: (Tag:Weight)`));
     const form = element("div", "bpi-form");
     const input = element("input", "");
     input.type = "number";
@@ -1106,7 +1106,7 @@ function createPanel(node, textWidget) {
     if (typeof entry.beforeCategoryView === "boolean") state.categoryView = entry.beforeCategoryView;
     if (Array.isArray(entry.hiddenBefore)) setHiddenTags(entry.hiddenBefore);
     updateText(entry.before, entry.beforeStart);
-    setStatus(`Undone: ${entry.label}`, "ok");
+    setStatus(`Undone: “${entry.label}”`, "ok");
     return true;
   };
 
@@ -1119,7 +1119,7 @@ function createPanel(node, textWidget) {
     if (typeof entry.afterCategoryView === "boolean") state.categoryView = entry.afterCategoryView;
     if (Array.isArray(entry.hiddenAfter)) setHiddenTags(entry.hiddenAfter);
     updateText(entry.after, entry.afterCursor);
-    setStatus(`Redone: ${entry.label}`, "ok");
+    setStatus(`Redone: “${entry.label}”`, "ok");
     return true;
   };
 
@@ -1401,11 +1401,11 @@ function createPanel(node, textWidget) {
       optimize: "Optimize to Anima",
     };
     const label = labels[action];
-    setStatus(`Running${label}…`, "busy");
+    setStatus(`Running “${label}”…`, "busy");
     try {
       const output = await runInspectorAssistant(action, source);
       setStagedResult(output, label, action !== "translate");
-      setStatus(`${label}completed; result not yet synced to the English output above`, "ok");
+      setStatus(`“${label}”completed; result not yet synced to the English output above`, "ok");
     } catch (error) {
       setStatus(error.message, "error");
     } finally {
@@ -1426,7 +1426,7 @@ function createPanel(node, textWidget) {
     if (state.stagedText?.requireAnima) {
       const punctuationError = animaPunctuationError(proposed);
       if (punctuationError) {
-        setStatus(`${punctuationError}; please fix before syncing`, "error");
+        setStatus(`“${punctuationError}”; please fix before syncing`, "error");
         return;
       }
     }
@@ -1581,8 +1581,8 @@ function createPanel(node, textWidget) {
       const classes = ["bpi-mirror-token", `bpi-${token.status}`];
       if (state.pinned === token.id) classes.push("bpi-linked");
       const label = token.status === "unknown"
-        ? `⚠ Not indexed: ${token.term}`
-        : `${token.chinese}${token.weight === null ? "" : ` (weight ${token.weight}）`}`;
+        ? `⚠ Not indexed: “${token.term}”`
+        : `${token.chinese}${token.weight === null ? "" : ` ${t(`(weight ${token.weight})`)}`}`;
       const chip = element("span", classes.join(" "), label);
       chip.dataset.tokenId = String(token.id);
       setTitle(chip, token.segmentKind === "natural"
@@ -1832,7 +1832,7 @@ function createPanel(node, textWidget) {
     try {
       await postUpstreamAction("resume", node.id, text);
     } catch (error) {
-      setStatus(`Release failed: ${error.message}`, "error");
+      setStatus(`Release failed: “${error.message}”`, "error");
     }
     renderSourceBar();
   };
@@ -1843,7 +1843,7 @@ function createPanel(node, textWidget) {
       await postUpstreamAction("cancel", node.id);
       setStatus("Discarded this upstream input", "ok");
     } catch (error) {
-      setStatus(`Discard failed: ${error.message}`, "error");
+      setStatus(`Discard failed: “${error.message}”`, "error");
     }
     renderSourceBar();
   };
@@ -1869,7 +1869,7 @@ function createPanel(node, textWidget) {
     } catch (error) {
       state.upstreamWaiting = false;
       renderSourceBar();
-      setStatus(`Cannot pause for confirmation: ${error.message}`, "error");
+      setStatus(`Cannot pause for confirmation: “${error.message}”`, "error");
     }
   };
 
@@ -2248,8 +2248,9 @@ function createPanel(node, textWidget) {
       const format = tag.pack_id === "danbooru_large"
         ? (/[_()]/.test(tag.english) ? "Danbooru raw format" : "Large dictionary")
         : "";
-      const usage = Number(tag.post_count) > 0 ? ` ·  · uses ${Number(tag.post_count).toLocaleString()}` : "";
-      meta.appendChild(element("span", "", `${tag.category} · ${tag.pack_name ?? sourceLabel(tag.source)}${format ? ` · ${format}` : ""}${usage}`));
+      const usage = Number(tag.post_count) > 0 ? ` ·  · ${t(`uses “${Number(tag.post_count).toLocaleString()}”`)}` : "";
+      const metaText = [t(tag.category), t(tag.pack_name ?? sourceLabel(tag.source)), ...(format ? [t(format)] : [])].join(" · ");
+      meta.appendChild(element("span", "", `${metaText}${usage}`));
       meta.appendChild(element("span", "bpi-search-reason", match.reason));
       const star = element("span", `bpi-result-star${isFavorite(tag.english) ? " bpi-starred" : ""}`, isFavorite(tag.english) ? "★" : "☆");
       setTitle(star, isFavorite(tag.english) ? "Unfavorite" : "Favorite tag");
@@ -2303,7 +2304,7 @@ function createPanel(node, textWidget) {
     let completed = 0;
     try {
       for (let index = 0; index < unknown.length; index += 1) {
-        setStatus(`Translating unknown tags ${index + 1}/${unknown.length}：${unknown[index].term}`, "busy");
+        setStatus(`Translating unknown tags ${index + 1}/${unknown.length}：“${unknown[index].term}”`, "busy");
         if (await translateToken(unknown[index])) completed += 1;
       }
       const rejected = unknown.length - completed;

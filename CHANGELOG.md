@@ -49,6 +49,10 @@
 - 变量的递归翻译：嵌在文案里的变量本身也可能是界面词（如冲突组名 `Solo vs multiple subjects`、模式名 `Tag`），回填时会再翻译一层，避免出现「中文句子里夹一个英文词」。
 - 为让变量能被稳定折叠，`parser.js` 的诊断模板与词包信息模板给动态片段加上「“...”」包裹（版本号 `1.0.0`、来源、授权等），否则带点号的版本会被拆成多个变量而匹配不到译表。
 - 统计行改为分段翻译再拼接：词库页的 `Showing … | Selected … | Enabled packs … | Built-in … | Large … | Personal … | Pending …` 与节点里的 `Common dictionary … items | Large …` 原来是整句做键，大词库有「未安装 / 按需（N 条）/ 已停用」三种形态，整句键必然漏掉其中几种。现在每段各自翻译后再用 ` | ` 拼起来，新增形态不会再漏。
+- 修掉一类「译表里有、界面上却还是英文」的隐蔽 bug：模板里的自由文本变量（标签名、词包名、错误信息、文件名、操作名）没有用「“...”」包裹时不会被折叠成 `{}`，整句变成带具体内容的字面量，永远匹配不到译表。已统一给 27 处这类变量加上包裹，并把 4 处误用 ASCII 直引号的地方（`"Re-translated \"...\""` 等）换成全角引号；译表里 6 条把直引号烤进键名的条目（`"Processed \"{}\""` 等）同步改成纯 `{}`。
+- 补齐第三批翻译（22 条）：置信度徽章（`Low · pending` / `Medium · pending` / `Medium · session-only`）、收藏星标按钮（★/☆）、`⚠ Not indexed:` 标签提示、Anima 格式说明、`Node #N · N tags` 收藏备注、`Running …` / `Translating unknown tags N/M` / `Translation complete …` 三条运行状态、`Querying dictionary…` / `Searching for more…` / `Paused, waiting for confirmation…`、权重越界诊断、以及词包导入预览与删除确认。
+- 两处组合句改分段翻译：词包导入预览 `Tags N | Sample: …`（示例内容是数据，不该参与翻译）与标签管理节点标题 `Node #N: …`（提示词原文不翻译）。
+- `tests/test_i18n.mjs` 新增 40+ 条「运行时真实形态」断言，把上面这批句子的确切中文结果锁死——以后谁把变量引号去掉或改回直引号，测试会直接失败。
 
 ## v1.1.0（2026-09-18）
 

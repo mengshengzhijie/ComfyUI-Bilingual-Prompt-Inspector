@@ -391,7 +391,7 @@ function openSavePromptDialog({ name = "", text = "", note = "" } = {}, onSaved)
     imageFile = file;
     previewImage.src = URL.createObjectURL(file);
     previewImage.style.display = "block";
-    setText(fileInfo, `${file.name || "image"} · ${Math.max(1, Math.round(file.size / 1024))} KB`);
+    setText(fileInfo, `“${file.name || "image"}” · ${Math.max(1, Math.round(file.size / 1024))} KB`);
   };
   drop.addEventListener("click", () => picker.click());
   picker.addEventListener("change", () => {

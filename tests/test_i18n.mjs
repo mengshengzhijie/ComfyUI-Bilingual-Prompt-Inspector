@@ -61,6 +61,67 @@ assert.equal(
   "可能存在冲突：单人 vs 多人（1girl ↔ 2girls）",
 );
 
+// 自由文本变量必须用「"…"」包起来才能折叠成 {}，否则整句永远匹配不上。
+// 这里锁死「运行时真实形态」，防止以后有人把引号去掉或换成 ASCII 直引号。
+for (const [source, expected] of [
+  ["Text processing result: “Translate”", "文本处理结果：翻译"],
+  ["applied “Translate & optimize”; press Ctrl+Z to undo", "已应用 翻译并优化；按 Ctrl+Z 可撤销"],
+  ["Undone: “Sort to Anima order”", "已撤销：Sort to Anima order"],
+  ["Redone: “Sort to Anima order”", "已重做：Sort to Anima order"],
+  ["Running “Translate”…", "正在运行 翻译…"],
+  ["“Translate”completed; result not yet synced to the English output above", "翻译已完成；结果尚未同步到上方英文输出"],
+  ["⚠ Not indexed: “1girl”", "⚠ 未收录：1girl"],
+  ["Release failed: “network down”", "放行失败：network down"],
+  ["Discard failed: “network down”", "放弃失败：network down"],
+  ["Cannot pause for confirmation: “network down”", "无法暂停等待确认：network down"],
+  ["Translating unknown tags 1/12：“1girl”", "正在翻译未收录标签 1/12：1girl"],
+  ["Translation complete 5 items, rejected abnormal results 2 items", "翻译完成 5 条，已拒绝异常结果 2 条"],
+  ["uses “12,345”", "使用 12,345 次"],
+  ["tag: “1girl” | Anima format: (Tag:Weight)", "标签：1girl｜Anima 格式：(标签:权重)"],
+  ["Node #3 · 12  tags", "节点 #3 · 12 个标签"],
+  ["Translating: “1girl”", "正在翻译：1girl"],
+  ["Re-translated “1girl”", "已重新翻译「1girl」"],
+  ["Copied “1girl”", "已复制 1girl"],
+  ["Processed “1girl”", "已处理「1girl」"],
+  ["Exported “My Pack”", "已导出「My Pack」"],
+  ["Deleted and backed up “My Pack”", "已删除并备份「My Pack」"],
+  ["community pack “My Pack”, 12 items", "社区词包「My Pack」，12 条"],
+  ["Connection OK: “pong”", "连接正常：pong"],
+  ["Community pack read failed: “bad json”", "社区词包读取失败：bad json"],
+  ["“image.png” · 12 KB", "image.png · 12 KB"],
+  ["Weight 5 outside common range 0–3", "权重 5 超出常见范围 0–3"],
+  [
+    "Delete community pack “My Pack”? File is backed up first; recoverable from data/backups.",
+    "删除社区词包「My Pack」？会先备份文件，可从 data/backups 恢复。",
+  ],
+]) {
+  assert.equal(t(source), expected, `未命中：${source}`);
+}
+
+// 置信度徽章：这几个是 parser.js 直接产出的界面文本
+assert.equal(t("Low · pending"), "低 · 待确认");
+assert.equal(t("Medium · pending"), "中 · 待确认");
+assert.equal(t("Medium · session-only"), "中 · 仅本次会话");
+assert.equal(t("Low"), "低");
+
+// 收藏星标按钮（带符号的整串）
+assert.equal(t("★ Unfavorite"), "★ 取消收藏");
+assert.equal(t("☆ Favorite"), "☆ 收藏");
+
+// 分段翻译所需的独立片段
+assert.equal(t("Tags 12"), "标签 12 条");
+assert.equal(t("Sample"), "示例");
+assert.equal(t("Updated"), "已更新");
+assert.equal(t("Imported"), "已导入");
+assert.equal(t("(empty prompt)"), "（空提示词）");
+assert.equal(t("(weight 1.5)"), "（权重 1.5）");
+assert.equal(t("Node #3"), "节点 #3");
+
+// 状态提示（整句形态）
+assert.equal(t("Paused, waiting for confirmation…"), "已暂停，等待确认…");
+assert.equal(t("Querying dictionary…"), "正在查询词库…");
+assert.equal(t("Searching for more…"), "正在搜索更多…");
+
 // 非法值一律退回 auto
 setLanguageMode("klingon");
 assert.equal(getLanguageMode(), "auto");

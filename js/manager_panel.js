@@ -188,7 +188,7 @@ async function confirmMachineRows(rows) {
 }
 
 async function retranslateMachineRow(row) {
-  setStatus(`Translating: ${row.english}`, "busy");
+  setStatus(`Translating: “${row.english}”`, "busy");
   try {
     const translated = await runInspectorAssistant("translate", row.tag.english);
     const validation = validateTranslationResult(row.tag.english, translated, {});
@@ -203,7 +203,7 @@ async function retranslateMachineRow(row) {
       createdAt: Date.now(),
     });
     panelSyncHub.notify("machine", manager.syncSource);
-    setStatus(`Re-translated "${row.tag.english}"`, "ok");
+    setStatus(`Re-translated “${row.tag.english}”`, "ok");
   } catch (error) {
     setStatus(error.message, "error");
   }
@@ -274,7 +274,7 @@ function renderRows() {
     actions.appendChild(button("Copy", async () => {
       try {
         await navigator.clipboard.writeText(tag.english);
-        setStatus(`Copied ${tag.english}`, "ok");
+        setStatus(`Copied “${tag.english}”`, "ok");
       } catch {
         setStatus("Browser denied clipboard write", "error");
       }
@@ -299,7 +299,7 @@ function renderRows() {
             await deletePersonalTag(tag.english);
             manager.selected.delete(id);
             await refresh();
-            setStatus(`Processed "${tag.english}"`, "ok");
+            setStatus(`Processed “${tag.english}”`, "ok");
           } catch (error) { setStatus(error.message, "error"); }
         }, "bpi-mini bpi-danger"));
       }
@@ -402,17 +402,17 @@ function renderPacks() {
       try {
         const payload = await exportDictionaryPack(pack.id);
         downloadJson(payload, `bpi-pack-${pack.id}-${new Date().toISOString().slice(0, 10)}.json`);
-        setStatus(`Exported "${pack.name}"`, "ok");
+        setStatus(`Exported “${pack.name}”`, "ok");
       } catch (error) { setStatus(error.message, "error"); }
     }, "bpi-mini"));
     if (!pack.readonly) {
       controls.appendChild(button("Delete", async () => {
-        if (!window.confirm(`Delete community pack "${pack.name}"? File is backed up first; recoverable from data/backups.`)) return;
+        if (!window.confirm(`Delete community pack “${pack.name}”? File is backed up first; recoverable from data/backups.`)) return;
         try {
           await deleteCommunityPack(pack.id);
           await refresh();
           manager.selected.clear();
-          setStatus(`Deleted and backed up "${pack.name}"`, "ok");
+          setStatus(`Deleted and backed up “${pack.name}”`, "ok");
         } catch (error) { setStatus(error.message, "error"); }
       }, "bpi-mini bpi-danger"));
     }
@@ -450,7 +450,8 @@ function openCommunityPackPreview(payload, filename) {
   }
   modal.appendChild(form);
   const preview = element("div", "bpi-community-preview");
-  setText(preview, `Tags ${payload.tags.length} | Sample: ${payload.tags.slice(0, 8).map((tag) => `${tag?.english ?? "?"} → ${tag?.chinese ?? "?"}`).join("; ")}`);
+  const sampleText = payload.tags.slice(0, 8).map((tag) => `${tag?.english ?? "?"} → ${tag?.chinese ?? "?"}`).join("; ");
+  setText(preview, `${t(`Tags ${payload.tags.length}`)} | ${t("Sample")}: ${sampleText}`);
   modal.appendChild(preview);
   const overwriteLine = element("label", "bpm-toolbar");
   const overwrite = element("input");
@@ -480,7 +481,7 @@ function openCommunityPackPreview(payload, filename) {
       }, overwrite.checked);
       close();
       await refresh();
-      setStatus(`${result.replaced ? "Updated" : "Imported"} community pack "${result.name}", ${result.count} items`, "ok");
+      setStatus(`${result.replaced ? t("Updated") : t("Imported")} ${t(`community pack “${result.name}”, ${result.count} items`)}`, "ok");
     } catch (importError) {
       setText(error, importError.message);
       confirm.disabled = false;
@@ -734,7 +735,7 @@ async function buildAssistantSection(section) {
       config = await saveAssistantConfig(payload());
       setLanguageMode(config.language);
       const result = await testAssistantConnection();
-      setText(error, `Connection OK: ${result.message}`);
+      setText(error, `Connection OK: “${result.message}”`);
       error.dataset.kind = "ok";
     } catch (testError) {
       setText(error, testError.message);
@@ -1059,7 +1060,7 @@ function inspectorNodes() {
 
 function tagNodeLabel(node) {
   const text = String(node.widgets?.find((widget) => widget.name === "text")?.value ?? "").trim();
-  return `Node #${node.id}: ${text ? text.slice(0, 30) : "(empty prompt)"}`;
+  return `${t(`Node #${node.id}`)}: ${text ? text.slice(0, 30) : t("(empty prompt)")}`;
 }
 
 function buildTagManagerSection() {
@@ -1239,7 +1240,7 @@ function buildPacksSection() {
     try {
       openCommunityPackPreview(JSON.parse(await file.text()), file.name);
     } catch (error) {
-      setStatus(`Community pack read failed: ${error.message}`, "error");
+      setStatus(`Community pack read failed: “${error.message}”`, "error");
     }
   });
   toolbar.append(
