@@ -693,6 +693,7 @@ const ZH = {
   "Sample": "示例",
   "(empty prompt)": "（空提示词）",
   "(weight {})": "（权重 {}）",
+  "restored {} hidden tags; press Ctrl+Z to undo": "已恢复 {} 个隐藏标签；按 Ctrl+Z 可撤销",
   "Delete community pack {}? File is backed up first; recoverable from data/backups.": "删除社区词包「{}」？会先备份文件，可从 data/backups 恢复。",
 
 

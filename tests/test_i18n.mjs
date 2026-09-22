@@ -115,6 +115,7 @@ assert.equal(t("Updated"), "已更新");
 assert.equal(t("Imported"), "已导入");
 assert.equal(t("(empty prompt)"), "（空提示词）");
 assert.equal(t("(weight 1.5)"), "（权重 1.5）");
+assert.equal(t("restored 3 hidden tags; press Ctrl+Z to undo"), "已恢复 3 个隐藏标签；按 Ctrl+Z 可撤销");
 assert.equal(t("Node #3"), "节点 #3");
 
 // 状态提示（整句形态）
