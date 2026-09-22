@@ -118,6 +118,11 @@ assert.equal(t("(weight 1.5)"), "（权重 1.5）");
 // 插件名：侧边栏标签写死中文，面板/关于框走译表，三处必须同一个名字
 assert.equal(t("Bilingual Prompt Manager"), "提示词翻译与管理");
 assert.equal(t("Bilingual Prompt Inspector"), "提示词翻译与管理");
+// 确认对话框：默认确认按钮是 "OK"，必须译为「确认」而不是「正常」
+assert.equal(t("OK"), "确认");
+assert.equal(t("Cancel"), "取消");
+assert.equal(t("This will overwrite node #3 prompt. Cannot be undone with Ctrl+Z."), "这会覆盖节点 #3 的提示词，Ctrl+Z 无法撤销。");
+assert.equal(t("Delete “Fluffy”? Reference image will be deleted too."), "删除「Fluffy」？参考图也会一并删除。");
 assert.equal(
   t("Bilingual Prompt Inspector: Tag Manager, Dictionary, Packs & Assistant Settings"),
   "提示词翻译与管理：标签管理、词库、词包与助手设置",

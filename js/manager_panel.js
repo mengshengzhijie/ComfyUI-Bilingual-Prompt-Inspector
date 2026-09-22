@@ -948,7 +948,7 @@ async function loadFavoriteIntoNode(item) {
 }
 
 async function removeFavorite(item) {
-  const confirmed = await confirmDialog("Delete", `Delete "${item.name ?? "Untitled"}"? Reference image will be deleted too.`);
+  const confirmed = await confirmDialog("Delete", `Delete “${item.name ?? t("Untitled")}”? Reference image will be deleted too.`);
   if (!confirmed) return;
   try {
     await deleteSavedPrompt(item.id);

@@ -557,7 +557,9 @@ const ZH = {
   "Translate & Optimize Rule": "翻译并优化规则",
   "Optimize Rule": "优化规则",
   "Connection OK: {}": "连接正常：{}",
-  OK: "正常",
+  // 确认对话框的默认确认按钮（confirmDialog 的 confirmLabel 缺省值），
+  // 不是「连接正常」的 OK——那个是整句键 "Connection OK: {}"。
+  OK: "确认",
   Untitled: "未命名",
   "Source node not recorded": "未记录来源节点",
   "No matching favorites.": "没有匹配的收藏。",
