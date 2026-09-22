@@ -36,6 +36,23 @@ assert.equal(t("items 3 | recognized 1 | unknown 2 | pending 1"), "共 3 个标�
 assert.equal(t("Personal"), "个人");
 assert.equal(t("Highest"), "最高");
 assert.equal(t("12 items | Local user | Always enabled, overrides same-name entries"), "12 条｜本地用户｜始终启用，覆盖同名条目");
+
+// 词库页统计行：这行是分段翻译后再拼起来的，三种大词库形态都要覆盖
+assert.equal(
+  [
+    t("Showing 952"),
+    t("Selected 0"),
+    t("Enabled packs 6/7"),
+    t("Built-in 951"),
+    t("Large not installed"),
+    t("Personal 1"),
+    t("Pending 0"),
+  ].join(" | "),
+  "显示 952 | 已选 0 | 已启用词包 6/7 | 内置 951 | 大词库未安装 | 个人 1 | 待确认 0",
+);
+assert.equal(t("Large 12000 (on-demand)"), "大词库 12000（按需）");
+assert.equal(t("Large 12000 (disabled)"), "大词库 12000（已停用）");
+assert.equal(t("Common dictionary 952 items"), "通用词库 952 条");
 assert.equal(t("moved “1girl”; press Ctrl+Z to undo"), "已移动「1girl」；按 Ctrl+Z 可撤销");
 assert.equal(t("Mode: “Tag” | “标签式输入”"), "模式：标签｜标签式输入");
 assert.equal(t("Mode: “Tag”"), "模式：标签");

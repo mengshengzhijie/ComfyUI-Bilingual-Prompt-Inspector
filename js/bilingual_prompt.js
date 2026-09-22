@@ -45,6 +45,7 @@ import {
   setPlaceholder,
   setText,
   setTitle,
+  t,
   UPSTREAM_ARRIVED_EVENT,
 } from "./bpi_shared.js";
 
@@ -1222,10 +1223,11 @@ function createPanel(node, textWidget) {
       resetLargeRuntimeCache();
       rebuildDictionaryIndex();
       const large = state.data.large_dictionary;
+      // 同上：分段翻译再拼，避免整句键漏掉大词库的几种形态
       const largeText = large?.available
-        ? ` | Large ${large.count}  (${large.enabled ? "on-demand" : "disabled"}）`
-        : " | Large not installed";
-      setStatus(`Common dictionary ${state.data.tags.length} items${largeText}`, "ok");
+        ? t(`Large ${large.count} (${large.enabled ? "on-demand" : "disabled"})`)
+        : t("Large not installed");
+      setStatus(`${t(`Common dictionary ${state.data.tags.length} items`)} | ${largeText}`, "ok");
       render();
       renderSearch();
       if (notifyPeers) panelSyncHub.notify("dictionary", state.syncSource);

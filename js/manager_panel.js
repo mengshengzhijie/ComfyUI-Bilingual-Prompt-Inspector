@@ -39,6 +39,7 @@ import {
   setPlaceholder,
   setText,
   setTitle,
+  t,
   testAssistantConnection,
 } from "./bpi_shared.js";
 
@@ -314,9 +315,20 @@ function renderRows() {
     refs.rows.appendChild(element("div", "bpm-loading", emptyText));
   }
   const large = manager.data.large_dictionary;
-  const largeSummary = large?.available ? ` | Large ${large.count} (${large.enabled ? "on-demand" : "disabled"})` : " | Large not installed";
+  // 分段翻译再拼：大词库有「未安装 / 按需 / 已停用」三种形态，整句做键会漏掉其中几种
+  const largeSummary = large?.available
+    ? t(`Large ${large.count} (${large.enabled ? "on-demand" : "disabled"})`)
+    : t("Large not installed");
   const enabledPacks = (manager.data.packs ?? []).filter((pack) => pack.enabled).length;
-  setText(refs.summary, `Showing ${rows.length} | Selected ${manager.selected.size} | Enabled packs ${enabledPacks}/${manager.data.packs?.length ?? 0} | Built-in ${manager.data.builtin.length}${largeSummary} | Personal ${manager.data.user.length} | Pending ${machineRows().length}`);
+  setText(refs.summary, [
+    t(`Showing ${rows.length}`),
+    t(`Selected ${manager.selected.size}`),
+    t(`Enabled packs ${enabledPacks}/${manager.data.packs?.length ?? 0}`),
+    t(`Built-in ${manager.data.builtin.length}`),
+    largeSummary,
+    t(`Personal ${manager.data.user.length}`),
+    t(`Pending ${machineRows().length}`),
+  ].join(" | "));
 }
 
 function renderPacks() {
