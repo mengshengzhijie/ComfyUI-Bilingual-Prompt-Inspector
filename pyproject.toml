@@ -1,6 +1,6 @@
 [project]
 name = "prompt-translator-manager"
-version = "1.2.0"
+version = "1.2.1"
 description = "ComfyUI prompt node with translation and management: bilingual tag view, drag-to-reorder, temporary hiding, multiple translation services and a sidebar dictionary manager."
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
@@ -18,8 +18,11 @@ Documentation = "https://github.com/mengshengzhijie/ComfyUI-Bilingual-Prompt-Ins
 PublisherId = "mengshengzhijie"
 DisplayName = "Prompt Translator & Manager"
 requires-comfyui = ">=0.3.40"
-# 前端扩展目录，与 __init__.py 的 WEB_DIRECTORY = "./js" 保持一致
-web = "js"
+# 注意：这里不要再加 web = "js"。
+# ComfyUI 的 nodes.py 会同时登记 pyproject 的 web 字段（key = project.name）
+# 和 __init__.py 的 WEB_DIRECTORY（key = 模块名），两者指向同一个 js/ 目录时
+# /extensions 接口会把每个 js 列两遍，前端加载两次 → "Extension already registered"。
+# 前端资源统一由 __init__.py 的 WEB_DIRECTORY = "./js" 提供（各版本 ComfyUI 都支持）。
 # 图标与横幅（可选，填好图片的公开 URL 后取消注释即可）
 # Icon = "https://..."    # 方形，≤400×400，PNG/SVG/JPG/GIF
 # Banner = "https://..."  # 21:9 横幅，PNG/SVG/JPG/GIF

@@ -1,5 +1,12 @@
 # 更新记录
 
+## v1.2.1（2026-09-23）
+
+- **修复 Nodes 2.0（设置里的「现代节点设计」）下标签拖拽完全失效**：该模式把节点改成 DOM 渲染，Vue 的祖先元素会在**捕获阶段** `stopPropagation`，事件到不了目标、也不会冒泡回 `document`，而拖拽的 `pointermove` / `pointerup` / `pointercancel` 原本挂在 `document` 的冒泡阶段，一次都收不到。改为统一走 `document` 的**捕获阶段**（新增 `bindDragTrackers` / `unbindDragTrackers` 两个工具函数），英文标签与明细表 `⠿` 手柄两处同时修复。经典画布模式行为不变。
+- **修复 Nodes 2.0 下连上／断开上游输入时，来源栏与上游选项不会立刻出现或消失**：来源栏原先只靠 `onDrawForeground`（画布每帧回调）驱动轮询，而该模式不再走画布绘制，那个回调根本不执行，只能等输入文字、刷新页面或运行一次才更新。改用官方的 `onConnectionsChange` 回调，连接与断开都会触发且与渲染模式无关；画布每帧轮询保留作兜底。
+- **修复插件前端扩展被加载两遍**：`pyproject.toml` 的 `[tool.comfy] web = "js"` 与 `__init__.py` 的 `WEB_DIRECTORY = "./js"` 会被 ComfyUI 分别登记（key 一个是 `project.name`、一个是模块名），`/extensions` 接口因此把同一批 js 列两次，前端各加载一次并报 `Extension named ... already registered.`。已移除 `web` 字段，前端资源统一由 `WEB_DIRECTORY` 提供。
+- 上游连接判定改用 `node.isInputConnected(slot)`（老版本无此方法时退回读 `input.link`），消除新版前端里 `input.link is deprecated` 的控制台刷屏。
+
 ## v1.2.0（2026-09-23）
 
 - 翻译服务与 AI 后端解耦（schema v3）：翻译/解释可选纯词库 / 百度翻译 / AI；"翻译并优化"与"优化为 Anima"恒走 AI。AI 与百度密钥独立留存，切换翻译服务互不清空——只有 AI 后端/地址变更或换机器时才清 AI Key，百度密钥只在显式清除时才清。

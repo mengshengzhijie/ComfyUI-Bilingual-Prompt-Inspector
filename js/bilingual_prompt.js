@@ -50,7 +50,7 @@ import {
 } from "./bpi_shared.js";
 
 const NODE_NAME = "BilingualPromptInspector";
-const EXTENSION_VERSION = "v1.2.0";
+const EXTENSION_VERSION = "v1.2.1";
 const PROJECT_URL = "https://github.com/mengshengzhijie/ComfyUI-Bilingual-Prompt-Inspector";
 const COLLAPSED_WIDGET_FALLBACK_HEIGHT = 390;
 const COLLAPSED_NODE_MIN_HEIGHT = 360;
@@ -945,6 +945,23 @@ function createPanel(node, textWidget) {
 
   let chipClickSuppressed = false;
 
+  // Drag trackers must listen in the CAPTURE phase on document.
+  // Nodes 2.0 (Vue Nodes) renders nodes as DOM and installs @pointermove.stop
+  // style handlers on ancestor elements; when an ancestor stops propagation
+  // during the capture phase the event never reaches the target and never
+  // bubbles back, so bubble-phase listeners on document would never fire and
+  // the drag would silently die.  document capture always runs first.
+  const bindDragTrackers = (onMove, finish) => {
+    document.addEventListener("pointermove", onMove, true);
+    document.addEventListener("pointerup", finish, true);
+    document.addEventListener("pointercancel", finish, true);
+  };
+  const unbindDragTrackers = (onMove, finish) => {
+    document.removeEventListener("pointermove", onMove, true);
+    document.removeEventListener("pointerup", finish, true);
+    document.removeEventListener("pointercancel", finish, true);
+  };
+
   // Drag-to-reorder on the English token chips: pointerdown arms a possible
   // drag, moving past a small threshold activates it (so plain clicks and
   // double-clicks keep working), and releasing applies a structured move
@@ -999,9 +1016,7 @@ function createPanel(node, textWidget) {
         }
       };
       const finish = () => {
-        document.removeEventListener("pointermove", onMove);
-        document.removeEventListener("pointerup", finish);
-        document.removeEventListener("pointercancel", finish);
+        unbindDragTrackers(onMove, finish);
         chip.classList.remove("bpi-dragging");
         clearHover();
         if (active) {
@@ -1012,9 +1027,7 @@ function createPanel(node, textWidget) {
           }
         }
       };
-      document.addEventListener("pointermove", onMove);
-      document.addEventListener("pointerup", finish);
-      document.addEventListener("pointercancel", finish);
+      bindDragTrackers(onMove, finish);
     });
   };
 
@@ -1664,9 +1677,7 @@ function createPanel(node, textWidget) {
       let indicator = null;
       const orderedRows = () => [...table.querySelectorAll(".bpi-row[data-token-id]")];
       const finish = () => {
-        document.removeEventListener("pointermove", onMove);
-        document.removeEventListener("pointerup", finish);
-        document.removeEventListener("pointercancel", finish);
+        unbindDragTrackers(onMove, finish);
         row.classList.remove("bpi-dragging");
         if (indicator) {
           indicator.remove();
@@ -1717,9 +1728,7 @@ function createPanel(node, textWidget) {
         }
         indicator.style.top = `${Math.max(0, y - 1)}px`;
       };
-      document.addEventListener("pointermove", onMove);
-      document.addEventListener("pointerup", finish);
-      document.addEventListener("pointercancel", finish);
+      bindDragTrackers(onMove, finish);
     });
     return handle;
   };
@@ -1793,8 +1802,14 @@ function createPanel(node, textWidget) {
     if (!node.properties) node.properties = {};
     node.properties.bpiUpstream = { ...upstreamSettings(), ...patch };
   };
+  // 新版前端里 input.link 已弃用（读了会刷警告），官方替代是
+  // node.isInputConnected(slot)；老版本没有这个方法，退回读 input.link。
   const upstreamConnected = () =>
-    (node.inputs ?? []).some((input) => input.name === "prompt" && input.link != null);
+    (node.inputs ?? []).some((input, index) =>
+      input.name === "prompt" &&
+      (typeof node.isInputConnected === "function"
+        ? node.isInputConnected(index)
+        : input.link != null));
 
   const renderSourceBar = () => {
     const connected = upstreamConnected();
@@ -2580,6 +2595,9 @@ function createPanel(node, textWidget) {
       getHiddenTags();
       scheduleRender(true);
     },
+    syncSourceBar() {
+      syncSourceBar();
+    },
     syncInitialLayout() {
       requestNodeResize();
     },
@@ -2678,6 +2696,16 @@ app.registerExtension({
     nodeType.prototype.onConfigure = function () {
       originalConfigure?.apply(this, arguments);
       this._bilingualPromptInspector?.refreshAfterConfigure?.();
+    };
+
+    // 上游输入连上/断开时立刻刷新来源栏。以前只靠 onDrawForeground 每帧轮询，
+    // 而 Nodes 2.0（Vue Nodes）不再走 canvas 绘制，那个回调根本不跑，来源栏
+    // 只能等输入文字/刷新/运行才更新。onConnectionsChange 是官方回调，
+    // 连接与断开都会触发，且与渲染模式无关。
+    const originalConnectionsChange = nodeType.prototype.onConnectionsChange;
+    nodeType.prototype.onConnectionsChange = function () {
+      originalConnectionsChange?.apply(this, arguments);
+      this._bilingualPromptInspector?.syncSourceBar?.();
     };
 
     const originalDrawForeground = nodeType.prototype.onDrawForeground;
