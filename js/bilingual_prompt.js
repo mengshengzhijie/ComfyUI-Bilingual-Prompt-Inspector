@@ -30,6 +30,7 @@ import {
   button,
   deletePersonalTag,
   element,
+  importTags,
   injectBpiStyles,
   loadDictionary,
   loadPreferences,
@@ -122,11 +123,14 @@ function createPanel(node, textWidget) {
   const editEnglishButton = element("button", "bpi-button bpi-mini", "Done");
   const clearEnglishButton = element("button", "bpi-button bpi-mini bpi-danger", "Clear");
   const favoriteButton = element("button", "bpi-button bpi-mini", "Favorite");
+  const insertBreakButton = element("button", "bpi-button bpi-mini", "Insert line break");
   editEnglishButton.type = "button";
   clearEnglishButton.type = "button";
   favoriteButton.type = "button";
+  insertBreakButton.type = "button";
   setTitle(favoriteButton, "Save the current English prompt to favorites in the user directory (a reference image can be attached)");
-  englishHead.append(englishTitle, englishHint, editEnglishButton, clearEnglishButton, favoriteButton);
+  setTitle(insertBreakButton, "Insert a line break after the selected tag, or at the end when no tag is selected");
+  englishHead.append(englishTitle, englishHint, editEnglishButton, clearEnglishButton, insertBreakButton, favoriteButton);
   const englishTokenView = element("div", "bpi-english-token-view bpi-hidden");
   englishTokenView.tabIndex = 0;
   englishTokenView.setAttribute("role", "textbox");
@@ -203,9 +207,48 @@ function createPanel(node, textWidget) {
   const status = element("span", "bpi-status");
   const issuesPanel = element("div", "bpi-issues");
   const filtersBar = element("div", "bpi-filters");
+  // 机器翻译批量入库操作栏：只在表格里出现机器翻译词条时才显示（详见 renderMachineBatchBar）
+  const machineBatchBar = element("div", "bpi-filters bpi-batch-bar bpi-hidden");
   const table = element("div", "bpi-table");
   const head = element("div", "bpi-head");
   head.append(element("div", "", "English original (actual output)"), element("div", "", "Chinese explanation (read-only)"));
+  // 表头分界处的抓手：拖动改左右两栏比例。比例写在表格的 --bpi-split 变量上，
+  // 行和表头都吃这个变量，所以改一次整张表重排，不用重新渲染、也不丢滚动位置。
+  const splitHandle = element("span", "bpi-split-handle");
+  setTitle(splitHandle, "Drag to resize the two columns; double-click to reset to the default ratio");
+  const applyTableSplit = (ratio) => {
+    const value = Math.max(0.2, Math.min(0.8, Number(ratio) || 0));
+    table.style.setProperty("--bpi-split", `${(value * 100).toFixed(1)}%`);
+    return value;
+  };
+  splitHandle.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    let ratio = null;
+    const onMove = (moveEvent) => {
+      moveEvent.preventDefault();
+      const rect = table.getBoundingClientRect();
+      if (!rect.width) return;
+      ratio = applyTableSplit((moveEvent.clientX - rect.left) / rect.width);
+    };
+    const finish = () => {
+      unbindDragTrackers(onMove, finish);
+      if (ratio === null) return;
+      state.preferences = { ...state.preferences, tableSplit: ratio };
+      persistPreferences();
+    };
+    // 必须走 document 捕获阶段：Nodes 2.0 的 Vue 祖先会在捕获阶段截停冒泡
+    bindDragTrackers(onMove, finish);
+  });
+  splitHandle.addEventListener("dblclick", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    applyTableSplit(0.4);
+    state.preferences = { ...state.preferences, tableSplit: 0.4 };
+    persistPreferences();
+  });
+  head.appendChild(splitHandle);
   table.appendChild(head);
   const aboutFooter = element("div", "bpi-about-footer");
   const aboutButton = element("button", "bpi-about-button", "About plugin");
@@ -243,6 +286,8 @@ function createPanel(node, textWidget) {
     preferences: loadPreferences(),
     tableFilter: "all",
     filterButtons: new Map(),
+    // 表格里勾选待入库的机器翻译词条，只存 token.key
+    batchSelected: new Set(),
     searchMatches: [],
     searchIndex: -1,
     largeCache: new Map(),
@@ -522,6 +567,7 @@ function createPanel(node, textWidget) {
   englishEditor.value = String(textWidget.value ?? "");
   if (state.preferences.englishInputHeight) applyEnglishEditorHeight(state.preferences.englishInputHeight);
   if (state.preferences.chineseEditorHeight) chineseEditor.style.height = `${state.preferences.chineseEditorHeight}px`;
+  applyTableSplit(state.preferences.tableSplit ?? 0.4);
 
   const setEnglishEditing = (editing, explicit = true) => {
     const requested = Boolean(editing);
@@ -832,6 +878,117 @@ function createPanel(node, textWidget) {
     return true;
   };
 
+  // ---- Line breaks --------------------------------------------------------
+  // 换行在原文里就是真正的 \n：parser 只把它当分隔符丢掉，所以它既不是 token
+  // 也进不了撤销栈。这里给两个可视化区补一层「换行块」，让它和标签一样看得见、
+  // 拖得动、删得掉。换行唯一能待的位置是第 n 个标签与第 n+1 个标签之间的原文
+  // 片段（下面叫 gap），所以换行块一律用 gap 下标定位，parser 与数据格式不动。
+  const breakGapCount = () => Math.max(0, state.tokens.length - 1);
+
+  const gapSource = (gapIndex) => {
+    const source = String(textWidget.value ?? "");
+    const left = state.tokens[gapIndex];
+    const right = state.tokens[gapIndex + 1];
+    if (!left || !right) return "";
+    return source.slice(left.end, right.start);
+  };
+
+  const gapHasBreak = (gapIndex) => /[\r\n]/.test(gapSource(gapIndex));
+
+  const currentBreakGaps = () => {
+    const gaps = new Set();
+    for (let index = 0; index < breakGapCount(); index += 1) if (gapHasBreak(index)) gaps.add(index);
+    return gaps;
+  };
+
+  // 只改写 gap：标签原文（权重、括号、自然语言整段）一个字符都不动。
+  // 注意 parser 把分隔符后面的空格算进下一个 token（token.start 在空格前），
+  // 所以 gap 里本来就只有 "," / "\n" 这类分隔符——去掉换行时补一个逗号就够，
+  // 再补空格会出现 "a,  b" 这种双空格。
+  const rebuildTextWithBreaks = (breakGaps) => {
+    const source = String(textWidget.value ?? "");
+    if (state.tokens.length < 2) return source;
+    const first = state.tokens[0];
+    const last = state.tokens[state.tokens.length - 1];
+    let out = source.slice(0, first.start);
+    for (const [index, token] of state.tokens.entries()) {
+      out += source.slice(token.start, token.end);
+      const next = state.tokens[index + 1];
+      if (!next) break;
+      const gap = source.slice(token.end, next.start);
+      if (!/[\r\n]/.test(gap)) {
+        out += breakGaps.has(index) ? "\n" : gap;
+        continue;
+      }
+      if (breakGaps.has(index)) {
+        out += gap;
+        continue;
+      }
+      const flat = gap.replace(/[\r\n]+/g, "").trim();
+      out += flat || ",";
+    }
+    return out + source.slice(last.end);
+  };
+
+  const replacePromptText = (nextText, label) => {
+    const before = String(textWidget.value ?? "");
+    if (nextText === before) return false;
+    state.undoStack.push({
+      before,
+      after: nextText,
+      beforeStart: before.length,
+      beforeEnd: null,
+      afterCursor: nextText.length,
+      label,
+    });
+    if (state.undoStack.length > 50) state.undoStack.shift();
+    state.redoStack = [];
+    updateText(nextText);
+    return true;
+  };
+
+  const applyBreakGaps = (breakGaps, label) => replacePromptText(rebuildTextWithBreaks(breakGaps), label);
+
+  const removeBreakAt = (gapIndex) => {
+    const gaps = currentBreakGaps();
+    if (!gaps.delete(gapIndex)) return false;
+    return applyBreakGaps(gaps, "Delete line break");
+  };
+
+  const moveBreakTo = (fromGap, toGap) => {
+    const gaps = currentBreakGaps();
+    if (!gaps.has(fromGap)) return false;
+    const target = Math.max(0, Math.min(breakGapCount() - 1, toGap));
+    if (target === fromGap) return false;
+    gaps.delete(fromGap);
+    gaps.add(target);
+    return applyBreakGaps(gaps, "Move line break");
+  };
+
+  const insertBreakFromToolbar = () => {
+    if (state.englishEditing) {
+      setEnglishEditing(false, true);
+      render(); // setEnglishEditing 只排了个异步渲染，这里同步跑一遍拿最新的 token 偏移
+    }
+    if (!state.tokens.length) {
+      setStatus("Enter tags first, then insert a line break", "");
+      return;
+    }
+    const pinnedIndex = state.tokens.findIndex((item) => item.id === state.pinned);
+    if (pinnedIndex >= 0 && pinnedIndex < breakGapCount()) {
+      const gaps = currentBreakGaps();
+      gaps.add(pinnedIndex);
+      if (applyBreakGaps(gaps, "Insert line break")) setStatus("Inserted a line break; press Ctrl+Z to undo", "ok");
+      return;
+    }
+    // 没选中标签，或选中的是最后一个标签（它后面没有 gap）：换行加在整段末尾。
+    const source = String(textWidget.value ?? "");
+    if (replacePromptText(`${source.replace(/[ \t]+$/, "")}\n`, "Insert line break")) {
+      setStatus("Inserted a line break; press Ctrl+Z to undo", "ok");
+    }
+  };
+  insertBreakButton.addEventListener("click", () => insertBreakFromToolbar());
+
   // ---- Hidden tags ---------------------------------------------------------
   // A hidden tag is removed from the actual output text (the model never sees
   // it) but remembered on the node itself — properties.bpiHiddenTags survives
@@ -1031,6 +1188,71 @@ function createPanel(node, textWidget) {
       };
       bindDragTrackers(onMove, finish);
     });
+  };
+
+  // 换行块：原文里的 \n 在两个可视化区里渲染成 ↵，和标签一样看得见、拖得动、
+  // 删得掉。拖到某个标签上 = 换行走这个标签后面的 gap。与标签拖拽一样必须挂
+  // document 捕获阶段，否则 Nodes 2.0 下收不到事件。
+  const buildBreakChip = (gapIndex, view, selector) => {
+    const chip = element("span", "bpi-break-chip", "↵");
+    setTitle(chip, "Line break | drag onto a tag to move it; click × to delete (the two lines merge)");
+    const remove = element("span", "bpi-break-x", "×");
+    setTitle(remove, "Delete this line break");
+    remove.addEventListener("pointerdown", (event) => event.stopPropagation());
+    remove.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (removeBreakAt(gapIndex)) setStatus("Deleted a line break; press Ctrl+Z to undo", "ok");
+    });
+    chip.appendChild(remove);
+    chip.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0 || event.target === remove) return;
+      if (breakGapCount() < 1) return;
+      const startX = event.clientX;
+      const startY = event.clientY;
+      let active = false;
+      let targetGap = null;
+      let hoverChip = null;
+      const clearHover = () => {
+        if (hoverChip) hoverChip.classList.remove("bpi-drop-target");
+        hoverChip = null;
+      };
+      const onMove = (moveEvent) => {
+        if (!chip.isConnected) {
+          finish();
+          return;
+        }
+        if (!active) {
+          if (Math.abs(moveEvent.clientX - startX) < 4 && Math.abs(moveEvent.clientY - startY) < 4) return;
+          active = true;
+          chip.classList.add("bpi-dragging");
+        }
+        moveEvent.preventDefault();
+        clearHover();
+        targetGap = null;
+        const hit = document.elementFromPoint(moveEvent.clientX, moveEvent.clientY);
+        const hitChip = hit?.closest?.(selector);
+        if (hitChip && hitChip !== chip) {
+          const index = [...view.querySelectorAll(selector)].indexOf(hitChip);
+          if (index >= 0) {
+            targetGap = Math.min(index, breakGapCount() - 1);
+            hoverChip = hitChip;
+            hoverChip.classList.add("bpi-drop-target");
+          }
+        }
+      };
+      const finish = () => {
+        unbindDragTrackers(onMove, finish);
+        chip.classList.remove("bpi-dragging");
+        clearHover();
+        if (active && targetGap !== null && chip.isConnected) {
+          if (moveBreakTo(gapIndex, targetGap)) setStatus("Moved the line break; press Ctrl+Z to undo", "ok");
+          requestAnimationFrame(() => view.focus({ preventScroll: true }));
+        }
+      };
+      bindDragTrackers(onMove, finish);
+    });
+    return chip;
   };
 
   // Alt+ArrowUp / Alt+ArrowDown nudge the pinned token one slot.  Returns
@@ -1256,18 +1478,90 @@ function createPanel(node, textWidget) {
     }
   };
 
+  const machineTagPayload = (token) => ({
+    english: token.term,
+    chinese: token.chinese,
+    category: "Uncategorized",
+    models: ["general", "anima"],
+    source: "bpi-assistant",
+    verified: true,
+  });
+
   const saveMachineTranslation = (token) => {
-    openTagDialog({
-      english: token.term,
-      chinese: token.chinese,
-      category: "Uncategorized",
-      models: ["general", "anima"],
-      source: "bpi-assistant",
-      verified: true,
-    }, async () => {
+    openTagDialog(machineTagPayload(token), async () => {
       deleteMachineTranslation(token.key);
       await refreshDictionary();
     });
+  };
+
+  // 批量入库：把勾选的机器翻译词条一次性写进个人词库。
+  // 只用「当前列表里看得见的机器翻译行」——所见即所操作，切了筛选就换一批，
+  // 不会出现「已选 3 条但列表里一条都没有」这种对不上的情况。
+  const addSelectedMachineTranslations = async (tokens) => {
+    if (!tokens.length) {
+      setStatus("Check the entries you want to add first", "error");
+      return;
+    }
+    setStatus(`Adding “${tokens.length}” entries…`, "busy");
+    try {
+      const imported = await importTags(tokens.map(machineTagPayload), "overwrite");
+      for (const token of tokens) {
+        deleteMachineTranslation(token.key);
+        state.batchSelected.delete(token.key);
+      }
+      await refreshDictionary();
+      const total = imported.added + imported.replaced;
+      setStatus(imported.skipped
+        ? `Added “${total}” entries | new “${imported.added}”, replaced “${imported.replaced}”, skipped “${imported.skipped}”`
+        : `Added “${total}” entries | new “${imported.added}”, replaced “${imported.replaced}”`, "ok");
+    } catch (error) {
+      setStatus(error.message, "error");
+    }
+  };
+
+  // 机器翻译行的勾选框：只有这类行有待入库的译文，所以勾选只给它们。
+  const buildRowCheckButton = (token) => {
+    const checkbox = element("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = state.batchSelected.has(token.key);
+    checkbox.style.cssText = "flex:none;margin:0;accent-color:#3f83ba";
+    setTitle(checkbox, "Check this machine translation; use the toolbar above the table to add several entries to the personal dictionary at once");
+    checkbox.addEventListener("click", (event) => event.stopPropagation());
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) state.batchSelected.add(token.key); else state.batchSelected.delete(token.key);
+      render();
+    });
+    return checkbox;
+  };
+
+  // 表格上方的批量操作栏：全选 + 已选计数 + 加入个人词库。
+  // 没有机器翻译词条时整个隐藏，不占版面。
+  const renderMachineBatchBar = (tokens) => {
+    machineBatchBar.replaceChildren();
+    machineBatchBar.classList.toggle("bpi-hidden", tokens.length === 0);
+    if (!tokens.length) return;
+    const keys = tokens.map((token) => token.key);
+    const selectedCount = keys.filter((key) => state.batchSelected.has(key)).length;
+    const selectAll = element("input");
+    selectAll.type = "checkbox";
+    selectAll.style.cssText = "margin:0;accent-color:#3f83ba";
+    selectAll.checked = selectedCount === tokens.length;
+    selectAll.indeterminate = selectedCount > 0 && selectedCount < tokens.length;
+    selectAll.addEventListener("change", () => {
+      for (const key of keys) {
+        if (selectAll.checked) state.batchSelected.add(key); else state.batchSelected.delete(key);
+      }
+      render();
+    });
+    const label = element("label", "bpi-source-toggle");
+    label.append(selectAll, element("span", "", `Select all (${tokens.length} items)`));
+    const count = element("span", "bpi-mode-info", `Selected “${selectedCount}” / “${tokens.length}”`);
+    count.style.marginLeft = "auto";
+    const addButton = button("Add selected to personal dictionary", () => {
+      addSelectedMachineTranslations(tokens.filter((token) => state.batchSelected.has(token.key)));
+    }, "bpi-primary");
+    addButton.disabled = selectedCount === 0;
+    machineBatchBar.append(label, count, addButton);
   };
 
   const beginInlineEdit = (token) => {
@@ -1525,6 +1819,14 @@ function createPanel(node, textWidget) {
       englishTokenView.appendChild(element("span", "bpi-mirror-empty", "Linked tags will appear here after you finish editing English."));
       return;
     }
+    let line = null;
+    const currentLine = () => {
+      if (!line) {
+        line = element("div", "bpi-token-line");
+        englishTokenView.appendChild(line);
+      }
+      return line;
+    };
     for (const [index, token] of state.tokens.entries()) {
       const classes = ["bpi-mirror-token", "bpi-english-token", `bpi-${token.status}`];
       if (state.pinned === token.id) classes.push("bpi-linked");
@@ -1571,11 +1873,15 @@ function createPanel(node, textWidget) {
         });
         chip.appendChild(remove);
       }
-      englishTokenView.appendChild(chip);
+      currentLine().appendChild(chip);
       const next = state.tokens[index + 1];
-      if (next) {
-        const sourceGap = text.slice(token.end, next.start);
-        englishTokenView.appendChild(element("span", "bpi-mirror-separator", /[\r\n]/.test(sourceGap) ? "\n" : ", "));
+      if (!next) continue;
+      if (gapHasBreak(index)) {
+        // 换行块：它自己独占行尾，后面的标签另起一行，和「实际输出」的行结构一致
+        currentLine().appendChild(buildBreakChip(index, englishTokenView, ".bpi-english-token"));
+        line = null;
+      } else {
+        currentLine().appendChild(element("span", "bpi-mirror-separator", ", "));
       }
     }
     requestAnimationFrame(() => autoFitGreenArea(englishTokenView, 92));
@@ -1651,12 +1957,24 @@ function createPanel(node, textWidget) {
       }
       chineseMirror.appendChild(categoryTable);
     } else {
+      // 与英文标签区一样按换行分行，两区的行数始终一一对齐
+      let mirrorLine = null;
+      const currentMirrorLine = () => {
+        if (!mirrorLine) {
+          mirrorLine = element("div", "bpi-token-line");
+          chineseMirror.appendChild(mirrorLine);
+        }
+        return mirrorLine;
+      };
       for (const [index, token] of state.tokens.entries()) {
-        chineseMirror.appendChild(tokenChip(token));
+        currentMirrorLine().appendChild(tokenChip(token));
         const next = state.tokens[index + 1];
-        if (next) {
-          const sourceGap = text.slice(token.end, next.start);
-          chineseMirror.appendChild(element("span", "bpi-mirror-separator", /[\r\n]/.test(sourceGap) ? "\n" : "，"));
+        if (!next) continue;
+        if (gapHasBreak(index)) {
+          currentMirrorLine().appendChild(buildBreakChip(index, chineseMirror, ".bpi-mirror-token"));
+          mirrorLine = null;
+        } else {
+          currentMirrorLine().appendChild(element("span", "bpi-mirror-separator", "，"));
         }
       }
     }
@@ -1935,6 +2253,9 @@ function createPanel(node, textWidget) {
     renderChineseMirror(text);
     if (hasNodeSize()) requestNodeResize();
     const personalKeys = new Set(state.data.user.map((tag) => normalizeKey(tag.english)));
+    // 勾选跟着当前提示词走：换了文本后旧 key 留着没意义，顺手清掉
+    const machineKeys = new Set(state.tokens.filter((token) => token.status === "machine").map((token) => token.key));
+    for (const key of [...state.batchSelected]) if (!machineKeys.has(key)) state.batchSelected.delete(key);
     const visibleTokens = state.tokens.filter((token) => {
       if (state.tableFilter === "unknown") return token.status === "unknown";
       if (state.tableFilter === "machine") return token.status === "machine";
@@ -1942,6 +2263,7 @@ function createPanel(node, textWidget) {
       if (state.tableFilter === "favorites") return isFavorite(token.term);
       return true;
     });
+    renderMachineBatchBar(visibleTokens.filter((token) => token.status === "machine"));
     const errorsByKey = new Map();
     for (const item of state.issues) {
       for (const key of item.tokenKeys ?? []) {
@@ -1970,6 +2292,7 @@ function createPanel(node, textWidget) {
         row.dataset.tokenId = String(token.id);
         if (state.pinned === token.id) row.classList.add("bpi-pinned");
         const englishCell = element("div", "bpi-cell bpi-en");
+        if (token.status === "machine") englishCell.appendChild(buildRowCheckButton(token));
         if (state.tableFilter === "all" && canReorderTokens()) {
           englishCell.appendChild(buildRowDragHandle(row, token));
         }
@@ -2360,7 +2683,7 @@ function createPanel(node, textWidget) {
   toolbar.append(leftTools, rightTools);
   searchLine.append(modeSelect, searchLabel, search);
   summary.append(counts, modeInfo, status);
-  detailsBody.append(toolbar, searchLine, results, summary, filtersBar, issuesPanel, table, detailsHiddenBar);
+  detailsBody.append(toolbar, searchLine, results, summary, filtersBar, machineBatchBar, issuesPanel, table, detailsHiddenBar);
   panel.append(englishSection, mirrorSection, aboutFooter);
   panel.addEventListener("mousedown", (event) => event.stopPropagation());
   panel.addEventListener("wheel", (event) => event.stopPropagation(), { passive: true });
@@ -2392,7 +2715,8 @@ function createPanel(node, textWidget) {
   setTitle(englishEditor, "Stay in text editing while typing; switch to tag view on blur or after clicking Done");
   setTitle(chineseEditor, "Enter Chinese, English, or mixed text; drag the bottom-right corner to resize (auto-saved)");
   englishTokenView.addEventListener("click", (event) => {
-    if (event.target !== englishTokenView) return;
+    // 分行之后空白处的点击目标是行容器，也算点在空白处
+    if (event.target !== englishTokenView && !event.target.classList?.contains("bpi-token-line")) return;
     state.pinned = null;
     render();
   });
