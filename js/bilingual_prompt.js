@@ -118,19 +118,25 @@ function createPanel(node, textWidget) {
   const panel = element("div", "bpi-panel");
   const englishSection = element("section", "bpi-english-section");
   const englishHead = element("div", "bpi-english-head");
-  const englishTitle = element("span", "", "English prompt (actual output)");
+  const englishTitle = element("span", "", "Prompt (English on top, Chinese below)");
   const englishHint = element("span", "bpi-english-hint", "Edit directly when empty");
   const editEnglishButton = element("button", "bpi-button bpi-mini", "Done");
   const clearEnglishButton = element("button", "bpi-button bpi-mini bpi-danger", "Clear");
   const favoriteButton = element("button", "bpi-button bpi-mini", "Favorite");
   const insertBreakButton = element("button", "bpi-button bpi-mini", "Insert line break");
+  // 中文不再单独占一块：每个英文标签下面直接跟一行中文，构成一张双语小卡。
+  // 翻译类动作已移到侧边栏，节点里只保留「直接作用于英文提示词」的这两个。
+  const optimizeChineseButton = element("button", "bpi-button bpi-mini", "Optimize to Anima");
+  const sortPromptButton = element("button", "bpi-button bpi-mini", "Sort by Anima order");
   editEnglishButton.type = "button";
   clearEnglishButton.type = "button";
   favoriteButton.type = "button";
   insertBreakButton.type = "button";
+  optimizeChineseButton.type = "button";
+  sortPromptButton.type = "button";
   setTitle(favoriteButton, "Save the current English prompt to favorites in the user directory (a reference image can be attached)");
   setTitle(insertBreakButton, "Insert a line break after the selected tag, or at the end when no tag is selected");
-  englishHead.append(englishTitle, englishHint, editEnglishButton, clearEnglishButton, insertBreakButton, favoriteButton);
+  englishHead.append(englishTitle, englishHint, editEnglishButton, clearEnglishButton, insertBreakButton, favoriteButton, optimizeChineseButton, sortPromptButton);
   const englishTokenView = element("div", "bpi-english-token-view bpi-hidden");
   englishTokenView.tabIndex = 0;
   englishTokenView.setAttribute("role", "textbox");
@@ -161,35 +167,6 @@ function createPanel(node, textWidget) {
   const cancelButton = button("Discard", () => cancelUpstreamWait());
   sourceBar.append(sourceCaption, sourceToggleLabel, sourceSelect, sourceState, resumeButton, cancelButton);
   englishSection.append(sourceBar, englishHead, englishTokenView, englishHiddenBar, englishEditor);
-  const mirrorSection = element("section", "bpi-mirror-section");
-  const mirrorHead = element("div", "bpi-section-head");
-  const mirrorTitle = element("span", "", "Chinese sync editor (per-tag composition)");
-  const mirrorHint = element("span", "bpi-section-hint", "Click to link | select then press Delete");
-  const mirrorActions = element("div", "bpi-mirror-actions");
-  const editChineseButton = element("button", "bpi-button bpi-mini", "Edit text");
-  const translateChineseButton = element("button", "bpi-button bpi-mini", "Translate");
-  const translateOptimizeButton = element("button", "bpi-button bpi-mini bpi-primary", "Translate & optimize");
-  const optimizeChineseButton = element("button", "bpi-button bpi-mini", "Optimize to Anima");
-  const expandChineseButton = element("button", "bpi-button bpi-mini", "Expand edit");
-  const syncTextButton = element("button", "bpi-button bpi-mini", "Sync to English output");
-  const sortPromptButton = element("button", "bpi-button bpi-mini", "Sort by Anima order");
-  // 已注释：标签管理与助手设置入口已在侧边栏管理面板提供，节点内重复入口移除以简化界面。
-  // 如需恢复，取消下面两行注释并在 mirrorActions.append 与 bindMirrorAction 处一并恢复。
-  // const assistantSettingsButton = element("button", "bpi-button bpi-mini", "助手设置");
-  // const tagManagerButton = element("button", "bpi-button bpi-mini", "标签管理");
-  for (const control of [editChineseButton, expandChineseButton, translateChineseButton, translateOptimizeButton, optimizeChineseButton, syncTextButton, sortPromptButton]) control.type = "button";
-  mirrorActions.append(editChineseButton, expandChineseButton, translateChineseButton, translateOptimizeButton, optimizeChineseButton, syncTextButton, sortPromptButton
-    // tagManagerButton, assistantSettingsButton
-  );
-  mirrorHead.append(mirrorTitle, mirrorHint, mirrorActions);
-  const chineseMirror = element("div", "bpi-chinese-mirror");
-  chineseMirror.tabIndex = 0;
-  chineseMirror.setAttribute("role", "textbox");
-  chineseMirror.setAttribute("aria-label", "Per-tag Chinese sync view");
-  chineseMirror.setAttribute("aria-readonly", "true");
-  const chineseEditor = element("textarea", "bpi-chinese-editor bpi-hidden");
-  setPlaceholder(chineseEditor, "Enter Chinese, English, or mixed text; use “Translate” or “Translate & optimize”, then sync to the English output separately after confirming.");
-  mirrorSection.append(mirrorHead, chineseMirror, chineseEditor);
   const detailsBody = element("div", "bpi-details-body");
   const detailsHiddenBar = element("div", "bpi-hidden-bar bpi-hidden");
   const toolbar = element("div", "bpi-toolbar");
@@ -306,15 +283,12 @@ function createPanel(node, textWidget) {
     searchVisibleLimit: 40,
     lastRenderedSearchQuery: "",
     categoryView: false,
-    chineseEditing: false,
     englishEditing: !String(textWidget.value ?? "").trim(),
     englishEditingExplicit: false,
     englishEditorDirty: false,
     englishClearState: "idle",
     clearedEnglishEntry: null,
     assistantBusy: false,
-    stagedText: null,
-    editorInitialized: false,
     undoStack: [],
     redoStack: [],
     boundTextarea: null,
@@ -341,16 +315,12 @@ function createPanel(node, textWidget) {
   };
   const autoFitGreenArea = (target, minimum) => {
     if (!target || target.classList.contains("bpi-hidden")) return;
-    const preferred = target === chineseEditor ? state.preferences.chineseEditorHeight : 0;
-    const maximum = target === chineseEditor ? 600 : 360;
+    const maximum = 360;
     target.style.height = "auto";
-    const height = Math.max(minimum, preferred, Math.min(maximum, Math.ceil(target.scrollHeight + 2)));
+    const height = Math.max(minimum, Math.min(maximum, Math.ceil(target.scrollHeight + 2)));
     target.style.height = `${height}px`;
     target.style.overflowY = target.scrollHeight > height + 1 ? "auto" : "hidden";
   };
-  const autoFitActiveGreenArea = () => requestAnimationFrame(() => {
-    autoFitGreenArea(state.chineseEditing ? chineseEditor : chineseMirror, state.chineseEditing ? 110 : 92);
-  });
   const hasNodeSize = () => Number.isFinite(Number(node.size?.[0])) && Number.isFinite(Number(node.size?.[1]));
   const resizeCornerHit = (elementValue, event) => {
     const bounds = elementValue.getBoundingClientRect();
@@ -392,15 +362,6 @@ function createPanel(node, textWidget) {
         if (hasNodeSize() && Math.abs(delta) > 0.5) {
           node.setSize?.([node.size[0], Math.max(COLLAPSED_NODE_MIN_HEIGHT, resize.startNodeHeight + delta)]);
         }
-      } else if (resize.kind === "chinese") {
-        const height = Math.max(110, Math.min(600, Math.round(resize.target.offsetHeight)));
-        const delta = height - resize.startHeight;
-        resize.target.style.height = `${height}px`;
-        state.preferences = { ...state.preferences, chineseEditorHeight: height };
-        persistPreferences();
-        if (hasNodeSize() && Math.abs(delta) > 0.5) {
-          node.setSize?.([node.size[0], Math.max(COLLAPSED_NODE_MIN_HEIGHT, resize.startNodeHeight + delta)]);
-        }
       }
       node.graph?.change?.();
       node.graph?.setDirtyCanvas?.(true, true);
@@ -414,8 +375,7 @@ function createPanel(node, textWidget) {
     const pixels = (name) => Number.parseFloat(styles.getPropertyValue(name)) || 0;
     // 底部快捷输入区是后加的，这里用选择器取高度，避免引用尚未初始化的常量
     const quickHeight = panel.querySelector(".bpi-quick-section")?.offsetHeight ?? 0;
-    const height = mirrorSection.offsetHeight
-      + englishSection.offsetHeight
+    const height = englishSection.offsetHeight
       + quickHeight
       + pixels("padding-top")
       + pixels("padding-bottom")
@@ -509,8 +469,6 @@ function createPanel(node, textWidget) {
   const findTextarea = () => {
     const resolved = resolveDeepestWidget(textWidget);
     const isEnglishTextarea = (candidate) => candidate?.tagName === "TEXTAREA"
-      && candidate !== chineseEditor
-      && !candidate.classList.contains("bpi-chinese-editor")
       && !panel.contains(candidate);
     for (const widget of [resolved, textWidget]) {
       for (const candidate of [widget?.inputEl, widget?.element]) {
@@ -569,7 +527,6 @@ function createPanel(node, textWidget) {
 
   englishEditor.value = String(textWidget.value ?? "");
   if (state.preferences.englishInputHeight) applyEnglishEditorHeight(state.preferences.englishInputHeight);
-  if (state.preferences.chineseEditorHeight) chineseEditor.style.height = `${state.preferences.chineseEditorHeight}px`;
   applyTableSplit(state.preferences.tableSplit ?? 0.4);
 
   const setEnglishEditing = (editing, explicit = true) => {
@@ -609,31 +566,6 @@ function createPanel(node, textWidget) {
   };
 
   const containsChinese = (value) => /[\u3400-\u9fff]/.test(String(value ?? ""));
-  const updateStageControls = () => {
-    const value = chineseEditor.value.trim();
-    const syncable = Boolean(value) && !containsChinese(value);
-    syncTextButton.disabled = state.assistantBusy || !state.chineseEditing || !syncable;
-    setTitle(syncTextButton, syncable
-      ? "Write the current English result to the actual output above after preview"
-      : "Only the English result in the green editing area can be synced to the actual output");
-  };
-  const setStagedResult = (text, label, requireAnima = false) => {
-    const value = String(text ?? "").trim();
-    state.chineseEditing = true;
-    state.editorInitialized = true;
-    state.stagedText = { text: value, label, requireAnima };
-    chineseEditor.value = value;
-    chineseMirror.classList.add("bpi-hidden");
-    chineseEditor.classList.remove("bpi-hidden");
-    setText(editChineseButton, "Back to link");
-    setText(mirrorTitle, `Text processing result: “${label}”`);
-    setText(mirrorHint, containsChinese(value)
-      ? "Chinese results are for reading only; to generate images, continue with translation or optimization"
-      : "result not yet written to the model; after confirming, click “Sync to English output”");
-    updateStageControls();
-    autoFitActiveGreenArea();
-  };
-
   const applyFullText = (nextText, label) => {
     const before = String(textWidget.value ?? "");
     const after = String(nextText ?? "").trim();
@@ -645,7 +577,7 @@ function createPanel(node, textWidget) {
       if (label === "Anima official sort") {
         state.categoryView = true;
         render();
-        setText(mirrorHint, "Category table view | click tags to link; category names are not written to the prompt");
+        setText(englishHint, "Category table view | click tags to link; category names are not written to the prompt");
       }
       setStatus("No content change", "ok");
       return false;
@@ -664,16 +596,9 @@ function createPanel(node, textWidget) {
     state.redoStack = [];
     state.pinned = null;
     state.categoryView = label === "Anima official sort";
-    state.chineseEditing = false;
-    state.editorInitialized = false;
-    state.stagedText = null;
-    chineseEditor.classList.add("bpi-hidden");
-    chineseMirror.classList.remove("bpi-hidden");
-    setText(editChineseButton, "Edit text");
-    setText(mirrorTitle, "Chinese sync editor (per-tag composition)");
-    setText(mirrorHint, state.categoryView
+    setText(englishHint, state.categoryView
       ? "Category table view | click tags to link; category names are not written to the prompt"
-      : "Click to link | select then press Delete");
+      : "Click tags to link; select then press Delete");
     state.englishEditing = false;
     state.englishEditingExplicit = false;
     state.englishEditorDirty = false;
@@ -682,7 +607,6 @@ function createPanel(node, textWidget) {
     englishTokenView.classList.remove("bpi-hidden");
     setText(editEnglishButton, "Edit text");
     setText(englishHint, "Click tags to link; select then press Delete");
-    updateStageControls();
     updateText(after);
     setStatus(`applied “${label}”; press Ctrl+Z to undo`, "ok");
     return true;
@@ -719,11 +643,6 @@ function createPanel(node, textWidget) {
     state.redoStack = [];
     state.pinned = null;
     state.categoryView = false;
-    state.chineseEditing = false;
-    state.editorInitialized = false;
-    state.stagedText = null;
-    chineseEditor.classList.add("bpi-hidden");
-    chineseMirror.classList.remove("bpi-hidden");
     state.englishEditing = true;
     state.englishEditingExplicit = true;
     state.englishEditorDirty = false;
@@ -766,36 +685,9 @@ function createPanel(node, textWidget) {
     modal.addEventListener("mousedown", (event) => event.stopPropagation());
   };
 
-  const openExpandedChineseEditor = () => {
-    if (!state.chineseEditing) setChineseEditing(true);
-    const shade = element("div", "bpi-modal-shade");
-    const modal = element("div", "bpi-modal bpi-assistant-settings");
-    modal.appendChild(element("h3", "", "Expand edit Chinese / mixed text"));
-    const editor = element("textarea", "bpi-preview-text");
-    editor.style.minHeight = "360px";
-    editor.style.resize = "vertical";
-    editor.value = chineseEditor.value;
-    modal.appendChild(editor);
-    const actions = element("div", "bpi-modal-actions");
-    const close = () => shade.remove();
-    actions.append(button("Cancel", close), button("Apply to editor", () => {
-      chineseEditor.value = editor.value;
-      chineseEditor.dispatchEvent(new Event("input", { bubbles: true }));
-      close();
-      chineseEditor.focus({ preventScroll: true });
-    }, "bpi-primary"));
-    modal.appendChild(actions);
-    shade.appendChild(modal);
-    document.body.appendChild(shade);
-    shade.addEventListener("mousedown", (event) => { if (event.target === shade) close(); });
-    modal.addEventListener("mousedown", (event) => event.stopPropagation());
-    setTimeout(() => editor.focus(), 0);
-  };
-
   const revealLinkedToken = (token) => {
     if (!token) return;
     table.querySelector(`.bpi-row[data-token-id="${token.id}"]`)?.scrollIntoView?.({ block: "nearest" });
-    chineseMirror.querySelector(`.bpi-mirror-token[data-token-id="${token.id}"]`)?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
     englishTokenView.querySelector(`.bpi-english-token[data-token-id="${token.id}"]`)?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
   };
 
@@ -853,7 +745,7 @@ function createPanel(node, textWidget) {
     state.redoStack = [];
     state.pinned = null;
     updateText(result.text, result.cursor);
-    setStatus(`${action}; press Ctrl+Z to undo`, "ok");
+    setStatus(`“${action}”; press Ctrl+Z to undo`, "ok");
     return true;
   };
 
@@ -1615,7 +1507,7 @@ function createPanel(node, textWidget) {
   const translateToken = async (token) => {
     if (!token?.key || state.translating.has(token.key)) return;
     state.translating.add(token.key);
-    setStatus(`Translating: ${token.term}`, "busy");
+    setStatus(`Translating: “${token.term}”`, "busy");
     render();
     try {
       const naturalLanguage = token.segmentKind === "natural" || ["natural", "instruction"].includes(token.inputMode);
@@ -1651,100 +1543,42 @@ function createPanel(node, textWidget) {
     }
   };
 
-  const chineseDraftFromTokens = () => state.tokens.map((token) => {
-    if (token.syntax === "special" || token.syntax === "operator") return token.raw;
-    const label = token.status === "unknown" ? token.term : token.chinese;
-    return token.weight === null ? label : `(${label}:${token.weight})`;
-  }).join("，");
-
-  const setChineseEditing = (editing) => {
-    state.chineseEditing = Boolean(editing);
-    chineseMirror.classList.toggle("bpi-hidden", state.chineseEditing);
-    chineseEditor.classList.toggle("bpi-hidden", !state.chineseEditing);
-    setText(editChineseButton, state.chineseEditing ? "Back to link" : "Edit text");
-    setText(mirrorTitle, state.chineseEditing ? "Text editing & processing (mixed CN/EN supported)" : "Chinese sync editor (per-tag composition)");
-    setText(mirrorHint, state.chineseEditing
-      ? "Processing results stay here; click Sync to write to the English output above"
-      : state.categoryView
-        ? "Category table view | click tags to link; category names are not written to the prompt"
-        : "Click to link | select then press Delete");
-    if (state.chineseEditing) {
-      if (!state.editorInitialized) {
-        chineseEditor.value = chineseDraftFromTokens();
-        state.editorInitialized = true;
-        state.stagedText = null;
-      }
-      requestAnimationFrame(() => {
-        autoFitGreenArea(chineseEditor, 110);
-        chineseEditor.focus();
-        chineseEditor.setSelectionRange(chineseEditor.value.length, chineseEditor.value.length);
-      });
-    } else {
-      autoFitActiveGreenArea();
-    }
-    updateStageControls();
-    if (hasNodeSize()) requestNodeResize();
-  };
-
   const setAssistantBusy = (busy) => {
     state.assistantBusy = Boolean(busy);
-    translateChineseButton.disabled = state.assistantBusy;
-    translateOptimizeButton.disabled = state.assistantBusy;
     optimizeChineseButton.disabled = state.assistantBusy;
     sortPromptButton.disabled = state.assistantBusy;
-    updateStageControls();
   };
 
-  const runTextAssistant = async (action) => {
+  // 「优化为 Anima」只处理英文提示词本身（中文翻译在侧边栏做），
+  // 结果不直接写回，先弹预览让用户确认。
+  const runAnimaOptimize = async () => {
     if (state.assistantBusy) return;
-    if (!state.chineseEditing) setChineseEditing(true);
-    const source = chineseEditor.value.trim();
+    const source = String(textWidget.value ?? "").trim();
     if (!source) {
-      setStatus("Please enter content in the green text editor first", "error");
+      setStatus("English prompt is empty; nothing to optimize", "error");
       return;
     }
-    if (action === "optimize" && containsChinese(source)) {
-      setStatus("“Optimize to Anima” only processes English; for Chinese or mixed content, use “Translate & optimize”", "error");
+    if (containsChinese(source)) {
+      setStatus("“Optimize to Anima” only processes English; translate Chinese in the sidebar first", "error");
       return;
     }
+    const label = "Optimize to Anima";
     setAssistantBusy(true);
-    const labels = {
-      translate: "Translate",
-      translate_optimize: "Translate & optimize",
-      optimize: "Optimize to Anima",
-    };
-    const label = labels[action];
     setStatus(`Running “${label}”…`, "busy");
     try {
-      const output = await runInspectorAssistant(action, source);
-      setStagedResult(output, label, action !== "translate");
-      setStatus(`“${label}”completed; result not yet synced to the English output above`, "ok");
+      const output = await runInspectorAssistant("optimize", source);
+      const punctuationError = animaPunctuationError(output);
+      openTextPreview("Optimize to Anima", output, null, label);
+      if (punctuationError) {
+        setStatus(`“${punctuationError}”; please fix it in the preview before confirming`, "error");
+      } else {
+        setStatus(`“${label}” done; please confirm in the preview window`, "ok");
+      }
     } catch (error) {
       setStatus(error.message, "error");
     } finally {
       setAssistantBusy(false);
     }
-  };
-
-  const syncEditedText = () => {
-    const proposed = chineseEditor.value.trim();
-    if (!proposed) {
-      setStatus("Green text editor is empty", "error");
-      return;
-    }
-    if (containsChinese(proposed)) {
-      setStatus("The current result contains Chinese and cannot be synced to the English model input", "error");
-      return;
-    }
-    if (state.stagedText?.requireAnima) {
-      const punctuationError = animaPunctuationError(proposed);
-      if (punctuationError) {
-        setStatus(`“${punctuationError}”; please fix before syncing`, "error");
-        return;
-      }
-    }
-    const label = state.stagedText?.label ? `${state.stagedText.label}Sync` : "Text sync";
-    openTextPreview("Sync to English output", proposed, null, label);
   };
 
   const ensureLargeEntriesFor = async (tokens) => {
@@ -1779,7 +1613,7 @@ function createPanel(node, textWidget) {
       if (result.text === source) {
         state.categoryView = true;
         render();
-        setText(mirrorHint, "Category table view | click tags to link; category names are not written to the prompt");
+        setText(englishHint, "Category table view | click tags to link; category names are not written to the prompt");
         setStatus(`already matches Anima order${result.uncertain.length ? ` | pending ${result.uncertain.length} items` : ""}`, "ok");
         return;
       }
@@ -1797,6 +1631,82 @@ function createPanel(node, textWidget) {
     } finally {
       setAssistantBusy(false);
     }
+  };
+
+  const tokenChineseLabel = (token) => {
+    if (token.status === "unknown") return "Not indexed";
+    const base = token.chinese || "";
+    return token.weight === null ? base : `${base} ${t(`(weight ${token.weight})`)}`;
+  };
+
+  // 一张双语小卡 = 上面英文标签 chip（拖拽 / 权重 / 隐藏 / 删除都挂在它身上）+ 下面对应中文。
+  // chip 的结构与交互完全沿用原来的英文标签，只是外面多包一层卡片，
+  // 所以 attachChipDrag 那套按 .bpi-english-token 命中的逻辑不用改。
+  const buildTokenCard = (token) => {
+    const classes = ["bpi-mirror-token", "bpi-english-token", `bpi-${token.status}`];
+    if (state.pinned === token.id) classes.push("bpi-linked");
+    const label = token.raw.trim() || token.term;
+    const chip = element("span", classes.join(" "), label);
+    chip.dataset.tokenId = String(token.id);
+    setTitle(chip, token.segmentKind === "natural"
+      ? `“${token.term}” ↔ “${token.chinese}” | natural language supports only whole-segment editing; can drag to reorder the whole segment`
+      : `“${token.term}” ↔ “${token.chinese}” | click to link; double-click to edit weight; select then press Delete; drag to reorder or Alt+↑/↓ to nudge`);
+    attachChipDrag(chip, token);
+    if (canHideTokens()) {
+      const hideCorner = element("span", "bpi-chip-hide");
+      hideCorner.appendChild(buildEyeIcon());
+      setTitle(hideCorner, `Hide “${token.raw}”: excluded from actual output; can be restored in the hidden section`);
+      hideCorner.addEventListener("pointerdown", (event) => event.stopPropagation());
+      hideCorner.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        hideToken(token);
+      });
+      chip.appendChild(hideCorner);
+    }
+    chip.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (chipClickSuppressed) return;
+      activateToken(token);
+      englishTokenView.focus({ preventScroll: true });
+    });
+    chip.addEventListener("dblclick", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (chipClickSuppressed) return;
+      window.getSelection()?.removeAllRanges();
+      activateToken(token);
+      englishTokenView.focus({ preventScroll: true });
+      openWeightEditor(token);
+    });
+    if (state.pinned === token.id && ["tags", "mixed"].includes(state.modeInfo.mode) && token.segmentKind !== "natural") {
+      const remove = element("span", "bpi-mirror-delete", "×");
+      setTitle(remove, `Delete “${token.term}”`);
+      remove.addEventListener("click", (event) => {
+        event.stopPropagation();
+        deleteTokenOccurrence(token);
+      });
+      chip.appendChild(remove);
+    }
+    const chinese = element("span", "bpi-token-card-zh", tokenChineseLabel(token));
+    setTitle(chinese, `“${token.term}” ↔ “${token.chinese}”`);
+    const card = element("span", "bpi-token-card");
+    card.append(chip, chinese);
+    return card;
+  };
+
+  // 分类表视图：原来画在中文对照区，合并后挪到同一张卡片里，每行仍是一张双语小卡
+  const buildCategoryTable = () => {
+    const categoryTable = element("div", "bpi-category-table");
+    for (const group of groupAnimaTokensForDisplay(state.tokens)) {
+      const row = element("div", "bpi-category-row");
+      const name = element("div", "bpi-category-name", group.label);
+      const content = element("div", "bpi-category-content");
+      for (const token of group.tokens) content.appendChild(buildTokenCard(token));
+      row.append(name, content);
+      categoryTable.appendChild(row);
+    }
+    return categoryTable;
   };
 
   const renderEnglishTokenView = (text) => {
@@ -1822,6 +1732,11 @@ function createPanel(node, textWidget) {
       englishTokenView.appendChild(element("span", "bpi-mirror-empty", "Linked tags will appear here after you finish editing English."));
       return;
     }
+    if (state.categoryView) {
+      englishTokenView.appendChild(buildCategoryTable());
+      requestAnimationFrame(() => autoFitGreenArea(englishTokenView, 92));
+      return;
+    }
     let line = null;
     const currentLine = () => {
       if (!line) {
@@ -1831,52 +1746,7 @@ function createPanel(node, textWidget) {
       return line;
     };
     for (const [index, token] of state.tokens.entries()) {
-      const classes = ["bpi-mirror-token", "bpi-english-token", `bpi-${token.status}`];
-      if (state.pinned === token.id) classes.push("bpi-linked");
-      const label = token.raw.trim() || token.term;
-      const chip = element("span", classes.join(" "), label);
-      chip.dataset.tokenId = String(token.id);
-      setTitle(chip, token.segmentKind === "natural"
-        ? `“${token.term}” ↔ “${token.chinese}” | natural language supports only whole-segment editing; can drag to reorder the whole segment`
-        : `“${token.term}” ↔ “${token.chinese}” | click to link; double-click to edit weight; select then press Delete; drag to reorder or Alt+↑/↓ to nudge`);
-      attachChipDrag(chip, token);
-      if (canHideTokens()) {
-        const hideCorner = element("span", "bpi-chip-hide");
-        hideCorner.appendChild(buildEyeIcon());
-        setTitle(hideCorner, `Hide “${token.raw}”: excluded from actual output; can be restored in the hidden section`);
-        hideCorner.addEventListener("pointerdown", (event) => event.stopPropagation());
-        hideCorner.addEventListener("click", (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          hideToken(token);
-        });
-        chip.appendChild(hideCorner);
-      }
-      chip.addEventListener("click", (event) => {
-        event.stopPropagation();
-        if (chipClickSuppressed) return;
-        activateToken(token);
-        englishTokenView.focus({ preventScroll: true });
-      });
-      chip.addEventListener("dblclick", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        if (chipClickSuppressed) return;
-        window.getSelection()?.removeAllRanges();
-        activateToken(token);
-        englishTokenView.focus({ preventScroll: true });
-        openWeightEditor(token);
-      });
-      if (state.pinned === token.id && ["tags", "mixed"].includes(state.modeInfo.mode) && token.segmentKind !== "natural") {
-        const remove = element("span", "bpi-mirror-delete", "×");
-        setTitle(remove, `Delete “${token.term}”`);
-        remove.addEventListener("click", (event) => {
-          event.stopPropagation();
-          deleteTokenOccurrence(token);
-        });
-        chip.appendChild(remove);
-      }
-      currentLine().appendChild(chip);
+      currentLine().appendChild(buildTokenCard(token));
       const next = state.tokens[index + 1];
       if (!next) continue;
       if (gapHasBreak(index)) {
@@ -1888,100 +1758,6 @@ function createPanel(node, textWidget) {
       }
     }
     requestAnimationFrame(() => autoFitGreenArea(englishTokenView, 92));
-  };
-
-  const renderChineseMirror = (text) => {
-    if (!state.chineseEditing) {
-      setText(mirrorHint, state.categoryView
-        ? "Category table view | click tags to link; category names are not written to the prompt"
-        : "Click to link | select then press Delete");
-    }
-    chineseMirror.replaceChildren();
-    if (!state.tokens.length) {
-      chineseMirror.appendChild(element("span", "bpi-mirror-empty", "Per-tag Chinese combinations for the English prompt will appear here."));
-      autoFitActiveGreenArea();
-      return;
-    }
-    const tokenChip = (token) => {
-      const classes = ["bpi-mirror-token", `bpi-${token.status}`];
-      if (state.pinned === token.id) classes.push("bpi-linked");
-      const label = token.status === "unknown"
-        ? `⚠ Not indexed: “${token.term}”`
-        : `${token.chinese}${token.weight === null ? "" : ` ${t(`(weight ${token.weight})`)}`}`;
-      const chip = element("span", classes.join(" "), label);
-      chip.dataset.tokenId = String(token.id);
-      setTitle(chip, token.segmentKind === "natural"
-        ? `“${token.raw}” ↔ “${token.chinese}” | natural language supports only whole-segment editing or translation`
-        : token.status === "unknown"
-          ? `Unknown English tag: “${token.term}” | click to locate; double-click to edit weight`
-          : `“${token.raw}” ↔ “${token.chinese}” | click to locate; double-click to edit weight; select then press Delete; drag to reorder or Alt+↑/↓ to nudge`);
-      // 中文对照区与英文标签区的 chip 一一对应同一个 token，拖动它同样是重排原文。
-      attachChipDrag(chip, token, chineseMirror, ".bpi-mirror-token");
-      chip.addEventListener("click", (event) => {
-        event.stopPropagation();
-        if (token.status === "unknown") state.tableFilter = "unknown";
-        activateToken(token);
-        chineseMirror.focus({ preventScroll: true });
-        if (token.status === "unknown") {
-          requestAnimationFrame(() => detailsBody.querySelector(`.bpi-row[data-token-id="${token.id}"]`)?.scrollIntoView?.({ block: "nearest" }));
-        }
-      });
-      chip.addEventListener("dblclick", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        window.getSelection()?.removeAllRanges();
-        activateToken(token);
-        chineseMirror.focus({ preventScroll: true });
-        openWeightEditor(token);
-      });
-      if (state.pinned === token.id && ["tags", "mixed"].includes(state.modeInfo.mode) && token.segmentKind !== "natural") {
-        const remove = element("span", "bpi-mirror-delete", "×");
-        setTitle(remove, `Delete “${token.term}”`);
-        remove.addEventListener("click", (event) => {
-          event.stopPropagation();
-          deleteTokenOccurrence(token);
-        });
-        chip.appendChild(remove);
-      }
-      return chip;
-    };
-    if (state.categoryView) {
-      const categoryTable = element("div", "bpi-category-table");
-      for (const group of groupAnimaTokensForDisplay(state.tokens)) {
-        const row = element("div", "bpi-category-row");
-        const name = element("div", "bpi-category-name", group.label);
-        const content = element("div", "bpi-category-content");
-        for (const [index, token] of group.tokens.entries()) {
-          content.appendChild(tokenChip(token));
-          if (index < group.tokens.length - 1) content.appendChild(element("span", "bpi-mirror-separator", "，"));
-        }
-        row.append(name, content);
-        categoryTable.appendChild(row);
-      }
-      chineseMirror.appendChild(categoryTable);
-    } else {
-      // 与英文标签区一样按换行分行，两区的行数始终一一对齐
-      let mirrorLine = null;
-      const currentMirrorLine = () => {
-        if (!mirrorLine) {
-          mirrorLine = element("div", "bpi-token-line");
-          chineseMirror.appendChild(mirrorLine);
-        }
-        return mirrorLine;
-      };
-      for (const [index, token] of state.tokens.entries()) {
-        currentMirrorLine().appendChild(tokenChip(token));
-        const next = state.tokens[index + 1];
-        if (!next) continue;
-        if (gapHasBreak(index)) {
-          currentMirrorLine().appendChild(buildBreakChip(index, chineseMirror, ".bpi-mirror-token"));
-          mirrorLine = null;
-        } else {
-          currentMirrorLine().appendChild(element("span", "bpi-mirror-separator", "，"));
-        }
-      }
-    }
-    autoFitActiveGreenArea();
   };
 
   // Drag handle for the details table rows: grab the ⠿ grip to drag a token
@@ -2253,7 +2029,6 @@ function createPanel(node, textWidget) {
     state.issues = analyzePromptSyntax(text, state.tokens, state.modeInfo);
     if (state.pinned !== null && !state.tokens.some((token) => token.id === state.pinned)) state.pinned = null;
     renderEnglishTokenView(text);
-    renderChineseMirror(text);
     if (hasNodeSize()) requestNodeResize();
     const personalKeys = new Set(state.data.user.map((tag) => normalizeKey(tag.english)));
     // 勾选跟着当前提示词走：换了文本后旧 key 留着没意义，顺手清掉
@@ -2312,7 +2087,7 @@ function createPanel(node, textWidget) {
             englishEditor.focus({ preventScroll: true });
             englishEditor.setSelectionRange(token.start, token.end, "forward");
           });
-          setStatus(`Located: ${token.term}`, "ok");
+          setStatus(`Located: “${token.term}”`, "ok");
         });
         englishCell.appendChild(englishText);
         const isEditing = state.editing?.id === token.id && state.editing?.key === token.key;
@@ -2728,7 +2503,7 @@ function createPanel(node, textWidget) {
       const translated = await runInspectorAssistant(mode === "optimize" ? "translate_optimize" : "translate", raw);
       const validation = validateTranslationResult(raw, translated, {});
       if (!validation.ok) {
-        setStatus(`Rejected abnormal translation: ${validation.reason}`, "error");
+        setStatus(`Rejected abnormal translation: “${validation.reason}”`, "error");
         return;
       }
       const english = validation.text.replace(/[\s,，]+$/u, "").trim();
@@ -2760,7 +2535,7 @@ function createPanel(node, textWidget) {
     event.stopPropagation();
     submitQuickInput(event.ctrlKey || event.metaKey ? "optimize" : "translate");
   });
-  panel.append(englishSection, mirrorSection, quickSection, aboutFooter);
+  panel.append(englishSection, quickSection, aboutFooter);
   panel.addEventListener("mousedown", (event) => event.stopPropagation());
   panel.addEventListener("wheel", (event) => event.stopPropagation(), { passive: true });
   const handleTokenViewKeydown = (event) => {
@@ -2775,29 +2550,11 @@ function createPanel(node, textWidget) {
     deleteTokenOccurrence(token);
   };
   englishTokenView.addEventListener("keydown", handleTokenViewKeydown);
-  chineseMirror.addEventListener("keydown", (event) => {
-    handleHistoryShortcut(event);
-    if (event.defaultPrevented) return;
-    if (handleTokenReorderShortcut(event)) return;
-    if (!["Backspace", "Delete"].includes(event.key)) return;
-    const token = state.tokens.find((item) => item.id === state.pinned);
-    if (!token) return;
-    event.preventDefault();
-    event.stopPropagation();
-    deleteTokenOccurrence(token);
-  });
-  setTitle(chineseMirror, "Click tags to link with the English view above and the detail table below");
-  setTitle(englishTokenView, "Click English tags to link with the Chinese view and the detail table below");
+  setTitle(englishTokenView, "Click a tag to link it with the detail table below; select then press Delete");
   setTitle(englishEditor, "Stay in text editing while typing; switch to tag view on blur or after clicking Done");
-  setTitle(chineseEditor, "Enter Chinese, English, or mixed text; drag the bottom-right corner to resize (auto-saved)");
   englishTokenView.addEventListener("click", (event) => {
     // 分行之后空白处的点击目标是行容器，也算点在空白处
     if (event.target !== englishTokenView && !event.target.classList?.contains("bpi-token-line")) return;
-    state.pinned = null;
-    render();
-  });
-  chineseMirror.addEventListener("click", (event) => {
-    if (event.target !== chineseMirror) return;
     state.pinned = null;
     render();
   });
@@ -2806,21 +2563,10 @@ function createPanel(node, textWidget) {
     event.stopPropagation();
     action();
   });
-  setTitle(editChineseButton, "Switch between the tag-linked view and the bilingual text editor");
-  setTitle(expandChineseButton, "Edit Chinese or mixed content in a larger popup");
-  setTitle(translateChineseButton, "Auto-detect language and translate faithfully; no optimization, no auto-sync");
-  setTitle(translateOptimizeButton, "auto-translate then optimize to Anima -compliant English prompt");
   setTitle(optimizeChineseButton, "Only optimizes existing English; does not translate");
   setTitle(sortPromptButton, "press Anima stable sort by recommended categories, one row per non-empty category; natural language and BREAK/AND kept intact");
-  // setTitle(assistantSettingsButton, "在侧边栏管理面板中配置纯词库、百度翻译、Ollama 或 OpenAI 兼容 API 与自定义规则");
-  bindMirrorAction(editChineseButton, () => setChineseEditing(!state.chineseEditing));
-  bindMirrorAction(expandChineseButton, openExpandedChineseEditor);
-  bindMirrorAction(translateChineseButton, () => runTextAssistant("translate"));
-  bindMirrorAction(translateOptimizeButton, () => runTextAssistant("translate_optimize"));
-  bindMirrorAction(optimizeChineseButton, () => runTextAssistant("optimize"));
-  bindMirrorAction(syncTextButton, syncEditedText);
+  bindMirrorAction(optimizeChineseButton, runAnimaOptimize);
   bindMirrorAction(sortPromptButton, sortByAnimaOrder);
-  // bindMirrorAction(assistantSettingsButton, () => openManagerPanel("assistant"));
   // bindMirrorAction(tagManagerButton, () => openManagerPanel("tag-manager", node.id));
   // setTitle(tagManagerButton, "在侧边栏管理面板中打开本节点的标签翻译与词库搜索");
   setTitle(editEnglishButton, "Switch between the English text editor and the linked tag view");
@@ -2872,29 +2618,6 @@ function createPanel(node, textWidget) {
     setTimeout(() => {
       if (state.englishEditing && document.activeElement !== englishEditor) setEnglishEditing(false);
     }, 0);
-  });
-  chineseEditor.addEventListener("mousedown", (event) => {
-    event.stopPropagation();
-    startManualResize("chinese", chineseEditor, event);
-  });
-  chineseEditor.addEventListener("input", () => {
-    state.stagedText = {
-      text: chineseEditor.value,
-      label: "Manual edit",
-      requireAnima: state.stagedText?.requireAnima === true,
-    };
-    setText(mirrorTitle, "Text editing & processing (mixed CN/EN supported)");
-    setText(mirrorHint, containsChinese(chineseEditor.value)
-      ? "Chinese or mixed content detected; use “Translate” or “Translate & optimize”"
-      : "English content can be synced directly, or optimized to Anima");
-    autoFitGreenArea(chineseEditor, 110);
-    updateStageControls();
-  });
-  chineseEditor.addEventListener("keydown", (event) => {
-    if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
-      event.preventDefault();
-      runTextAssistant("translate");
-    }
   });
   search.addEventListener("input", renderSearch);
   search.addEventListener("focus", renderSearch);
@@ -2950,11 +2673,6 @@ function createPanel(node, textWidget) {
       state.englishEditorDirty = false;
       englishEditor.value = nextText;
     }
-    if (!state.chineseEditing) {
-      state.editorInitialized = false;
-      state.stagedText = null;
-      updateStageControls();
-    }
     scheduleRender();
     return result;
   };
@@ -2978,7 +2696,6 @@ function createPanel(node, textWidget) {
   };
   const unsubscribePanelSync = panelSyncHub.subscribe(syncFromPeer);
 
-  updateStageControls();
   refreshDictionary(false);
   setTimeout(() => {
     bindTextareaEvents();

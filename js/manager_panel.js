@@ -188,12 +188,12 @@ async function confirmMachineRows(rows) {
 }
 
 async function retranslateMachineRow(row) {
-  setStatus(`Translating: “${row.english}”`, "busy");
+  setStatus(`Translating: “${row.tag.english}”`, "busy");
   try {
     const translated = await runInspectorAssistant("translate", row.tag.english);
     const validation = validateTranslationResult(row.tag.english, translated, {});
     if (!validation.ok) {
-      setStatus(`Rejected invalid translation: ${validation.reason}`, "error");
+      setStatus(`Rejected invalid translation: “${validation.reason}”`, "error");
       return;
     }
     panelSyncHub.machineTranslations.set(row.key, {

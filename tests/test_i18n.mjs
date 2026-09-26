@@ -64,13 +64,12 @@ assert.equal(
 // 自由文本变量必须用「"…"」包起来才能折叠成 {}，否则整句永远匹配不上。
 // 这里锁死「运行时真实形态」，防止以后有人把引号去掉或换成 ASCII 直引号。
 for (const [source, expected] of [
-  ["Text processing result: “Translate”", "文本处理结果：翻译"],
+  ["“Optimize to Anima” done; please confirm in the preview window", "「优化为 Anima」完成；请在预览窗口确认"],
   ["applied “Translate & optimize”; press Ctrl+Z to undo", "已应用 翻译并优化；按 Ctrl+Z 可撤销"],
   ["Undone: “Sort to Anima order”", "已撤销：Sort to Anima order"],
   ["Redone: “Sort to Anima order”", "已重做：Sort to Anima order"],
   ["Running “Translate”…", "正在运行 翻译…"],
-  ["“Translate”completed; result not yet synced to the English output above", "翻译已完成；结果尚未同步到上方英文输出"],
-  ["⚠ Not indexed: “1girl”", "⚠ 未收录：1girl"],
+  ["“Result still contains Chinese”; please fix it in the preview before confirming", "「结果仍包含中文」；请在预览里改好再确认"],
   ["Release failed: “network down”", "放行失败：network down"],
   ["Discard failed: “network down”", "放弃失败：network down"],
   ["Cannot pause for confirmation: “network down”", "无法暂停等待确认：network down"],

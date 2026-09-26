@@ -61,35 +61,18 @@ const ZH = {
 
   // ── 节点主面板 ──────────────────────────────────────────────────────
   "English original (actual output)": "英文原文（实际输出）",
-  "English prompt (actual output)": "英文提示词（实际输出）",
   "Chinese explanation (read-only)": "中文解释（只读）",
-  "Chinese sync editor (per-tag composition)": "中文同步编辑（按标签组合）",
   "Category table view | click tags to link; category names are not written to the prompt":
     "分类表视图 | 点击标签联动；分类名不会写入提示词",
   "Click tags to link; select then press Delete": "点击标签联动；选中后按 Delete",
-  "Click to link | select then press Delete": "点击联动 | 选中后按 Delete",
-  "Click English tags to link with the Chinese view and the detail table below":
-    "点击英文标签，与下方中文视图和明细表联动",
-  "Click tags to link with the English view above and the detail table below":
-    "点击标签，与上方英文视图和明细表联动",
   "Enter the English prompt; after editing, it will be shown as selectable, deletable tags.":
     "输入英文提示词；编辑完成后会显示成可选中、可删除的标签。",
-  "Enter Chinese, English, or mixed text; use “Translate” or “Translate & optimize”, then sync to the English output separately after confirming.":
-    "输入中文、英文或混排文本；可用「翻译」或「翻译并优化」，确认后再单独同步到英文输出。",
-  "Enter Chinese, English, or mixed text; drag the bottom-right corner to resize (auto-saved)":
-    "输入中文、英文或混排文本；拖右下角可调整大小（自动保存）",
   "Enter a prompt in the English text box above; per-tag bilingual mapping will appear here.":
     "在上面的英文输入框里写提示词，这里会出现逐标签的中英对照。",
-  "Per-tag Chinese combinations for the English prompt will appear here.":
-    "英文提示词的逐标签中文组合会出现在这里。",
   "Linked tags will appear here after you finish editing English.":
     "英文编辑完成后，联动标签会出现在这里。",
   "Edit text": "编辑文本",
-  "Back to link": "返回联动视图",
   "Edit Chinese": "编辑中文",
-  "Expand edit": "展开编辑",
-  "Expand edit Chinese / mixed text": "展开编辑中文／混排文本",
-  "Edit Chinese or mixed content in a larger popup": "在更大的弹窗里编辑中文或中英混排内容",
   "Edit directly when empty": "为空时可直接编辑",
   "Edit tag weight": "编辑标签权重",
   "Apply weight": "应用权重",
@@ -101,7 +84,6 @@ const ZH = {
   "Re-translate": "重新翻译",
   "Translate all unknown": "翻译全部未收录",
   "Sort by Anima order": "按 Anima 顺序排序",
-  "Sync to English output": "同步到英文输出",
   "Confirm write English": "确认写入英文",
   "Confirm & save": "确认并保存",
   "Save to dict": "存入词库",
@@ -116,14 +98,11 @@ const ZH = {
   "Double-click to edit Chinese explanation": "双击编辑中文解释",
   "Enter Chinese explanation": "输入中文解释",
   "Copy English + Chinese mapping": "复制中英对照",
-  "Text editing & processing (mixed CN/EN supported)": "文本编辑与处理（支持中英混排）",
   "Text mode while typing; parsed into tags when done": "输入时按文本处理，结束后解析为标签",
   "Stay in text editing while typing; switch to tag view on blur or after clicking Done":
     "输入时保持文本编辑；失焦或点「完成」后切回标签视图",
   "Switch between the English text editor and the linked tag view":
     "在英文文本编辑框与联动标签视图之间切换",
-  "Switch between the tag-linked view and the bilingual text editor":
-    "在标签联动视图与双语文本编辑框之间切换",
   "Requires a second click to clear the actual English output; after clearing, click the same button or press Ctrl+Z to undo":
     "需要再点一次才会清空英文实际输出；清空后点同一个按钮或按 Ctrl+Z 可撤销",
   "Save the current English prompt to favorites in the user directory (a reference image can be attached)":
@@ -156,7 +135,6 @@ const ZH = {
   "Import: first run only": "导入：仅首次运行",
   "New English prompt to apply": "待应用的新英文提示词",
   "Current English prompt": "当前英文提示词",
-  "Apply to editor": "应用到编辑框",
 
   // ── 状态栏 / 提示文案（含变量） ──────────────────────────────────────
   "Click “Confirm clear” again to clear the English actual output": "再点一次「确认清空」才会清空英文实际输出",
@@ -165,24 +143,14 @@ const ZH = {
   "English clear undone": "已撤销英文清空",
   "English content has changed; cannot undo this clear": "英文内容已变化，无法撤销这次清空",
   "English prompt is empty; cannot sort": "英文提示词是空的，无法排序",
-  "Green text editor is empty": "绿色文本框是空的",
-  "Please enter content in the green text editor first": "请先在绿色文本框里输入内容",
   "Content is empty; enter the English prompt directly": "内容为空，请直接输入英文提示词",
   "Result is empty; English prompt not overwritten": "结果为空，未覆盖英文提示词",
   "No content change": "内容没有变化",
-  "The current result contains Chinese and cannot be synced to the English model input":
-    "当前结果含中文，不能同步到英文模型输入",
-  "result not yet written to the model; after confirming, click “Sync to English output”":
-    "结果还没写入模型；确认后点「同步到英文输出」",
   "Natural-language segments only support whole-segment editing; tags can still be deleted individually":
     "自然语言片段只支持整段编辑；标签仍可单独删除",
   "Only tags support individual weights; use text editing for natural language":
     "只有标签支持单独权重；自然语言请用文本编辑",
   "Weight must be between 0 and 3": "权重必须在 0 到 3 之间",
-  "“Optimize to Anima” only processes English; for Chinese or mixed content, use “Translate & optimize”":
-    "「优化为 Anima」只处理英文；中文或混排内容请用「翻译并优化」",
-  "Chinese or mixed content detected; use “Translate” or “Translate & optimize”":
-    "检测到中文或混排内容，请用「翻译」或「翻译并优化」",
   "Use “Edit text” to process it": "请用「编辑文本」处理",
   "Click “Edit text”, then use the inspector's own “Translate” or “Translate & optimize”":
     "点「编辑文本」，再用检查器自带的「翻译」或「翻译并优化」",
@@ -193,10 +161,6 @@ const ZH = {
   "Prompt is empty; cannot favorite": "提示词是空的，无法收藏",
   "Browser denied clipboard write": "浏览器拒绝了剪贴板写入",
   "Browser denied clipboard access": "浏览器拒绝了剪贴板访问",
-  "Auto-detect language and translate faithfully; no optimization, no auto-sync":
-    "自动识别语言并忠实翻译；不优化、不自动同步",
-  "auto-translate then optimize to Anima -compliant English prompt":
-    "自动翻译后优化为符合 Anima 规范的英文提示词",
   "Only optimizes existing English; does not translate": "只优化已有英文，不做翻译",
   "press Anima stable sort by recommended categories, one row per non-empty category; natural language and BREAK/AND kept intact":
     "按 Anima 推荐分类做稳定排序，每个非空分类一行；自然语言与 BREAK/AND 原样保留",
@@ -238,18 +202,10 @@ const ZH = {
   "Query: {} | weight: {}": "查询：{}｜权重：{}",
   "Explanation source: {}": "解释来源：{}",
   "Aliases: {}": "别名：{}",
-  "Unknown English tag: {} | click to locate; double-click to edit weight":
-    "未收录的英文标签：「{}」｜点击定位；双击编辑权重",
   "{} ↔ {} | natural language supports only whole-segment editing; can drag to reorder the whole segment":
     "「{}」↔「{}」｜自然语言只支持整段编辑；可拖动整段调整顺序",
   "{} ↔ {} | click to link; double-click to edit weight; select then press Delete; drag to reorder or Alt+↑/↓ to nudge":
     "「{}」↔「{}」｜点击联动；双击编辑权重；选中后按 Delete；拖动排序或 Alt+↑/↓ 微调",
-  "{} ↔ {} | natural language supports only whole-segment editing or translation":
-    "「{}」↔「{}」｜自然语言只支持整段编辑或整段翻译",
-  "{} ↔ {} | click to locate; double-click to edit weight; select then press Delete":
-    "「{}」↔「{}」｜点击定位；双击编辑权重；选中后按 Delete",
-  "{} ↔ {} | click to locate; double-click to edit weight; select then press Delete; drag to reorder or Alt+↑/↓ to nudge":
-    "「{}」↔「{}」｜点击定位；双击编辑权重；选中后按 Delete；拖动排序或 Alt+↑/↓ 微调",
   "Insert line break": "插入换行",
   "Delete line break": "删除换行",
   "Move line break": "移动换行",
@@ -451,14 +407,11 @@ const ZH = {
   Tag: "标签",
   "Tag + Natural language": "标签 + 自然语言",
   Instruction: "指令",
-  "Tag mode": "标签模式",
   "Mode: {}": "模式：{}",
   "Mode: {} | {}": "模式：{}｜{}",
   "English prompt tag view": "英文提示词标签视图",
-  "Per-tag Chinese sync view": "逐标签中文同步视图",
   "Anima official sort": "Anima 官方顺序",
   "Anima official order preview": "Anima 官方顺序预览",
-  "Manual edit": "手动编辑",
   "Empty input": "输入为空",
   "Copied": "已复制",
 
@@ -467,19 +420,7 @@ const ZH = {
   "items {} | recognized {} | unknown {} | pending {}": "共 {} 个标签｜已识别 {}｜未收录 {}｜待确认 {}",
   "items {} | recognized {} | unknown {} | issues {}": "共 {} 个标签｜已识别 {}｜未收录 {}｜问题 {}",
   "items {} | recognized {} | unknown {} | pending {} | issues {}": "共 {} 个标签｜已识别 {}｜未收录 {}｜待确认 {}｜问题 {}",
-  "Text processing result: {}": "文本处理结果：{}",
-  "Chinese results are for reading only; to generate images, continue with translation or optimization":
-    "中文结果仅供阅读；要出图请继续翻译或优化",
-  "Processing results stay here; click Sync to write to the English output above":
-    "处理结果留在这里；点「同步」写入上方英文输出",
-  "{}completed; result not yet synced to the English output above": "{}已完成；结果尚未同步到上方英文输出",
-  "{}; please fix before syncing": "{}；请先修正再同步",
   "{}Sync": "{}同步",
-  "Text sync": "文本同步",
-  "Write the current English result to the actual output above after preview": "预览后把当前英文结果写入上方实际输出",
-  "Only the English result in the green editing area can be synced to the actual output":
-    "只有绿色编辑区里的英文结果能同步到实际输出",
-  "English content can be synced directly, or optimized to Anima": "英文内容可直接同步，或优化为 Anima",
   "Clear English prompt": "清空英文提示词",
   "This tag has no explicit weight": "这个标签没有显式权重",
   "Weight unchanged or value invalid": "权重没有变化，或数值无效",
@@ -718,7 +659,6 @@ const ZH = {
   "Paused, waiting for confirmation…": "已暂停，等待确认…",
   "Querying dictionary…": "正在查询词库…",
   "Searching for more…": "正在搜索更多…",
-  "⚠ Not indexed: {}": "⚠ 未收录：{}",
   "tag: {} | Anima format: (Tag:Weight)": "标签：{}｜Anima 格式：(标签:权重)",
   "Node #{} · {}  tags": "节点 #{} · {} 个标签",
   "Running {}…": "正在运行 {}…",
@@ -731,7 +671,6 @@ const ZH = {
   "Sample": "示例",
   "(empty prompt)": "（空提示词）",
   "(weight {})": "（权重 {}）",
-  "restored {} hidden tags; press Ctrl+Z to undo": "已恢复 {} 个隐藏标签；按 Ctrl+Z 可撤销",
   "Delete community pack {}? File is backed up first; recoverable from data/backups.": "删除社区词包「{}」？会先备份文件，可从 data/backups 恢复。",
 
 
@@ -740,6 +679,12 @@ const ZH = {
   Updated: "已更新",
   Imported: "已导入",
 
+  "Prompt (English on top, Chinese below)": "提示词（上英文 · 下中文）",
+  "Click a tag to link it with the detail table below; select then press Delete": "点击标签可与下方明细表联动；选中后按 Delete 删除",
+  "English prompt is empty; nothing to optimize": "英文提示词是空的，没有可优化的内容",
+  "“Optimize to Anima” only processes English; translate Chinese in the sidebar first": "「优化为 Anima」只处理英文；中文请先在侧边栏翻译",
+  "{} done; please confirm in the preview window": "「{}」完成；请在预览窗口确认",
+  "{}; please fix it in the preview before confirming": "「{}」；请在预览里改好再确认",
 };
 
 let mode = "auto";
