@@ -6,6 +6,7 @@ const SCROLLABLE_SELECTOR = [
   ".bpi-chinese-editor",
   ".bpi-english-token-view",
   ".bpi-english-editor",
+  ".bpi-quick-input",
   ".bpi-manager-table",
   ".bpi-pack-list",
   ".bpi-sort-groups",

@@ -284,6 +284,18 @@ const ZH = {
   "Click to disable this pack": "点击停用这个词包",
   "Click to enable this pack": "点击启用这个词包",
 
+  // ── 底部快捷输入 ────────────────────────────────────────────────────
+  "Quick add": "快捷添加",
+  "Enter to add | Shift+Enter for a new line | Ctrl+Enter to translate & optimize": "回车添加｜Shift+回车换行｜Ctrl+回车翻译并优化",
+  "Type Chinese to translate it into English tags, or type English tags to add them directly":
+    "输入中文会自动翻译为英文标签；直接输入英文则原样添加",
+  Add: "添加",
+  "Enter Chinese or an English tag first": "请先输入中文或英文标签",
+  "Added {} to the prompt": "已把「{}」添加到提示词",
+  "Translating {}…": "正在翻译「{}」…",
+  "Translation result is empty": "翻译结果是空的",
+  "Translated {} to {} and added it": "已把「{}」翻译为「{}」并添加",
+
   // ── 弹窗：保存提示词 ────────────────────────────────────────────────
   "Save Current Prompt": "保存当前提示词",
   "Defaults to the start of the prompt": "默认取提示词开头",

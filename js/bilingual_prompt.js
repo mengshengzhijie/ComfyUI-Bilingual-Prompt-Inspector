@@ -412,8 +412,11 @@ function createPanel(node, textWidget) {
   const measureCollapsedWidgetHeight = () => {
     const styles = getComputedStyle(panel);
     const pixels = (name) => Number.parseFloat(styles.getPropertyValue(name)) || 0;
+    // 底部快捷输入区是后加的，这里用选择器取高度，避免引用尚未初始化的常量
+    const quickHeight = panel.querySelector(".bpi-quick-section")?.offsetHeight ?? 0;
     const height = mirrorSection.offsetHeight
       + englishSection.offsetHeight
+      + quickHeight
       + pixels("padding-top")
       + pixels("padding-bottom")
       + pixels("border-top-width")
@@ -1628,7 +1631,7 @@ function createPanel(node, textWidget) {
           translated,
           reason: validation.reason,
         });
-        setStatus(`Rejected abnormal translation: ${validation.reason}`, "error");
+        setStatus(`Rejected abnormal translation: “${validation.reason}”`, "error");
         return false;
       }
       setMachineTranslation(token.key, {
@@ -2684,7 +2687,80 @@ function createPanel(node, textWidget) {
   searchLine.append(modeSelect, searchLabel, search);
   summary.append(counts, modeInfo, status);
   detailsBody.append(toolbar, searchLine, results, summary, filtersBar, machineBatchBar, issuesPanel, table, detailsHiddenBar);
-  panel.append(englishSection, mirrorSection, aboutFooter);
+  // 底部快捷输入：中文先翻译再追加，英文直接追加。只挂在节点面板上，
+  // 明细表（detailsBody）才会被侧边栏「标签管理」复用，这个输入框不会跟着过去。
+  const quickSection = element("section", "bpi-quick-section");
+  const quickHead = element("div", "bpi-quick-head");
+  quickHead.append(
+    element("span", "", "Quick add"),
+    element("span", "bpi-quick-hint", "Enter to add | Shift+Enter for a new line | Ctrl+Enter to translate & optimize"),
+  );
+  const quickRow = element("div", "bpi-quick-row");
+  const quickInput = element("textarea", "bpi-quick-input");
+  quickInput.rows = 2;
+  setPlaceholder(quickInput, "Type Chinese to translate it into English tags, or type English tags to add them directly");
+  const quickButton = button("Add", () => submitQuickInput("translate"), "bpi-primary");
+  quickRow.append(quickInput, quickButton);
+  quickSection.append(quickHead, quickRow);
+  let quickBusy = false;
+  const appendToPrompt = (piece) => {
+    const current = String(textWidget.value ?? "").replace(/[\s,，]+$/u, "");
+    updateText(current ? `${current}, ${piece}` : piece);
+  };
+  async function submitQuickInput(mode = "translate") {
+    if (quickBusy) return;
+    const raw = quickInput.value.trim();
+    if (!raw) {
+      setStatus("Enter Chinese or an English tag first", "error");
+      return;
+    }
+    if (!containsChinese(raw)) {
+      appendToPrompt(raw);
+      quickInput.value = "";
+      setStatus(`Added “${raw}” to the prompt`, "ok");
+      quickInput.focus({ preventScroll: true });
+      return;
+    }
+    quickBusy = true;
+    quickButton.disabled = true;
+    setStatus(`Translating “${raw}”…`, "busy");
+    try {
+      const translated = await runInspectorAssistant(mode === "optimize" ? "translate_optimize" : "translate", raw);
+      const validation = validateTranslationResult(raw, translated, {});
+      if (!validation.ok) {
+        setStatus(`Rejected abnormal translation: ${validation.reason}`, "error");
+        return;
+      }
+      const english = validation.text.replace(/[\s,，]+$/u, "").trim();
+      if (!english) {
+        setStatus("Translation result is empty", "error");
+        return;
+      }
+      appendToPrompt(english);
+      // 写进机器翻译缓存，标签管理「机器翻译」页就能看到并勾选入库个人词库
+      setMachineTranslation(normalizeKey(english), {
+        english,
+        text: raw,
+        source: "bpi-assistant",
+        createdAt: Date.now(),
+      });
+      quickInput.value = "";
+      setStatus(`Translated “${raw}” to “${english}” and added it`, "ok");
+      quickInput.focus({ preventScroll: true });
+    } catch (error) {
+      setStatus(error.message, "error");
+    } finally {
+      quickBusy = false;
+      quickButton.disabled = false;
+    }
+  }
+  quickInput.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    event.stopPropagation();
+    submitQuickInput(event.ctrlKey || event.metaKey ? "optimize" : "translate");
+  });
+  panel.append(englishSection, mirrorSection, quickSection, aboutFooter);
   panel.addEventListener("mousedown", (event) => event.stopPropagation());
   panel.addEventListener("wheel", (event) => event.stopPropagation(), { passive: true });
   const handleTokenViewKeydown = (event) => {
