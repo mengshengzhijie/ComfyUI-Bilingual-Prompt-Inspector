@@ -1151,6 +1151,75 @@ function createPanel(node, textWidget) {
     return chip;
   };
 
+  // 明细表里的换行行：整行青绿色，只放一个拖拽手柄和"换行"两字，其余一律不显示。
+  // 拖 ⠿ 到某个 token 行上 = 把这条换行从当前 gap 移到那个 token 后面的 gap，
+  // 复用 moveBreakTo；命中目标从标签 chip 换成带 data-token-id 的明细表行。
+  // 跟标签拖拽一样必须挂 document 捕获阶段，否则 Nodes 2.0 下收不到事件。
+  const buildBreakRow = (gapIndex) => {
+    const row = element("div", "bpi-row bpi-break-row");
+    const handle = element("span", "bpi-drag-handle", "⠿");
+    setTitle(handle, "Drag onto a tag row to move this line break; Ctrl+Z to undo");
+    row.appendChild(handle);
+    row.appendChild(element("span", "bpi-break-row-label", "换行"));
+    handle.addEventListener("click", (event) => event.stopPropagation());
+    handle.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const startX = event.clientX;
+      const startY = event.clientY;
+      let active = false;
+      let targetGap = null;
+      let indicator = null;
+      const orderedRows = () => [...table.querySelectorAll(".bpi-row[data-token-id]")];
+      const finish = () => {
+        unbindDragTrackers(onMove, finish);
+        row.classList.remove("bpi-dragging");
+        if (indicator) { indicator.remove(); indicator = null; }
+        if (active && targetGap !== null && row.isConnected) {
+          if (moveBreakTo(gapIndex, targetGap)) setStatus("Moved the line break; press Ctrl+Z to undo", "ok");
+        }
+      };
+      const onMove = (moveEvent) => {
+        if (!row.isConnected) { finish(); return; }
+        if (!active) {
+          if (Math.abs(moveEvent.clientX - startX) < 3 && Math.abs(moveEvent.clientY - startY) < 3) return;
+          active = true;
+          row.classList.add("bpi-dragging");
+          indicator = element("div", "bpi-drop-indicator");
+          table.appendChild(indicator);
+        }
+        moveEvent.preventDefault();
+        const tableRect = table.getBoundingClientRect();
+        if (moveEvent.clientY < tableRect.top + 28) table.scrollTop -= 9;
+        else if (moveEvent.clientY > tableRect.bottom - 28) table.scrollTop += 9;
+        const rows = orderedRows();
+        let anchorRow = null;
+        for (const candidate of rows) {
+          const rect = candidate.getBoundingClientRect();
+          if (moveEvent.clientY < rect.top + rect.height / 2) { anchorRow = candidate; break; }
+        }
+        if (anchorRow) {
+          const tokenId = Number(anchorRow.dataset.tokenId);
+          const index = state.tokens.findIndex((item) => item.id === tokenId);
+          targetGap = index >= 0 ? Math.min(index, breakGapCount() - 1) : null;
+        } else {
+          targetGap = breakGapCount() - 1;
+        }
+        let y;
+        if (anchorRow) {
+          y = anchorRow.getBoundingClientRect().top - tableRect.top + table.scrollTop;
+        } else {
+          const lastRow = rows[rows.length - 1];
+          y = (lastRow ? lastRow.getBoundingClientRect().bottom - tableRect.top : 0) + table.scrollTop;
+        }
+        indicator.style.top = `${Math.max(0, y - 1)}px`;
+      };
+      bindDragTrackers(onMove, finish);
+    });
+    return row;
+  };
+
   // Alt+ArrowUp / Alt+ArrowDown nudge the pinned token one slot.  Returns
   // true when the key was consumed.
   const handleTokenReorderShortcut = (event) => {
@@ -2089,7 +2158,7 @@ function createPanel(node, textWidget) {
     } else if (!visibleTokens.length) {
       table.appendChild(element("div", "bpi-empty", "No matching items under the current filter."));
     } else {
-      for (const token of visibleTokens) {
+      visibleTokens.forEach((token, visibleIndex) => {
         const row = element("div", `bpi-row bpi-${token.status}`);
         const rowSeverity = errorsByKey.get(token.key);
         if (rowSeverity === "error") row.classList.add("bpi-has-error");
@@ -2144,7 +2213,7 @@ function createPanel(node, textWidget) {
           row.append(englishCell, chineseCell);
           table.appendChild(row);
           setTimeout(() => { editor.focus(); editor.select(); }, 0);
-          continue;
+          return; // forEach 里不能用 continue；这里跳过本条剩余的渲染逻辑
         }
         const chineseText = element("span", "", token.chinese);
         setTitle(chineseText, "Double-click to edit Chinese explanation");
@@ -2270,7 +2339,13 @@ function createPanel(node, textWidget) {
           activateToken(token);
         });
         table.appendChild(row);
-      }
+        // 当前 token 与下一个 token 之间的 gap 有换行，就在这里插一行换行行。
+        // 只在"全部"过滤下显示——别的过滤会把 token 打散，gap 下标对不上。
+        // tableFilter==='all' 时 visibleIndex 就是 state.tokens 里的下标，两者一致。
+        if (state.tableFilter === "all" && canReorderTokens() && gapHasBreak(visibleIndex)) {
+          table.appendChild(buildBreakRow(visibleIndex));
+        }
+      });
     }
     const known = state.tokens.filter((token) => ["verified", "unverified", "special", "session"].includes(token.status)).length;
     const unknown = state.tokens.filter((token) => token.status === "unknown").length;
