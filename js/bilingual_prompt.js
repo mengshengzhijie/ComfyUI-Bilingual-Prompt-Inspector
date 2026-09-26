@@ -34,6 +34,7 @@ import {
   injectBpiStyles,
   loadDictionary,
   loadPreferences,
+  loadTokenColors,
   lookupLargeDictionary,
   openManagerPanel,
   openSavePromptDialog,
@@ -283,6 +284,14 @@ function createPanel(node, textWidget) {
     searchVisibleLimit: 40,
     lastRenderedSearchQuery: "",
     categoryView: false,
+    // 节点标签卡颜色模式：default（不着色）| status（按收录：未收录淡橙、机器翻译淡紫、已收录不变）| random（从 token_colors.json 摇色）
+    colorMode: localStorage.getItem("bpi.colorMode") || "default",
+    // 从后端读到的 { presets, random_pool }
+    tokenColors: { presets: [], random_pool: [] },
+    // 每个卡的双击自定义色，key = token.key；切到非默认模式时被模式覆盖
+    customColors: new Map(),
+    // 随机模式下每个 token.key 摇到的颜色
+    randomColors: new Map(),
     englishEditing: !String(textWidget.value ?? "").trim(),
     englishEditingExplicit: false,
     englishEditorDirty: false,
@@ -1245,8 +1254,19 @@ function createPanel(node, textWidget) {
     }
     const shade = element("div", "bpi-modal-shade");
     const modal = element("div", "bpi-modal");
-    modal.appendChild(element("h3", "", "Edit tag weight"));
-    modal.appendChild(element("div", "bpi-config-note", `tag: “${token.term}” | Anima format: (Tag:Weight)`));
+    // 这两句直接写中文：带变量 + 固定术语，走翻译层反而匹配不上，界面必须中文
+    modal.appendChild(element("h3", "", `编辑标签：${token.term}`));
+    modal.appendChild(element("div", "bpi-config-note", "Anima 格式：(标签:权重)"));
+
+    // Tab 切换：权重 / 颜色
+    const tabs = element("div", "bpi-editor-tabs");
+    const tabWeight = element("button", "bpi-editor-tab bpi-editor-tab-active", t("Weight"));
+    const tabColor = element("button", "bpi-editor-tab", t("Color"));
+    tabWeight.type = tabColor.type = "button";
+    tabs.append(tabWeight, tabColor);
+    modal.appendChild(tabs);
+
+    const weightPanel = element("div", "bpi-editor-panel");
     const form = element("div", "bpi-form");
     const input = element("input", "");
     input.type = "number";
@@ -1255,7 +1275,7 @@ function createPanel(node, textWidget) {
     input.step = "0.05";
     input.value = token.weight === null ? "1" : String(token.weight);
     form.append(element("label", "", "Weight"), input);
-    modal.appendChild(form);
+    weightPanel.appendChild(form);
 
     const presets = element("div", "bpi-weight-presets");
     for (const value of [0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.5]) {
@@ -1264,7 +1284,54 @@ function createPanel(node, textWidget) {
         input.focus();
       }, "bpi-mini"));
     }
-    modal.appendChild(presets);
+    weightPanel.appendChild(presets);
+
+    // 颜色 Tab：预设色块 + 自定义输入框；只在 default 模式下才看得见效果
+    const colorPanel = element("div", "bpi-editor-panel bpi-hidden");
+    const presetsRow = element("div", "bpi-color-presets");
+    let pickedColor = state.customColors.get(token.key) || "";
+    const customInput = element("input", "");
+    customInput.value = pickedColor;
+    // 统一选中态：值相同才高亮，「无」用空串，所以点它能直接清掉自定义色
+    const markPicked = (value, keepInput) => {
+      pickedColor = value;
+      if (!keepInput) customInput.value = value;
+      presetsRow.querySelectorAll(".bpi-color-swatch").forEach((s) => {
+        s.classList.toggle("bpi-color-swatch-active", (s.dataset.color || "") === value);
+      });
+    };
+    // 「无」= 不着色、跟随主题，放在预设色块最前面，一键回到默认
+    const noneSwatch = element("span", "bpi-color-swatch bpi-color-swatch-none", t("None"));
+    noneSwatch.dataset.color = "";
+    setTitle(noneSwatch, t("None"));
+    noneSwatch.addEventListener("click", () => markPicked(""));
+    presetsRow.appendChild(noneSwatch);
+    const presetsPool = (state.tokenColors.presets && state.tokenColors.presets.length) ? state.tokenColors.presets : ["#6b9b78"];
+    for (const hex of presetsPool) {
+      const swatch = element("span", "bpi-color-swatch");
+      swatch.dataset.color = hex;
+      if (hex === pickedColor) swatch.classList.add("bpi-color-swatch-active");
+      swatch.style.background = hex;
+      swatch.title = hex;
+      swatch.addEventListener("click", () => markPicked(hex));
+      presetsRow.appendChild(swatch);
+    }
+    if (!pickedColor) noneSwatch.classList.add("bpi-color-swatch-active");
+    colorPanel.appendChild(presetsRow);
+    const customRow = element("div", "bpi-color-custom");
+    customRow.appendChild(element("span", "", t("Custom")));
+    setPlaceholder(customInput, "#5b8a72 or rgb(91,138,114)");
+    customInput.addEventListener("input", () => {
+      // keepInput：正在打字就不要回写输入框，否则光标会被拉到末尾
+      markPicked(customInput.value.trim(), true);
+    });
+    customInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") { event.preventDefault(); applyColor(); }
+    });
+    customRow.appendChild(customInput);
+    colorPanel.appendChild(customRow);
+
+    modal.append(weightPanel, colorPanel);
 
     const close = () => shade.remove();
     const apply = () => {
@@ -1276,13 +1343,39 @@ function createPanel(node, textWidget) {
       }
       if (applyTokenWeight(token, numeric)) close();
     };
+    const applyColor = () => {
+      const value = String(customInput.value || "").trim();
+      // 任何模式下都允许设置（切回 default 就显示）；显示与否由 tokenCardColor 按模式决定
+      if (!value) {
+        state.customColors.delete(token.key);
+        close();
+        render();
+        return;
+      }
+      const okHex = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value);
+      const okRgb = /^rgb\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\)$/.test(value);
+      if (!okHex && !okRgb) {
+        setStatus("Invalid color; use #hex or rgb(r,g,b)", "error");
+        customInput.focus();
+        return;
+      }
+      state.customColors.set(token.key, value);
+      close();
+      render();
+    };
     const actions = element("div", "bpi-modal-actions");
     if (token.weight !== null) {
       actions.appendChild(button("Clear weight", () => {
         if (applyTokenWeight(token, null)) close();
       }, "bpi-danger"));
     }
-    actions.append(button("Cancel", close), button("Apply weight", apply, "bpi-primary"));
+    actions.append(button("Cancel", close));
+    // 先声明再让 applyButton 引用它：let 有 TDZ，声明放在闭包之后会有隐患
+    let onColorTab = false;
+    const applyButton = button(t("Apply"), () => {
+      if (onColorTab) applyColor(); else apply();
+    }, "bpi-primary");
+    actions.append(applyButton);
     modal.appendChild(actions);
     shade.appendChild(modal);
     document.body.appendChild(shade);
@@ -1296,6 +1389,23 @@ function createPanel(node, textWidget) {
         event.preventDefault();
         close();
       }
+    });
+    // Tab 切换：权重走 apply，颜色走 applyColor；通过共享的 Apply 按钮 + onColorTab 标志分派
+    tabWeight.addEventListener("click", () => {
+      onColorTab = false;
+      tabWeight.classList.add("bpi-editor-tab-active");
+      tabColor.classList.remove("bpi-editor-tab-active");
+      weightPanel.classList.remove("bpi-hidden");
+      colorPanel.classList.add("bpi-hidden");
+      setTimeout(() => input.focus(), 0);
+    });
+    tabColor.addEventListener("click", () => {
+      onColorTab = true;
+      tabColor.classList.add("bpi-editor-tab-active");
+      tabWeight.classList.remove("bpi-editor-tab-active");
+      colorPanel.classList.remove("bpi-hidden");
+      weightPanel.classList.add("bpi-hidden");
+      setTimeout(() => { customInput.focus(); customInput.select(); }, 0);
     });
     setTimeout(() => { input.focus(); input.select(); }, 0);
   };
@@ -1729,6 +1839,29 @@ function createPanel(node, textWidget) {
     return token.weight === null ? base : `${base} ${t(`(weight ${token.weight})`)}`;
   };
 
+  // 模式优先：customColors 只在 default 模式下看得见；status/random 覆盖它
+  const tokenCardColor = (token) => {
+    if (state.colorMode === "status") {
+      // 淡橙（未收录）、淡紫（机器翻译）、已收录不变 —— 柔和不鲜艳，跟换行行一个调子
+      if (token.status === "unknown") return "rgba(184,120,50,.18)";
+      if (token.status === "machine") return "rgba(120,80,160,.20)";
+      return null;
+    }
+    if (state.colorMode === "random") {
+      if (!state.randomColors.has(token.key)) {
+        const pool = state.tokenColors.random_pool;
+        if (pool && pool.length) {
+          state.randomColors.set(token.key, pool[Math.floor(Math.random() * pool.length)]);
+        } else {
+          state.randomColors.set(token.key, "#5b8a72");
+        }
+      }
+      return state.randomColors.get(token.key);
+    }
+    // default：只显示双击设过的自定义色
+    return state.customColors.get(token.key) || null;
+  };
+
   // 一张双语小卡 = 上面英文标签 chip（拖拽 / 权重 / 隐藏 / 删除都挂在它身上）+ 下面对应中文。
   // chip 的结构与交互完全沿用原来的英文标签，只是外面多包一层卡片，
   // 所以 attachChipDrag 那套按 .bpi-english-token 命中的逻辑不用改。
@@ -1767,6 +1900,8 @@ function createPanel(node, textWidget) {
     const card = element("span", "bpi-token-card");
     // 选中反馈给整张卡片，而不是只有英文那一行
     if (state.pinned === token.id) card.classList.add("bpi-card-linked");
+    const cardColor = tokenCardColor(token);
+    if (cardColor && !card.classList.contains("bpi-card-linked")) card.style.background = cardColor;
     card.append(chip, chinese);
     // 拖拽也挂在整个方块上：抓中文行一样能拖，不必精确抓英文。
     // 注意必须放在 card 声明之后：在 const card 之前引用它会触发 TDZ 报错，
@@ -2549,6 +2684,90 @@ function createPanel(node, textWidget) {
     state.filterButtons.set(filter, control);
     filtersBar.appendChild(control);
   }
+  // 颜色模式下拉：原生 select 在深色面板里又土又难配色，改成自己画的按钮 + 弹出菜单
+  const buildDropdown = ({ options, value, onChange }) => {
+    const root = element("span", "bpi-dropdown");
+    const trigger = element("button", "bpi-dropdown-trigger");
+    trigger.type = "button";
+    const valueLabel = element("span", "", "");
+    const caret = element("span", "bpi-dropdown-caret", "▾");
+    trigger.append(valueLabel, caret);
+    const menu = element("div", "bpi-dropdown-menu bpi-hidden");
+    const items = new Map();
+    const closeMenu = () => {
+      menu.classList.add("bpi-hidden");
+      root.classList.remove("bpi-dropdown-open");
+    };
+    const setValue = (next) => {
+      const active = options.find((option) => option.value === next) || options[0];
+      valueLabel.textContent = active.label;
+      items.forEach((item, itemValue) => {
+        item.classList.toggle("bpi-dropdown-item-active", itemValue === next);
+        const check = item.querySelector(".bpi-dropdown-check");
+        if (check) check.textContent = itemValue === next ? "✓" : "";
+      });
+    };
+    for (const option of options) {
+      const item = element("div", "bpi-dropdown-item");
+      const dots = element("span", "bpi-dropdown-dots");
+      for (const color of option.dots || []) {
+        const dot = element("i", "bpi-dropdown-dot");
+        dot.style.background = color;
+        dots.appendChild(dot);
+      }
+      item.append(dots, element("span", "", option.label), element("span", "bpi-dropdown-check", ""));
+      item.addEventListener("click", (event) => {
+        event.stopPropagation();
+        setValue(option.value);
+        closeMenu();
+        onChange(option.value);
+      });
+      items.set(option.value, item);
+      menu.appendChild(item);
+    }
+    setValue(value);
+    trigger.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (menu.classList.contains("bpi-hidden")) {
+        menu.classList.remove("bpi-hidden");
+        root.classList.add("bpi-dropdown-open");
+      } else {
+        closeMenu();
+      }
+    });
+    trigger.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeMenu();
+    });
+    // 点空白处关闭：Nodes 2.0 下 Vue 祖先会在捕获阶段拦事件，所以走 document + 捕获阶段
+    document.addEventListener("pointerdown", (event) => {
+      if (root.contains(event.target)) return;
+      closeMenu();
+    }, true);
+    root.append(trigger, menu);
+    return root;
+  };
+  // 只有节点主视图的卡会着色，侧边栏明细表不受影响
+  const colorSeparator = element("span", "bpi-filter-sep");
+  filtersBar.appendChild(colorSeparator);
+  const colorModeLabel = element("span", "bpi-color-label");
+  colorModeLabel.appendChild(element("span", "", t("Color")));
+  colorModeLabel.appendChild(buildDropdown({
+    options: [
+      { value: "default", label: t("Default"), dots: ["var(--bpi-border-2)"] },
+      { value: "status", label: t("By inclusion"), dots: ["#c08a4a", "#8a6bb0"] },
+      { value: "random", label: t("Random"), dots: ["#5b8a72", "#8a5b7a", "#5b6e8a"] },
+    ],
+    // 旧存档里可能有不在选项里的值，回落到默认，别让下拉显示空白
+    value: ["default", "status", "random"].includes(state.colorMode) ? state.colorMode : "default",
+    onChange: (next) => {
+      state.colorMode = next;
+      localStorage.setItem("bpi.colorMode", next);
+      // 切到随机 → 重新摇一轮；切走 → 清掉旧的随机色，下次回来再摇
+      state.randomColors.clear();
+      render();
+    },
+  }));
+  filtersBar.appendChild(colorModeLabel);
   leftTools.append(
     button("Add tag", () => openTagDialog({}, refreshDictionary), "bpi-primary"),
     translateAllButton,
@@ -2802,6 +3021,8 @@ function createPanel(node, textWidget) {
   const unsubscribePanelSync = panelSyncHub.subscribe(syncFromPeer);
 
   refreshDictionary(false);
+  // 颜色池单独读一次，失败就静默回退内置默认
+  loadTokenColors().then((colors) => { state.tokenColors = colors; render(); }).catch(() => {});
   setTimeout(() => {
     bindTextareaEvents();
     render();

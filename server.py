@@ -387,6 +387,28 @@ async def get_dictionary(_request):
         return error_response(error, 500)
 
 
+# 节点标签卡的颜色配置：用户可以直接编辑 data/token_colors.json 增删色块，
+# 不用改源码。文件不在或格式不对时回退内置默认，不影响功能。
+_DEFAULT_TOKEN_COLORS = {
+    "presets": ["#6b9b78", "#9b8b6b", "#6b7b9b", "#9b6b8b", "#8b9b6b", "#6b9b9b", "#9b7b6b", "#7b6b9b"],
+    "random_pool": ["#5b8a72", "#8a725b", "#5b6e8a", "#8a5b7a", "#7a8a5b", "#5b8a8a", "#8a6b5b", "#6b5b8a"],
+}
+
+
+@protected_route("get", "/bpi/token-colors")
+async def get_token_colors(_request):
+    from pathlib import Path
+    path = Path(__file__).resolve().parent / "data" / "token_colors.json"
+    try:
+        if path.exists():
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and isinstance(data.get("presets"), list) and isinstance(data.get("random_pool"), list):
+                return web.json_response({"success": True, "data": data})
+    except (OSError, ValueError):
+        pass
+    return web.json_response({"success": True, "data": _DEFAULT_TOKEN_COLORS})
+
+
 @protected_route("post", "/bpi/large/lookup")
 async def lookup_large_dictionary(request):
     try:
