@@ -23,6 +23,11 @@ class BilingualPromptInspector:
             },
             "optional": {
                 "prompt": ("STRING", {"forceInput": True}),
+                # 输出管道（前端隐藏标签用）：节点文本保留隐藏标签便于继续编辑，
+                # 前端把"剔除隐藏标签后的文本"同步进 effective_text 并置 use_effective，
+                # 实际输出取它；旧工作流没有这两个 widget，默认直通 text。
+                "effective_text": ("STRING", {"multiline": True, "default": ""}),
+                "use_effective": ("BOOLEAN", {"default": False}),
             },
             "hidden": {"unique_id": "UNIQUE_ID"},
         }
@@ -33,10 +38,13 @@ class BilingualPromptInspector:
     CATEGORY = "text/prompt"
     DESCRIPTION = "Bilingual prompt inspector and manager: tag-linked views, drag-to-reorder, temporary hide, upstream intercept with pause-to-confirm. Output always matches the English prompt text."
 
-    async def pass_through(self, text, prompt=None, unique_id=None):
+    async def pass_through(self, text, prompt=None, effective_text="", use_effective=False, unique_id=None):
+        # 前端置了 use_effective 时，effective_text 是"剔除隐藏标签后的文本"，全隐藏时为空串，
+        # 也必须照用（所以不能拿空串当"未设置"）；旧工作流没有该 widget，默认 False 直通。
+        base = effective_text if use_effective else text
         # 没有上游时保持原来的直通行为：协程立即返回，执行器不会挂起。
         if prompt is None:
-            return (text,)
+            return (base,)
 
         node_id = str(unique_id or "")
         announce_upstream(node_id, prompt)

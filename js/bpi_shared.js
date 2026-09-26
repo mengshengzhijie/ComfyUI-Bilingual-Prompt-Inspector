@@ -585,10 +585,21 @@ function injectBpiStyles() {
     .bpi-break-row-label{flex:1;font-size:12px;font-weight:500;letter-spacing:.5px}
     .bpi-mirror-token{user-select:none}.bpi-english-token.bpi-drop-before,.bpi-mirror-token.bpi-drop-before{box-shadow:-2px 0 0 0 #76c9ff,0 0 5px rgba(118,201,255,.4)}.bpi-english-token.bpi-drop-after,.bpi-mirror-token.bpi-drop-after{box-shadow:2px 0 0 0 #76c9ff,0 0 5px rgba(118,201,255,.4)}
     .bpi-english-token{position:relative}.bpi-hide-btn{flex:none;cursor:pointer;color:#7194ad;font-size:11px;line-height:1;user-select:none;padding:1px 2px;border-radius:3px;display:inline-flex;align-items:center}.bpi-hide-btn:hover{color:#9ed0ff;background:#2b3a4d}.bpi-eye-icon{display:inline-flex;align-items:center}
+.bpi-card-hidden{opacity:.55;filter:grayscale(.7)}
+.bpi-card-hidden:hover{opacity:.75}
+.bpi-card-hidden .bpi-english-token{text-decoration:line-through}
+.bpi-card-hidden .bpi-token-card-zh{color:var(--bpi-text-faint)}
+.bpi-card-hidden .bpi-chip-hide{display:inline-flex}
+.bpi-chip-hidden-mark{color:#e8b06a}
+.bpi-row-hidden{opacity:.6}
+.bpi-row-hidden:hover{opacity:.8}
+.bpi-hidden-term{text-decoration:line-through;color:var(--bpi-text-faint)}
+.bpi-hide-btn-off{color:#e8b06a}
+.bpi-eye-off{color:#e8b06a}
     .bpi-chip-hide{position:absolute;top:-5px;right:-5px;display:none;cursor:pointer;padding:1px 2px;border-radius:999px;background:#1d2937;border:1px solid #4c5668;color:#9ed0ff;line-height:1;z-index:2}.bpi-english-token:hover .bpi-chip-hide{display:inline-flex}.bpi-chip-hide:hover{background:#285f8e;border-color:#76c9ff;color:#fff}
 .bpi-token-line{display:flex;flex-wrap:wrap;align-items:flex-end;gap:2px 0}
     .bpi-token-card{display:inline-flex;flex-direction:column;align-items:flex-start;max-width:100%;border:1px solid var(--bpi-border-3);border-radius:5px;background:var(--bpi-surface-3);padding:1px 5px;margin:2px 3px 2px 0;vertical-align:top;cursor:pointer}
-    .bpi-token-card:hover{border-color:var(--bpi-border-secondary)}
+    .bpi-token-card:hover{border-color:var(--bpi-border-2)}
     .bpi-token-card.bpi-dragging{opacity:.45;cursor:grabbing}
     .bpi-token-card .bpi-english-token{margin:0;padding:0}
     .bpi-token-card.bpi-card-linked{background:#147fc3;border-color:#76c9ff;box-shadow:0 0 0 1px rgba(118,201,255,.32)}

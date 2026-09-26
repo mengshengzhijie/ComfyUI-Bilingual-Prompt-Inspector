@@ -198,6 +198,17 @@ const ZH = {
   "Hide {}: removed from actual output but kept in this list; can be restored to original position at any time":
     "隐藏「{}」：从实际输出中移除但保留在本列表，随时可恢复到原位置",
   "Click to restore {} to its original position": "点击把「{}」恢复到原位置",
+  "Hide {}: keeps it visible here (strikethrough) but excludes it from the actual output":
+    "隐藏「{}」：仍显示在节点里（加删除线），但不参与实际输出",
+  "Unhide {}: back into the actual output": "取消隐藏「{}」：重新参与实际输出",
+  "Hidden {}: stays visible and editable here, but excluded from the actual output; click the eye-slash to unhide; press Ctrl+Z to undo":
+    "已隐藏「{}」：仍显示、可照常编辑，但不参与实际输出；点眼睛斜线图标取消隐藏；按 Ctrl+Z 可撤销",
+  "Unhidden {}: back in the actual output; press Ctrl+Z to undo":
+    "已取消隐藏「{}」：重新参与实际输出；按 Ctrl+Z 可撤销",
+  "These tags stay visible above (strikethrough) but will not enter the actual output; click a tag to unhide":
+    "这些标签仍显示在上方（加删除线），但不会进入实际输出；点击标签取消隐藏",
+  "Click to unhide {}": "点击取消隐藏「{}」",
+  "Unhide all {} hidden tags": "全部取消隐藏（{} 个）",
   "hidden ({})": "已隐藏（{}）",
   "Delete personal override and restore built-in explanation": "删除个人覆盖并恢复内置解释",
   "Delete personal tag": "删除个人标签",

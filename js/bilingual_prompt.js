@@ -164,7 +164,12 @@ function createPanel(node, textWidget) {
     sourceSelect.appendChild(option);
   }
   const sourceState = element("span", "bpi-source-state");
-  const resumeButton = button("Resume", () => releaseUpstream(String(textWidget.value ?? "")), "bpi-primary");
+  // 放行时给后端的是"剔除隐藏标签后的文本"（effective_text 与 use_effective 两个
+  // 隐藏 widget 只服务于无上游的直通路径；有上游时输出就是这里放行的文本）
+  const resumeButton = button("Resume", () => {
+    syncEffectiveOutput();
+    releaseUpstream(effectiveWidget ? String(effectiveWidget.value ?? "") : String(textWidget.value ?? ""));
+  }, "bpi-primary");
   const cancelButton = button("Discard", () => cancelUpstreamWait());
   sourceBar.append(sourceCaption, sourceToggleLabel, sourceSelect, sourceState, resumeButton, cancelButton);
   englishSection.append(sourceBar, englishHead, englishTokenView, englishHiddenBar, englishEditor);
@@ -717,16 +722,25 @@ function createPanel(node, textWidget) {
     const before = String(textWidget.value ?? "");
     const result = removePromptToken(before, token);
     if (!result.changed) return;
-    state.undoStack.push({
+    // 如果删的是个已隐藏的标签，把它的隐藏标记一起删掉，撤销时一起回来
+    const hidden = getHiddenTags();
+    const hiddenAfter = hidden.filter((item) => !hiddenEntryMatches(item, token));
+    const entry = {
       before,
       after: result.text,
       beforeStart: token.start,
       beforeEnd: token.end,
       afterCursor: result.cursor,
       label: `Delete “${token.term}”`,
-    });
+    };
+    if (hiddenAfter.length !== hidden.length) {
+      entry.hiddenBefore = hidden.slice();
+      entry.hiddenAfter = hiddenAfter;
+    }
+    state.undoStack.push(entry);
     if (state.undoStack.length > 50) state.undoStack.shift();
     state.redoStack = [];
+    if (entry.hiddenAfter) setHiddenTags(entry.hiddenAfter);
     state.pinned = null;
     updateText(result.text, result.cursor);
     setStatus(`deleted “${token.term}”; press Ctrl+Z to undo`, "ok");
@@ -894,12 +908,14 @@ function createPanel(node, textWidget) {
   insertBreakButton.addEventListener("click", () => insertBreakFromToolbar());
 
   // ---- Hidden tags ---------------------------------------------------------
-  // A hidden tag is removed from the actual output text (the model never sees
-  // it) but remembered on the node itself — properties.bpiHiddenTags survives
-  // workflow save/load — together with the tag that used to sit in front of
-  // it, so one click puts it back at its original position.  Both directions
-  // run through the shared undo stack, and every entry snapshots the hidden
-  // list so Ctrl+Z rolls text and list back together.
+  // A hidden tag STAYS in the text (the views draw it with a strikethrough and
+  // it can still be dragged / recolored / re-weighted); it is only stripped
+  // from the actual output, via the effective_text/use_effective widgets that
+  // syncEffectiveOutput keeps up to date.  The list lives in
+  // properties.bpiHiddenTags so it survives workflow save/load, and every undo
+  // entry snapshots the list so Ctrl+Z rolls mark and text back together.
+  // Entries from older saves (whose tags were physically removed from the text
+  // back then) are re-inserted at their old anchor on restore.
   const getHiddenTags = () => {
     if (!node.properties || typeof node.properties !== "object") node.properties = {};
     if (!Array.isArray(node.properties.bpiHiddenTags)) node.properties.bpiHiddenTags = [];
@@ -912,65 +928,113 @@ function createPanel(node, textWidget) {
 
   const canHideTokens = () => ["tags", "mixed"].includes(state.modeInfo.mode);
 
+  // 隐藏条目 ↔ 当前 token 的匹配：优先按 key（normalizeKey(term)，改权重不影响），
+  // 旧存档的条目没有 key，退回按 raw 匹配。
+  const hiddenEntryMatches = (item, token) =>
+    (item.key && token.key === item.key) || (!item.key && token.raw === item.raw);
+  const hiddenIndexOf = (token) => getHiddenTags().findIndex((item) => hiddenEntryMatches(item, token));
+  const isTokenHidden = (token) => hiddenIndexOf(token) >= 0;
+
+  // ---- 输出管道 ------------------------------------------------------------
+  // 隐藏的标签留在 text 里（界面上划线显示，照常拖动/改色/改权重），真正输出
+  // 走两个隐藏 widget：effective_text = 剔除隐藏标签后的文本，use_effective = true。
+  // 旧工作流没有它们，Python 默认直通 text，行为不变。
+  const effectiveWidget = node.widgets?.find((widget) => widget.name === "effective_text") || null;
+  const useEffectiveWidget = node.widgets?.find((widget) => widget.name === "use_effective") || null;
+  const syncEffectiveOutput = () => {
+    if (!effectiveWidget) return;
+    const hidden = getHiddenTags();
+    let out = String(textWidget.value ?? "");
+    if (hidden.length) {
+      // 每次删完重新解析，偏移才不会错；隐藏条目通常很少，代价可忽略
+      for (;;) {
+        const tokens = parsePrompt(out, state.index, state.machine, { mode: state.modePreference });
+        const target = tokens.find((token) => hidden.some((item) => hiddenEntryMatches(item, token)));
+        if (!target) break;
+        const step = removePromptToken(out, target);
+        if (!step.changed) break;
+        out = step.text;
+      }
+    }
+    effectiveWidget.value = out;
+    if (useEffectiveWidget) useEffectiveWidget.value = true;
+  };
+
   const pushHistoryWithHidden = (entry) => {
     state.undoStack.push(entry);
     if (state.undoStack.length > 50) state.undoStack.shift();
     state.redoStack = [];
   };
 
+  // 隐藏只是"打标记"：标签留在文本里，界面上划线显示，照常拖动/改色/改权重，
+  // 只是 syncEffectiveOutput 会把它从实际输出里剔除。所以隐藏/恢复的 undo 条目
+  // before === after（文本没变），撤销只回滚隐藏列表。
   const hideToken = (token) => {
     if (!token || !canHideTokens()) return false;
-    const before = String(textWidget.value ?? "");
-    const result = removePromptToken(before, token);
-    if (!result.changed) return false;
-    const index = state.tokens.findIndex((item) =>
-      item.start === token.start && item.end === token.end && item.raw === token.raw);
-    const afterToken = index > 0 ? state.tokens[index - 1] : null;
+    if (isTokenHidden(token)) return false;
     const hidden = getHiddenTags();
+    const before = String(textWidget.value ?? "");
     const entry = {
       before,
-      after: result.text,
+      after: before,
       beforeStart: token.start,
       beforeEnd: token.end,
-      afterCursor: result.cursor,
+      afterCursor: token.start,
       label: `Hide “${token.term}”`,
       hiddenBefore: hidden.slice(),
       hiddenAfter: hidden.concat([{
         raw: token.raw,
         chinese: token.chinese ?? "",
-        after: afterToken ? afterToken.raw : null,
+        after: null,
+        key: token.key,
       }]),
     };
     pushHistoryWithHidden(entry);
     setHiddenTags(entry.hiddenAfter);
     state.pinned = null;
-    updateText(result.text, result.cursor);
-    setStatus(`hidden “${token.term}” (excluded from actual output); can be restored anytime in the hidden section; press Ctrl+Z to undo`, "ok");
+    updateText(before, token.start);
+    setStatus(`Hidden “${token.term}”: stays visible and editable here, but excluded from the actual output; click the eye-slash to unhide; press Ctrl+Z to undo`, "ok");
     return true;
   };
 
+  // 取消隐藏 = 把条目从隐藏列表里摘掉。两种形态都兼容：
+  // 标签还在文本里（新模型）→ 只摘标记；旧版工作流当时把标签从文本删了 → 按旧锚点插回去。
   const restoreHiddenTag = (index) => {
     const hidden = getHiddenTags();
     const item = hidden[index];
     if (!item) return false;
     const before = String(textWidget.value ?? "");
-    const result = restorePromptToken(before, state.tokens, item.raw, item.after);
-    if (!result.changed) return false;
+    const inText = state.tokens.some((token) => hiddenEntryMatches(item, token));
+    let after = before;
+    let cursor = before.length;
+    if (!inText) {
+      const result = restorePromptToken(before, state.tokens, item.raw, item.after);
+      if (!result.changed) return false;
+      after = result.text;
+      cursor = result.cursor;
+    }
     const entry = {
       before,
-      after: result.text,
+      after,
       beforeStart: 0,
       beforeEnd: before.length,
-      afterCursor: result.cursor,
+      afterCursor: cursor,
       label: `restore “${item.raw}”`,
       hiddenBefore: hidden.slice(),
       hiddenAfter: hidden.filter((_, i) => i !== index),
     };
     pushHistoryWithHidden(entry);
     setHiddenTags(entry.hiddenAfter);
-    updateText(result.text, result.cursor);
-    setStatus(`restored “${item.raw}” to its original position; press Ctrl+Z to undo`, "ok");
+    updateText(after, cursor);
+    setStatus(inText
+      ? `Unhidden “${item.raw}”: back in the actual output; press Ctrl+Z to undo`
+      : `restored “${item.raw}” to its original position; press Ctrl+Z to undo`, "ok");
     return true;
+  };
+
+  const unhideToken = (token) => {
+    const index = hiddenIndexOf(token);
+    return index >= 0 ? restoreHiddenTag(index) : false;
   };
 
   const restoreAllHiddenTags = () => {
@@ -980,12 +1044,12 @@ function createPanel(node, textWidget) {
     let text = before;
     let tokens = state.tokens;
     for (const item of hidden) {
+      if (tokens.some((token) => hiddenEntryMatches(item, token))) continue; // 还在文本里，只摘标记
       const step = restorePromptToken(text, tokens, item.raw, item.after);
       if (!step.changed) continue;
       text = step.text;
       tokens = parsePrompt(text, state.index, state.machine, { mode: state.modePreference });
     }
-    if (text === before) return false;
     const entry = {
       before,
       after: text,
@@ -1875,14 +1939,18 @@ function createPanel(node, textWidget) {
       ? `“${token.term}” ↔ “${token.chinese}” | natural language supports only whole-segment editing; can drag to reorder the whole segment`
       : `“${token.term}” ↔ “${token.chinese}” | click to link; double-click to edit weight; select then press Delete; drag to reorder or Alt+↑/↓ to nudge`);
     if (canHideTokens()) {
-      const hideCorner = element("span", "bpi-chip-hide");
-      hideCorner.appendChild(buildEyeIcon());
-      setTitle(hideCorner, `Hide “${token.raw}”: excluded from actual output; can be restored in the hidden section`);
+      const tokenHidden = isTokenHidden(token);
+      const hideCorner = element("span", tokenHidden ? "bpi-chip-hide bpi-chip-hidden-mark" : "bpi-chip-hide");
+      hideCorner.appendChild(tokenHidden ? buildEyeOffIcon() : buildEyeIcon());
+      setTitle(hideCorner, tokenHidden
+        ? `Unhide “${token.raw}”: back into the actual output`
+        : `Hide “${token.raw}”: keeps it visible here (strikethrough) but excludes it from the actual output`);
       hideCorner.addEventListener("pointerdown", (event) => event.stopPropagation());
       hideCorner.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        hideToken(token);
+        if (isTokenHidden(token)) unhideToken(token);
+        else hideToken(token);
       });
       chip.appendChild(hideCorner);
     }
@@ -1898,6 +1966,8 @@ function createPanel(node, textWidget) {
     const chinese = element("span", "bpi-token-card-zh", tokenChineseLabel(token));
     setTitle(chinese, `“${token.term}” ↔ “${token.chinese}”`);
     const card = element("span", "bpi-token-card");
+    // 隐藏的卡：划线 + 灰化褪色，但拖动/双击改权重/改色都照常
+    if (isTokenHidden(token)) card.classList.add("bpi-card-hidden");
     // 选中反馈给整张卡片，而不是只有英文那一行
     if (state.pinned === token.id) card.classList.add("bpi-card-linked");
     const cardColor = tokenCardColor(token);
@@ -2076,15 +2146,31 @@ function createPanel(node, textWidget) {
     return icon;
   };
 
-  // Details-table row button: hide this tag from the actual output while
-  // keeping it in the hidden list so it can be restored with one click.
+  // 眼睛 + 斜线 = 已隐藏，点击取消隐藏
+  const buildEyeOffIcon = () => {
+    const icon = element("span", "bpi-eye-icon bpi-eye-off");
+    icon.innerHTML =
+      '<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true">' +
+      '<path d="M12 5C6.5 5 2.5 10.5 2 12c.5 1.5 4.5 7 10 7s9.5-5.5 10-7c-.5-1.5-4.5-7-10-7z" ' +
+      'fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/>' +
+      '<circle cx="12" cy="12" r="3" fill="currentColor"/>' +
+      '<line x1="4" y1="20" x2="20" y2="4" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>';
+    return icon;
+  };
+
+  // Details-table row button: toggle this tag's hidden mark. Hidden tags stay in
+  // the list (strikethrough, faded) and are only excluded from the actual output.
   const buildRowHideButton = (token) => {
-    const hide = element("span", "bpi-hide-btn");
-    hide.appendChild(buildEyeIcon());
-    setTitle(hide, `Hide “${token.raw}”: removed from actual output but kept in this list; can be restored to original position at any time`);
+    const tokenHidden = isTokenHidden(token);
+    const hide = element("span", tokenHidden ? "bpi-hide-btn bpi-hide-btn-off" : "bpi-hide-btn");
+    hide.appendChild(tokenHidden ? buildEyeOffIcon() : buildEyeIcon());
+    setTitle(hide, tokenHidden
+      ? `Unhide “${token.raw}”: back into the actual output`
+      : `Hide “${token.raw}”: keeps it visible here (strikethrough) but excludes it from the actual output`);
     hide.addEventListener("click", (event) => {
       event.stopPropagation();
-      hideToken(token);
+      if (isTokenHidden(token)) unhideToken(token);
+      else hideToken(token);
     });
     return hide;
   };
@@ -2101,11 +2187,15 @@ function createPanel(node, textWidget) {
     }
     container.classList.remove("bpi-hidden");
     const label = element("span", "bpi-hidden-label", `hidden (${hidden.length})`);
-    setTitle(label, "These tags will not enter the actual output; click a tag to restore it to its original position");
+    setTitle(label, "These tags stay visible above (strikethrough) but will not enter the actual output; click a tag to unhide");
     container.appendChild(label);
     for (const [index, item] of hidden.entries()) {
+      // 还在文本里 → 点击就是取消隐藏；旧版工作流里不在文本的 → 点击插回原位
+      const inText = state.tokens.some((token) => hiddenEntryMatches(item, token));
       const chip = element("span", "bpi-hidden-chip");
-      setTitle(chip, `Click to restore “${item.raw}” to its original position`);
+      setTitle(chip, inText
+        ? `Click to unhide “${item.raw}”`
+        : `Click to restore “${item.raw}” to its original position`);
       chip.appendChild(element("span", "bpi-hidden-en", item.raw));
       if (item.chinese) chip.appendChild(element("span", "bpi-hidden-zh", item.chinese));
       chip.appendChild(element("span", "bpi-hidden-restore", "↩"));
@@ -2116,7 +2206,7 @@ function createPanel(node, textWidget) {
       container.appendChild(chip);
     }
     const restoreAll = button("Restore all", () => restoreAllHiddenTags(), "bpi-mini bpi-hidden-all");
-    setTitle(restoreAll, `Restore all ${hidden.length} hidden tags to their original positions`);
+    setTitle(restoreAll, `Unhide all ${hidden.length} hidden tags`);
     container.appendChild(restoreAll);
   };
 
@@ -2241,6 +2331,9 @@ function createPanel(node, textWidget) {
 
   const render = () => {
     renderSourceBar();
+    // 输出管道跟着视图一起刷：任何文本/隐藏列表变化最后都会走到 render，
+    // 在这里统一同步，漏不了（updateText / 隐藏 / 恢复 / 加载工作流都会触发 render）
+    syncEffectiveOutput();
     const text = String(textWidget.value ?? "");
     state.lastText = text;
     state.modeInfo = detectInputMode(text, state.modePreference);
@@ -2295,6 +2388,8 @@ function createPanel(node, textWidget) {
     } else {
       visibleTokens.forEach((token, visibleIndex) => {
         const row = element("div", `bpi-row bpi-${token.status}`);
+        const tokenHidden = isTokenHidden(token);
+        if (tokenHidden) row.classList.add("bpi-row-hidden");
         const rowSeverity = errorsByKey.get(token.key);
         if (rowSeverity === "error") row.classList.add("bpi-has-error");
         else if (rowSeverity === "warning") row.classList.add("bpi-has-warning");
@@ -2309,7 +2404,7 @@ function createPanel(node, textWidget) {
           englishCell.appendChild(buildRowHideButton(token));
         }
         const chineseCell = element("div", "bpi-cell bpi-zh");
-        const englishText = element("span", "", token.raw);
+        const englishText = element("span", tokenHidden ? "bpi-hidden-term" : "", token.raw);
         setTitle(englishText, `Query: “${token.term}”${token.weight === null ? "" : ` | weight: ${token.weight}`}`);
         englishText.addEventListener("dblclick", (event) => {
           event.stopPropagation();
@@ -3117,7 +3212,18 @@ app.registerExtension({
       if (!textWidget) return;
       // widget.label 直接赋值，不经过 element()/set*()，也就不会走翻译层，
       // 所以这里直接写死中文（面板里的同名标题走 element()，由 i18n 处理）。
-      textWidget.label = "英文提示词（实际输出）";
+      // 叫「实际输入」而不是「实际输出」：这里显示的是编辑用的完整文本，
+      // 隐藏的标签仍然在里面，真正剔除后的输出由 effective_text 送出去。
+      textWidget.label = "英文提示词（实际输入）";
+      // effective_text / use_effective 是 Python 侧声明的输出管道 widget（隐藏标签
+      // 剔除后的文本从这里走），不应出现在节点上，三种手段一起压扁隐藏。
+      for (const name of ["effective_text", "use_effective"]) {
+        const pipe = this.widgets?.find((widget) => widget.name === name);
+        if (!pipe) continue;
+        pipe.type = "hidden";
+        pipe.hidden = true;
+        pipe.computeSize = () => [0, -4];
+      }
 
       bindUpstreamListener();
       const inspector = createPanel(this, textWidget);
