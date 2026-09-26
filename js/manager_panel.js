@@ -17,6 +17,7 @@ import {
   exportSavedPrompts,
   field,
   getAssistantConfig,
+  helpMark,
   importCommunityPack,
   importSavedPrompts,
   importTags,
@@ -626,6 +627,24 @@ async function buildAssistantSection(section) {
   clearBaiduLine.append(clearBaiduSecretKey, element("span", "", "Clear saved Baidu secret"));
   const baiduSpacer = element("span");
   form.append(baiduSpacer, clearBaiduLine);
+  const baiduQps = field(form, "QPS (requests/second)", "assistant-baidu-qps", config.baidu_qps ?? 1, "1");
+  baiduQps.type = "number";
+  baiduQps.min = "0.1";
+  baiduQps.max = "50";
+  baiduQps.step = "0.5";
+  const baiduQpsHelp = [
+    "Baidu rate-limits General Text Translation by account tier. Enter your tier's number and the plugin queues requests to match:",
+    "· Unverified / Standard: 1",
+    "· Personal verified: 10",
+    "· Enterprise verified: higher, see the Baidu AI Cloud console",
+    "Find your tier under Baidu AI Cloud → Machine Translation → General Text Translation.",
+    "Too high and Baidu still returns 54003 (too many requests); too low is only slower, never an error.",
+    "If unsure, use 1.",
+  ].join("\n");
+  form.querySelector('label[for="bpi-field-assistant-baidu-qps"]')?.appendChild(helpMark(baiduQpsHelp));
+  const baiduQpsNote = element("div", "bpi-config-note", "How many requests per second Baidu may receive at most. Batch translation queues by this value and never exceeds it.");
+  baiduQpsNote.style.gridColumn = "1 / -1";
+  form.append(baiduQpsNote);
 
   // AI 服务（优化恒走它；翻译在选 AI 时也走它）
   const aiHead = element("div", "bpm-toolbar");
@@ -771,6 +790,7 @@ async function buildAssistantSection(section) {
     baidu_appid: baiduAppId.value.trim(),
     baidu_secret_key: baiduSecretKey.value.trim(),
     clear_baidu_secret_key: clearBaiduSecretKey.checked,
+    baidu_qps: baiduQps.value.trim(),
     ai_temperature: temperature.value,
     ai_timeout_seconds: timeout.value,
     appearance: appearanceSelect.value,

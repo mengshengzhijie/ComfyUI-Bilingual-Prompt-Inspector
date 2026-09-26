@@ -125,6 +125,15 @@ function button(label, action, className = "") {
   return item;
 }
 
+// 输入框旁边的「?」：鼠标悬停或键盘聚焦时弹出说明气泡。
+// 气泡内容直接写进 DOM，走 t() 翻译；\n 会被 CSS 的 pre-line 渲染成换行。
+function helpMark(helpText) {
+  const mark = element("span", "bpi-help", "?");
+  mark.tabIndex = 0;
+  mark.appendChild(element("span", "bpi-help-pop", helpText));
+  return mark;
+}
+
 function field(form, labelText, name, value = "", placeholder = "") {
   const label = element("label", "", labelText);
   label.htmlFor = `bpi-field-${name}`;
@@ -150,7 +159,9 @@ async function runInspectorAssistant(action, text, instruction = "") {
     throw new Error("Assistant returned no valid result");
   }
   if (!response.ok || !result.success) {
-    throw new Error(result.error || "Assistant processing failed");
+    const error = new Error(result.error || "Assistant processing failed");
+    error.status = response.status; // 429 = 插件自己的限流计数器，前端据此等待重试
+    throw error;
   }
   const output = result.data?.text;
   if (!output || typeof output !== "string") throw new Error("Assistant returned no text");
@@ -593,7 +604,11 @@ function injectBpiStyles() {
     .bpi-hidden-bar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:5px 2px;border-top:1px solid var(--bpi-border-3)}.bpi-hidden-bar.bpi-hidden{display:none}.bpi-hidden-label{flex:none;color:var(--bpi-text-muted);font-size:11px}
     .bpi-hidden-chip{display:inline-flex;align-items:center;gap:5px;max-width:280px;overflow:hidden;border:1px dashed var(--bpi-border-2);border-radius:999px;padding:2px 8px;background:var(--bpi-surface-3);color:var(--bpi-text-muted);cursor:pointer;font-size:11px}.bpi-hidden-chip:hover{background:#31404f;border-color:#76c9ff;color:#d7e6f7}.bpi-hidden-en{text-decoration:line-through;white-space:nowrap}.bpi-hidden-zh{color:var(--bpi-text-muted);font-size:10px}.bpi-hidden-restore{color:#76c9ff;font-size:12px}
     .bpi-hidden-all{margin-left:auto}
-    .bpi-modal-shade{position:fixed;inset:0;z-index:10020;background:rgba(0,0,0,.58);display:flex;align-items:center;justify-content:center}.bpi-modal{width:min(520px,calc(100vw - 32px));max-height:calc(100vh - 40px);overflow:auto;background:var(--bpi-surface-modal);color:var(--bpi-text);border:1px solid var(--bpi-border-2);border-radius:10px;padding:16px;box-shadow:0 18px 55px rgba(0,0,0,.55)}.bpi-modal h3{margin:0 0 12px;font-size:16px}.bpi-form{display:grid;grid-template-columns:92px minmax(0,1fr);gap:9px;align-items:center}.bpi-form label{color:var(--bpi-text-muted)}.bpi-form input,.bpi-form select,.bpi-form textarea{box-sizing:border-box;width:100%;border:1px solid var(--bpi-border-2);border-radius:5px;background:var(--bpi-input-bg);color:var(--bpi-input-text);padding:6px 7px}.bpi-form textarea{min-height:112px;resize:vertical;font:11px/1.45 Arial,sans-serif}.bpi-form input:focus,.bpi-form select:focus,.bpi-form textarea:focus{outline:none;border-color:#4ca7e8}.bpi-modal-actions{display:flex;justify-content:flex-end;gap:7px;margin-top:14px;flex-wrap:wrap}.bpi-weight-presets{display:flex;gap:5px;flex-wrap:wrap;margin-top:10px}.bpi-about-modal{width:min(460px,calc(100vw - 32px))}.bpi-about-name{margin-bottom:7px;color:var(--bpi-text);font-weight:700}.bpi-config-note{color:var(--bpi-text-muted);font-size:10px;word-break:break-all}.bpi-preview-text{box-sizing:border-box;width:100%;min-height:130px;max-height:300px;resize:vertical;border:1px solid var(--bpi-border-2);border-radius:6px;background:var(--bpi-surface-3);color:var(--bpi-text);padding:8px;font:12px/1.5 monospace}.bpi-sort-groups{max-height:230px;overflow:auto;border:1px solid var(--bpi-border-2);border-radius:6px;background:var(--bpi-surface-3);padding:6px;margin:8px 0}.bpi-sort-group{display:grid;grid-template-columns:145px minmax(0,1fr);gap:7px;padding:4px;border-top:1px solid var(--bpi-border-3)}.bpi-sort-group:first-child{border-top:0}.bpi-sort-group strong{color:#9fd3ff}
+    .bpi-modal-shade{position:fixed;inset:0;z-index:10020;background:rgba(0,0,0,.58);display:flex;align-items:center;justify-content:center}.bpi-modal{width:min(520px,calc(100vw - 32px));max-height:calc(100vh - 40px);overflow:auto;background:var(--bpi-surface-modal);color:var(--bpi-text);border:1px solid var(--bpi-border-2);border-radius:10px;padding:16px;box-shadow:0 18px 55px rgba(0,0,0,.55)}.bpi-modal h3{margin:0 0 12px;font-size:16px}.bpi-form{display:grid;grid-template-columns:92px minmax(0,1fr);gap:9px;align-items:center}.bpi-form label{color:var(--bpi-text-muted)}.bpi-form input,.bpi-form select,.bpi-form textarea{box-sizing:border-box;width:100%;border:1px solid var(--bpi-border-2);border-radius:5px;background:var(--bpi-input-bg);color:var(--bpi-input-text);padding:6px 7px}.bpi-form textarea{min-height:112px;resize:vertical;font:11px/1.45 Arial,sans-serif}.bpi-form input:focus,.bpi-form select:focus,.bpi-form textarea:focus{outline:none;border-color:#4ca7e8}.bpi-modal-actions{display:flex;justify-content:flex-end;gap:7px;margin-top:14px;flex-wrap:wrap}.bpi-weight-presets{display:flex;gap:5px;flex-wrap:wrap;margin-top:10px}.bpi-about-modal{width:min(460px,calc(100vw - 32px))}.bpi-about-name{margin-bottom:7px;color:var(--bpi-text);font-weight:700}.bpi-config-note{color:var(--bpi-text-muted);font-size:10px;word-break:break-all}
+.bpi-help{position:relative;display:inline-flex;align-items:center;justify-content:center;width:13px;height:13px;margin-left:5px;border:1px solid var(--bpi-border);border-radius:50%;color:var(--bpi-text-muted);font:10px/1 Arial,sans-serif;vertical-align:middle;cursor:help;user-select:none}
+.bpi-help:hover,.bpi-help:focus{color:var(--bpi-text);border-color:var(--bpi-border-2)}
+.bpi-help-pop{position:absolute;left:50%;bottom:calc(100% + 6px);transform:translateX(-50%);z-index:80;display:none;box-sizing:border-box;width:290px;max-width:70vw;padding:7px 9px;border:1px solid var(--bpi-border-2);border-radius:6px;background:var(--bpi-surface-modal);color:var(--bpi-text-muted);font:11px/1.65 Arial,sans-serif;white-space:pre-line;text-align:left;cursor:default}
+.bpi-help:hover .bpi-help-pop,.bpi-help:focus .bpi-help-pop{display:block}.bpi-preview-text{box-sizing:border-box;width:100%;min-height:130px;max-height:300px;resize:vertical;border:1px solid var(--bpi-border-2);border-radius:6px;background:var(--bpi-surface-3);color:var(--bpi-text);padding:8px;font:12px/1.5 monospace}.bpi-sort-groups{max-height:230px;overflow:auto;border:1px solid var(--bpi-border-2);border-radius:6px;background:var(--bpi-surface-3);padding:6px;margin:8px 0}.bpi-sort-group{display:grid;grid-template-columns:145px minmax(0,1fr);gap:7px;padding:4px;border-top:1px solid var(--bpi-border-3)}.bpi-sort-group:first-child{border-top:0}.bpi-sort-group strong{color:#9fd3ff}
     .bpi-about-footer{flex:none;min-height:20px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:1px 4px 0;color:var(--bpi-text-faint);font-size:9px}.bpi-about-button{border:0;background:transparent;color:var(--bpi-text-muted);padding:1px 3px;cursor:pointer;font-size:9px}.bpi-about-button:hover{color:#b8dcfa;text-decoration:underline}
     .bpi-pack-section{border:1px solid var(--bpi-border-2);border-radius:7px;background:var(--bpi-surface-3);padding:7px;margin-bottom:8px}.bpi-pack-toolbar{display:flex;gap:6px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:6px}.bpi-pack-toolbar strong{color:var(--bpi-text)}.bpi-pack-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(225px,1fr));gap:5px;max-height:166px;overflow:auto}.bpi-pack-card{border:1px solid var(--bpi-border-2);border-radius:6px;background:var(--bpi-surface-2);padding:6px;display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:6px;align-items:start}.bpi-pack-card.bpi-pack-disabled{opacity:.58}.bpi-pack-name{font-weight:700;color:var(--bpi-text)}.bpi-pack-meta{font-size:10px;color:var(--bpi-text-muted);margin-top:2px;word-break:break-word}.bpi-pack-controls{display:flex;gap:3px;flex-wrap:wrap;justify-content:flex-end}.bpi-switch{margin-top:3px}.bpi-pack-personal{border-color:#397062}.bpi-community-form{display:grid;grid-template-columns:105px minmax(0,1fr);gap:8px;align-items:center}.bpi-community-form input{border:1px solid var(--bpi-border-2);border-radius:5px;background:var(--bpi-input-bg);color:var(--bpi-input-text);padding:6px}.bpi-community-preview{max-height:150px;overflow:auto;border:1px solid var(--bpi-border-2);border-radius:5px;padding:5px;margin-top:8px;color:var(--bpi-text-muted)}
     .bpi-import-conflicts{max-height:240px;overflow:auto;border:1px solid var(--bpi-border-2);border-radius:6px;margin-top:10px}.bpi-import-conflict{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;padding:6px;border-top:1px solid var(--bpi-border-3)}.bpi-import-conflict:first-child{border-top:0}.bpi-import-stat{display:flex;gap:12px;flex-wrap:wrap;color:var(--bpi-text)}.bpi-danger-text{color:#ff9ba3}
@@ -647,6 +662,7 @@ export {
   exportSavedPrompts,
   field,
   getAssistantConfig,
+  helpMark,
   getLanguageMode,
   importCommunityPack,
   importSavedPrompts,

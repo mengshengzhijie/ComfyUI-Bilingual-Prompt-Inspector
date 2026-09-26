@@ -14,6 +14,7 @@ from server import PromptServer
 
 from .assistant_store import (
     BAIDU_ERROR_MESSAGES,
+    BAIDU_QPS_DEFAULT,
     BAIDU_TRANSLATE_ENDPOINT,
     AssistantStore,
     baidu_split_query,
@@ -41,6 +42,10 @@ _ASSISTANT_RATE_WINDOW = 60.0
 _ASSISTANT_RATE_LIMIT = 30
 _assistant_requests = deque()
 _assistant_slots = asyncio.Semaphore(2)
+# 百度翻译的全局 QPS 节流：所有百度请求共用一条时间轴，跨请求生效。
+# 之前是每个请求内部 sleep(1.1)，只有单次文本被拆成多块时才生效，逐条翻译等于没节流。
+_baidu_gate = asyncio.Lock()
+_baidu_next_slot = 0.0
 
 
 class AssistantLimitError(ValueError):
@@ -138,6 +143,19 @@ def _dictionary_explain(text):
     return "，".join(output)
 
 
+async def _baidu_throttle(qps):
+    """按账号 QPS 给百度请求排号；多留 10% 余量，避免边界抖动踩到 54003。"""
+    global _baidu_next_slot
+    interval = (1.0 / max(float(qps), 0.1)) * 1.1
+    async with _baidu_gate:
+        now = time.monotonic()
+        slot = max(now, _baidu_next_slot)
+        _baidu_next_slot = slot + interval
+    delay = slot - time.monotonic()
+    if delay > 0:
+        await asyncio.sleep(delay)
+
+
 async def _baidu_translate(text, to_lang):
     config = assistant_store.config()
     appid = str(config.get("baidu_appid") or "").strip()
@@ -147,12 +165,12 @@ async def _baidu_translate(text, to_lang):
     chunks = baidu_split_query(text)
     if not chunks:
         raise ValueError("待翻译文本为空")
+    qps = config.get("baidu_qps") or BAIDU_QPS_DEFAULT
     timeout = ClientTimeout(total=config["ai_timeout_seconds"])
     results = []
     async with ClientSession(timeout=timeout) as session:
-        for index, chunk in enumerate(chunks):
-            if index:
-                await asyncio.sleep(1.1)  # 通用文本翻译标准版限 1 QPS
+        for chunk in chunks:
+            await _baidu_throttle(qps)
             params = baidu_translate_params(appid, secret_key, chunk, to_lang)
             async with session.post(BAIDU_TRANSLATE_ENDPOINT, data=params) as response:
                 if response.status >= 400:
@@ -338,7 +356,12 @@ async def run_assistant(request):
             raise ValueError("输入内容过长")
         if len(instruction) > 20000:
             raise ValueError("附加要求过长")
-        _consume_assistant_rate_limit()
+        # 百度翻译有自己的 QPS 节流器（_baidu_throttle），通用的「30 次 / 60 秒」
+        # 计数器不再重复计数——否则逐条翻译 30 个标签之后，一分钟内再点一次会被误拦。
+        # 只有真正走百度的 translate/explain 才豁免；optimize 恒走 AI，照旧计数。
+        goes_to_baidu = assistant_store.config()["translate_service"] == "baidu" and action in {"translate", "explain"}
+        if not goes_to_baidu:
+            _consume_assistant_rate_limit()
         try:
             await asyncio.wait_for(_assistant_slots.acquire(), timeout=0.25)
         except asyncio.TimeoutError as error:

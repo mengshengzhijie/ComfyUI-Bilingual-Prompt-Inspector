@@ -1505,34 +1505,54 @@ function createPanel(node, textWidget) {
     }
   };
 
+  const isNaturalSegment = (token) => token?.segmentKind === "natural" || ["natural", "instruction"].includes(token?.inputMode);
+
+  // 校验译文并写入机器翻译缓存；逐条翻译与批量翻译共用这一段
+  const commitTranslation = (token, translated) => {
+    const validation = validateTranslationResult(token.term, translated, { naturalLanguage: isNaturalSegment(token) });
+    if (!validation.ok) {
+      console.warn("[BilingualPromptInspector] Rejected abnormal machine translation", {
+        source: token.term,
+        translated,
+        reason: validation.reason,
+      });
+      setStatus(`Rejected abnormal translation: “${validation.reason}”`, "error");
+      return false;
+    }
+    setMachineTranslation(token.key, {
+      english: token.term,
+      text: validation.text,
+      source: "bpi-assistant",
+      createdAt: Date.now(),
+    });
+    return true;
+  };
+
   const translateToken = async (token) => {
     if (!token?.key || state.translating.has(token.key)) return;
     state.translating.add(token.key);
     setStatus(`Translating: “${token.term}”`, "busy");
     render();
     try {
-      const naturalLanguage = token.segmentKind === "natural" || ["natural", "instruction"].includes(token.inputMode);
-      const translated = await runInspectorAssistant(
-        "translate",
-        token.term,
-        naturalLanguage ? "This is a natural-language segment; keep the translation as natural language, do not split into a tag list." : "",
-      );
-      const validation = validateTranslationResult(token.term, translated, { naturalLanguage });
-      if (!validation.ok) {
-        console.warn("[BilingualPromptInspector] Rejected abnormal machine translation", {
-          source: token.term,
-          translated,
-          reason: validation.reason,
-        });
-        setStatus(`Rejected abnormal translation: “${validation.reason}”`, "error");
-        return false;
+      const naturalLanguage = isNaturalSegment(token);
+      const instruction = naturalLanguage ? "This is a natural-language segment; keep the translation as natural language, do not split into a tag list." : "";
+      // 撞到插件自己的「30 次 / 60 秒」（AI 服务）就等窗口滑过去再试同一个标签，
+      // 别直接算成失败；百度已豁免这个计数器，走不到这里
+      let translated;
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        try {
+          translated = await runInspectorAssistant("translate", token.term, instruction);
+          break;
+        } catch (error) {
+          if (error.status === 429 && attempt < 3) {
+            setStatus(`Rate limited; waiting to retry “${token.term}”…`, "busy");
+            await new Promise((resolve) => setTimeout(resolve, 15000));
+            continue;
+          }
+          throw error;
+        }
       }
-      setMachineTranslation(token.key, {
-        english: token.term,
-        text: validation.text,
-        source: "bpi-assistant",
-        createdAt: Date.now(),
-      });
+      if (!commitTranslation(token, translated)) return false;
       setStatus(`translated “${token.term}”; can save after confirming`, "ok");
       return true;
     } catch (error) {
@@ -2423,7 +2443,9 @@ function createPanel(node, textWidget) {
       if (token.status !== "unknown" || /[\u3400-\u9fff]/.test(token.term) || seen.has(token.key)) return false;
       seen.add(token.key);
       return true;
-    }).slice(0, 30);
+    });
+    // 不设数量上限：以前砍到 30 是为了躲插件自己的 30/60 计数器，现在百度走 QPS 节流、
+    // AI 撞限流会自动等窗口滑过去重试，没必要再让用户多点一次
     if (!unknown.length) {
       setStatus("No unknown tags currently", "ok");
       return;
@@ -2431,6 +2453,7 @@ function createPanel(node, textWidget) {
     control.disabled = true;
     let completed = 0;
     try {
+      // 一个一个来：后端按 QPS 排队，慢但不会撞百度 54003，界面也能逐条看到进度
       for (let index = 0; index < unknown.length; index += 1) {
         setStatus(`Translating unknown tags ${index + 1}/${unknown.length}：“${unknown[index].term}”`, "busy");
         if (await translateToken(unknown[index])) completed += 1;

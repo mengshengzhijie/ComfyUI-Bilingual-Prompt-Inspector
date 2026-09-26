@@ -60,6 +60,9 @@ DEFAULT_CONFIG = {
     # 百度翻译独立配置，不随翻译服务切换而清空
     "baidu_appid": "",
     "baidu_secret_key": "",
+    # 百度账号的 QPS 上限：未认证/标准版 1，个人认证 10，企业认证更高。
+    # 后端按它给百度请求排队，避免触发 54003「请求过于频繁」
+    "baidu_qps": 1.0,
     "appearance": "auto",  # auto | dark | light
     # 插件面板自己的界面语言：auto 跟随 ComfyUI 的 Comfy.Locale，zh / en 强制指定
     "language": "auto",  # auto | zh | en
@@ -69,6 +72,25 @@ DEFAULT_CONFIG = {
 }
 
 BAIDU_TRANSLATE_ENDPOINT = "https://fanyi-api.baidu.com/api/trans/vip/translate"
+
+# 百度「通用文本翻译」按账号档位给 QPS：标准版 1 QPS，个人认证 10 QPS，企业认证更高。
+# 后端按这个值给百度请求排队；填高了会被百度报 54003，填低了只是慢一点。
+BAIDU_QPS_DEFAULT = 1.0
+BAIDU_QPS_MIN = 0.1
+BAIDU_QPS_MAX = 50.0
+
+
+def normalize_baidu_qps(value):
+    """把用户填的 QPS 收敛成合法数字；非数字一律拒绝，不静默回退。"""
+    if value is None or isinstance(value, bool) or str(value).strip() == "":
+        return BAIDU_QPS_DEFAULT
+    try:
+        qps = float(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError("百度 QPS 必须是数字") from error
+    if qps != qps or qps in (float("inf"), float("-inf")):
+        raise ValueError("百度 QPS 必须是数字")
+    return min(max(qps, BAIDU_QPS_MIN), BAIDU_QPS_MAX)
 
 BAIDU_ERROR_MESSAGES = {
     "52001": "请求超时，请重试",
@@ -317,6 +339,12 @@ class AssistantStore:
             result["baidu_secret_key"] = ""
             result["baidu_credential_binding"] = ""
             should_rewrite = True
+        # 手改配置文件可能写坏 QPS；这里兜底回默认值，不让整个助手挂掉
+        try:
+            result["baidu_qps"] = normalize_baidu_qps(result.get("baidu_qps"))
+        except ValueError:
+            result["baidu_qps"] = BAIDU_QPS_DEFAULT
+            should_rewrite = True
         if should_rewrite:
             self._write_json_atomic(self.config_path, result)
         return result
@@ -399,6 +427,7 @@ class AssistantStore:
                 if len(incoming_secret) > 4096:
                     raise ValueError("百度密钥过长")
                 baidu_secret = incoming_secret
+        baidu_qps = normalize_baidu_qps(payload.get("baidu_qps", current.get("baidu_qps", BAIDU_QPS_DEFAULT)))
         ai_credential_binding = self._credential_binding(ai_provider, ai_base_url) if ai_api_key else ""
         baidu_credential_binding = self._credential_binding("baidu", "") if baidu_secret else ""
         appearance = str(payload.get("appearance", current.get("appearance", "auto"))).strip().lower()
@@ -418,6 +447,7 @@ class AssistantStore:
             "ai_timeout_seconds": ai_timeout_seconds,
             "baidu_appid": baidu_appid,
             "baidu_secret_key": baidu_secret,
+            "baidu_qps": baidu_qps,
             "appearance": appearance,
             "language": language,
             "translation_rule": self._clean_rule(payload.get("translation_rule"), current["translation_rule"]),

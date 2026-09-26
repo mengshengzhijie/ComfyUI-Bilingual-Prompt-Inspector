@@ -190,6 +190,31 @@ class AssistantStoreTests(unittest.TestCase):
             self.assertFalse(public["baidu_secret_key_configured"])
             self.assertEqual(store.config()["baidu_secret_key"], "")
 
+    def test_baidu_qps_is_persisted_and_validated(self):
+        with tempfile.TemporaryDirectory() as root:
+            store = AssistantStore(Path(root) / "config")
+            # 新装默认按标准版 1 QPS，宁慢不错
+            self.assertEqual(store.config()["baidu_qps"], 1.0)
+            public = store.update({"translate_service": "baidu", "baidu_appid": "appid", "baidu_qps": 10})
+            self.assertEqual(public["baidu_qps"], 10.0)
+            self.assertEqual(store.config()["baidu_qps"], 10.0)
+            # 非数字直接拒绝，不静默回退，免得用户以为填上了
+            with self.assertRaises(ValueError):
+                store.update({"baidu_qps": "很快"})
+            # 越界收敛到上下限
+            self.assertEqual(store.update({"baidu_qps": 999})["baidu_qps"], 50.0)
+            self.assertEqual(store.update({"baidu_qps": 0})["baidu_qps"], 0.1)
+
+    def test_baidu_qps_falls_back_when_config_file_is_corrupt(self):
+        with tempfile.TemporaryDirectory() as root:
+            store = AssistantStore(Path(root) / "config")
+            store.update({"translate_service": "baidu"})
+            path = Path(root) / "config" / "assistant_settings.json"
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            raw["baidu_qps"] = "not-a-number"
+            path.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
+            self.assertEqual(store.config()["baidu_qps"], 1.0)
+
     def test_baidu_params_and_query_splitting(self):
         params = baidu_translate_params("appid", "secret", "你好", "zh", salt="12345")
         self.assertEqual(params["sign"], hashlib.md5("appid你好12345secret".encode("utf-8")).hexdigest())

@@ -350,6 +350,10 @@ const ZH = {
   "Clear saved Baidu secret": "清除已保存的百度密钥",
   "Baidu Cloud \"General Text Translation\" APP ID": "百度智能云「通用文本翻译」的 APP ID",
   "Baidu Cloud \"General Text Translation\" Secret Key": "百度智能云「通用文本翻译」的密钥",
+  "QPS (requests/second)": "QPS（每秒请求数）",
+  "Baidu rate-limits General Text Translation by account tier. Enter your tier's number and the plugin queues requests to match:\n· Unverified / Standard: {}\n· Personal verified: {}\n· Enterprise verified: higher, see the Baidu AI Cloud console\nFind your tier under Baidu AI Cloud → Machine Translation → General Text Translation.\nToo high and Baidu still returns {} (too many requests); too low is only slower, never an error.\nIf unsure, use {}.":
+    "百度「通用文本翻译」按账号档位限速，填你账号对应的数值，插件会照它排队发请求：\n· 未认证 / 标准版：{}\n· 个人认证：{}\n· 企业认证：更高，以百度智能云控制台为准\n档位可在「百度智能云 → 机器翻译 → 通用文本翻译」的接入文档里查到。\n填高了仍会被百度返回 {}（请求过于频繁）；填低了只是慢一点，不会报错。\n不确定就填 {}。",
+  "How many requests per second Baidu may receive at most. Batch translation queues by this value and never exceeds it.": "每秒最多发给百度多少次请求。批量翻译会按这个值排队，不会超额。",
   "AI Service (Translate & Optimize / Optimize / AI Translate)": "AI 服务（翻译并优化 / 优化 / AI 翻译）",
   "AI Backend": "AI 后端",
   "OpenAI-compatible API": "OpenAI 兼容接口",
@@ -663,6 +667,7 @@ const ZH = {
   "Node #{} · {}  tags": "节点 #{} · {} 个标签",
   "Running {}…": "正在运行 {}…",
   "Translating unknown tags {}/{}：{}": "正在翻译未收录标签 {}/{}：{}",
+  "Rate limited; waiting to retry {}…": "触发限流；稍后重试「{}」…",
   "Translation complete {} items, rejected abnormal results {} items": "翻译完成 {} 条，已拒绝异常结果 {} 条",
   "uses {}": "使用 {} 次",
   "{} · {} KB": "{} · {} KB",
