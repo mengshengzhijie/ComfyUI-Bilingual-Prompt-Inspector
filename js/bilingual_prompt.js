@@ -1049,7 +1049,8 @@ function createPanel(node, textWidget) {
         const hit = document.elementFromPoint(moveEvent.clientX, moveEvent.clientY);
         const hitChip = hit?.closest?.(selector);
         const list = [...view.querySelectorAll(selector)];
-        if (hitChip && hitChip !== chip) {
+        // 拖拽元素现在可能是整张卡片：命中它内部的 chip 也算「拖到自己身上」，跳过
+        if (hitChip && hitChip !== chip && !chip.contains(hitChip)) {
           const index = list.indexOf(hitChip);
           if (index >= 0) {
             const rect = hitChip.getBoundingClientRect();
@@ -1651,7 +1652,6 @@ function createPanel(node, textWidget) {
     setTitle(chip, token.segmentKind === "natural"
       ? `“${token.term}” ↔ “${token.chinese}” | natural language supports only whole-segment editing; can drag to reorder the whole segment`
       : `“${token.term}” ↔ “${token.chinese}” | click to link; double-click to edit weight; select then press Delete; drag to reorder or Alt+↑/↓ to nudge`);
-    attachChipDrag(chip, token);
     if (canHideTokens()) {
       const hideCorner = element("span", "bpi-chip-hide");
       hideCorner.appendChild(buildEyeIcon());
@@ -1664,21 +1664,6 @@ function createPanel(node, textWidget) {
       });
       chip.appendChild(hideCorner);
     }
-    chip.addEventListener("click", (event) => {
-      event.stopPropagation();
-      if (chipClickSuppressed) return;
-      activateToken(token);
-      englishTokenView.focus({ preventScroll: true });
-    });
-    chip.addEventListener("dblclick", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      if (chipClickSuppressed) return;
-      window.getSelection()?.removeAllRanges();
-      activateToken(token);
-      englishTokenView.focus({ preventScroll: true });
-      openWeightEditor(token);
-    });
     if (state.pinned === token.id && ["tags", "mixed"].includes(state.modeInfo.mode) && token.segmentKind !== "natural") {
       const remove = element("span", "bpi-mirror-delete", "×");
       setTitle(remove, `Delete “${token.term}”`);
@@ -1694,6 +1679,26 @@ function createPanel(node, textWidget) {
     // 选中反馈给整张卡片，而不是只有英文那一行
     if (state.pinned === token.id) card.classList.add("bpi-card-linked");
     card.append(chip, chinese);
+    // 拖拽也挂在整个方块上：抓中文行一样能拖，不必精确抓英文。
+    // 注意必须放在 card 声明之后：在 const card 之前引用它会触发 TDZ 报错，
+    // 一报错整个 render 中断，标签区会整个空白。
+    attachChipDrag(card, token);
+    // 点击 / 双击挂在整个方块上：点中文行、点卡片留白都算选中，不必精确点中英文
+    card.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (chipClickSuppressed) return;
+      activateToken(token);
+      englishTokenView.focus({ preventScroll: true });
+    });
+    card.addEventListener("dblclick", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (chipClickSuppressed) return;
+      window.getSelection()?.removeAllRanges();
+      activateToken(token);
+      englishTokenView.focus({ preventScroll: true });
+      openWeightEditor(token);
+    });
     return card;
   };
 
