@@ -28,7 +28,7 @@ class BilingualPromptInspector:
         }
 
     RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("english_prompt",)
+    RETURN_NAMES = ("英文提示词",)
     FUNCTION = "pass_through"
     CATEGORY = "text/prompt"
     DESCRIPTION = "Bilingual prompt inspector and manager: tag-linked views, drag-to-reorder, temporary hide, upstream intercept with pause-to-confirm. Output always matches the English prompt text."

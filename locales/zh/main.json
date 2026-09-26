@@ -10,11 +10,6 @@
         "prompt": {
           "name": "上游提示词"
         }
-      },
-      "outputs": {
-        "english_prompt": {
-          "name": "英文提示词"
-        }
       }
     }
   }

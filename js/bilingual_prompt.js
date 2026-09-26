@@ -966,7 +966,9 @@ function createPanel(node, textWidget) {
   // drag, moving past a small threshold activates it (so plain clicks and
   // double-clicks keep working), and releasing applies a structured move
   // through the shared undo stack.
-  const attachChipDrag = (chip, token) => {
+  // view / selector 让英文标签区与中文对照区可以共用这套拖拽逻辑：
+  // 两处 chip 一一对应同一批 token，拖动任何一个都是重排同一份文本。
+  const attachChipDrag = (chip, token, view = englishTokenView, selector = ".bpi-english-token") => {
     chip.addEventListener("pointerdown", (event) => {
       if (event.button !== 0 || !canReorderTokens()) return;
       const startX = event.clientX;
@@ -993,8 +995,8 @@ function createPanel(node, textWidget) {
         clearHover();
         targetIndex = null;
         const hit = document.elementFromPoint(moveEvent.clientX, moveEvent.clientY);
-        const hitChip = hit?.closest?.(".bpi-english-token");
-        const list = [...englishTokenView.querySelectorAll(".bpi-english-token")];
+        const hitChip = hit?.closest?.(selector);
+        const list = [...view.querySelectorAll(selector)];
         if (hitChip && hitChip !== chip) {
           const index = list.indexOf(hitChip);
           if (index >= 0) {
@@ -1023,7 +1025,7 @@ function createPanel(node, textWidget) {
           setTimeout(() => { chipClickSuppressed = false; }, 0);
           if (targetIndex !== null && chip.isConnected) {
             moveTokenTo(token, targetIndex);
-            requestAnimationFrame(() => englishTokenView.focus({ preventScroll: true }));
+            requestAnimationFrame(() => view.focus({ preventScroll: true }));
           }
         }
       };
@@ -1603,7 +1605,9 @@ function createPanel(node, textWidget) {
         ? `“${token.raw}” ↔ “${token.chinese}” | natural language supports only whole-segment editing or translation`
         : token.status === "unknown"
           ? `Unknown English tag: “${token.term}” | click to locate; double-click to edit weight`
-          : `“${token.raw}” ↔ “${token.chinese}” | click to locate; double-click to edit weight; select then press Delete`);
+          : `“${token.raw}” ↔ “${token.chinese}” | click to locate; double-click to edit weight; select then press Delete; drag to reorder or Alt+↑/↓ to nudge`);
+      // 中文对照区与英文标签区的 chip 一一对应同一个 token，拖动它同样是重排原文。
+      attachChipDrag(chip, token, chineseMirror, ".bpi-mirror-token");
       chip.addEventListener("click", (event) => {
         event.stopPropagation();
         if (token.status === "unknown") state.tableFilter = "unknown";
@@ -2668,7 +2672,9 @@ app.registerExtension({
       originalCreated?.apply(this, arguments);
       const textWidget = this.widgets?.find((widget) => widget.name === "text");
       if (!textWidget) return;
-      textWidget.label = "English prompt (actual output)";
+      // widget.label 直接赋值，不经过 element()/set*()，也就不会走翻译层，
+      // 所以这里直接写死中文（面板里的同名标题走 element()，由 i18n 处理）。
+      textWidget.label = "英文提示词（实际输出）";
 
       bindUpstreamListener();
       const inspector = createPanel(this, textWidget);
