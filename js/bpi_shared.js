@@ -552,10 +552,13 @@ function injectBpiStyles() {
     .bpi-mirror-token{user-select:none}.bpi-english-token.bpi-drop-before,.bpi-mirror-token.bpi-drop-before{box-shadow:-2px 0 0 0 #76c9ff,0 0 5px rgba(118,201,255,.4)}.bpi-english-token.bpi-drop-after,.bpi-mirror-token.bpi-drop-after{box-shadow:2px 0 0 0 #76c9ff,0 0 5px rgba(118,201,255,.4)}
     .bpi-english-token{position:relative}.bpi-hide-btn{flex:none;cursor:pointer;color:#7194ad;font-size:11px;line-height:1;user-select:none;padding:1px 2px;border-radius:3px;display:inline-flex;align-items:center}.bpi-hide-btn:hover{color:#9ed0ff;background:#2b3a4d}.bpi-eye-icon{display:inline-flex;align-items:center}
     .bpi-chip-hide{position:absolute;top:-5px;right:-5px;display:none;cursor:pointer;padding:1px 2px;border-radius:999px;background:#1d2937;border:1px solid #4c5668;color:#9ed0ff;line-height:1;z-index:2}.bpi-english-token:hover .bpi-chip-hide{display:inline-flex}.bpi-chip-hide:hover{background:#285f8e;border-color:#76c9ff;color:#fff}
-.bpi-token-line{display:flex;flex-wrap:wrap;align-items:flex-start;gap:2px 0}
+.bpi-token-line{display:flex;flex-wrap:wrap;align-items:flex-end;gap:2px 0}
     .bpi-token-card{display:inline-flex;flex-direction:column;align-items:flex-start;max-width:100%;border:1px solid var(--bpi-border-3);border-radius:5px;background:var(--bpi-surface-3);padding:1px 5px;margin:2px 3px 2px 0;vertical-align:top}
     .bpi-token-card .bpi-english-token{margin:0;padding:0}
-    .bpi-token-card-zh{max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--bpi-text-muted);font:11px/1.35 Arial,sans-serif}
+    .bpi-token-card.bpi-card-linked{background:#147fc3;border-color:#76c9ff;box-shadow:0 0 0 1px rgba(118,201,255,.32)}
+    .bpi-token-card.bpi-card-linked .bpi-token-card-zh{color:#fff}
+    .bpi-token-card.bpi-card-linked .bpi-english-token{background:transparent;border-color:transparent;box-shadow:none;color:#fff}
+    .bpi-token-card-zh{min-height:15px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--bpi-text-muted);font:11px/1.35 Arial,sans-serif}
     .bpi-category-content{display:flex;flex-wrap:wrap;gap:2px 3px}
 .bpi-break-chip{position:relative;display:inline-flex;align-items:center;gap:3px;border:1px dashed #6c83a8;border-radius:5px;background:#1d2937;color:#9ed0ff;padding:0 5px;margin:1px 0;cursor:grab;user-select:none;font-family:Consolas,monospace}
 .bpi-break-chip:hover{background:#285f8e;border-color:#76c9ff;color:#fff}

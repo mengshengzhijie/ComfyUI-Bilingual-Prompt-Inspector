@@ -118,7 +118,7 @@ function createPanel(node, textWidget) {
   const panel = element("div", "bpi-panel");
   const englishSection = element("section", "bpi-english-section");
   const englishHead = element("div", "bpi-english-head");
-  const englishTitle = element("span", "", "Prompt (English on top, Chinese below)");
+  const englishTitle = element("span", "", "Prompt");
   const englishHint = element("span", "bpi-english-hint", "Edit directly when empty");
   const editEnglishButton = element("button", "bpi-button bpi-mini", "Done");
   const clearEnglishButton = element("button", "bpi-button bpi-mini bpi-danger", "Clear");
@@ -1691,6 +1691,8 @@ function createPanel(node, textWidget) {
     const chinese = element("span", "bpi-token-card-zh", tokenChineseLabel(token));
     setTitle(chinese, `“${token.term}” ↔ “${token.chinese}”`);
     const card = element("span", "bpi-token-card");
+    // 选中反馈给整张卡片，而不是只有英文那一行
+    if (state.pinned === token.id) card.classList.add("bpi-card-linked");
     card.append(chip, chinese);
     return card;
   };

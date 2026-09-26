@@ -679,7 +679,6 @@ const ZH = {
   Updated: "已更新",
   Imported: "已导入",
 
-  "Prompt (English on top, Chinese below)": "提示词（上英文 · 下中文）",
   "Click a tag to link it with the detail table below; select then press Delete": "点击标签可与下方明细表联动；选中后按 Delete 删除",
   "English prompt is empty; nothing to optimize": "英文提示词是空的，没有可优化的内容",
   "“Optimize to Anima” only processes English; translate Chinese in the sidebar first": "「优化为 Anima」只处理英文；中文请先在侧边栏翻译",
