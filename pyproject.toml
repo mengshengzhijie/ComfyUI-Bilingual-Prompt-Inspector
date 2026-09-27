@@ -1,6 +1,6 @@
 [project]
 name = "prompt-translator-manager"
-version = "1.2.1"
+version = "1.2.10"
 description = "ComfyUI prompt node with translation and management: bilingual tag view, drag-to-reorder, temporary hiding, multiple translation services and a sidebar dictionary manager."
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
