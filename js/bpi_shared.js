@@ -1,5 +1,6 @@
 import { app } from "../../scripts/app.js";
 import { normalizePreferences } from "./dictionary_tools.js";
+import { matchModelNames } from "./model_suggest.js";
 import {
   LANGUAGE_CHANGED_EVENT,
   applyLanguageToDom,
@@ -15,6 +16,8 @@ import {
 } from "./i18n.js";
 
 const API_ROOT = "/bpi";
+// 一条收藏最多记多少个「适合模型」，和后端 MAX_MODELS 对齐
+const MAX_SAVED_MODELS = 20;
 const PREFERENCES_KEY = "bpi.dictionary.preferences.v1";
 const MANAGER_TAB_ID = "bpi-manager";
 const MANAGER_OPEN_EVENT = "bpi:open-manager";
@@ -23,6 +26,7 @@ const UPSTREAM_ARRIVED_EVENT = "bpi/upstream-arrived";
 
 let sessionTokenPromise = null;
 let dictionaryPromise = null;
+let modelNamesPromise = null;
 
 // 插件语言：ComfyUI 自带的 locale 只翻译 nodeDefs，面板文案得自己来。
 // 「跟随 ComfyUI」读 ComfyUI 的 Comfy.Locale 设置，中文系语言走中文，其余走英文。
@@ -345,15 +349,46 @@ async function listSavedPrompts() {
   return payload.data ?? [];
 }
 
-async function createSavedPrompt({ name, text, note, imageFile }) {
+async function listModelNames(force = false) {
+  if (!modelNamesPromise || force) {
+    modelNamesPromise = bpiFetch(`${API_ROOT}/model-names`)
+      .then(async (response) => {
+        const payload = await response.json();
+        if (!response.ok || payload.success === false) throw new Error(payload.error || "Model names load failed");
+        return payload.data ?? [];
+      })
+      .catch((error) => {
+        modelNamesPromise = null;
+        throw error;
+      });
+  }
+  return modelNamesPromise;
+}
+
+async function createSavedPrompt({ name, text, note, models, imageFile }) {
   const form = new FormData();
   form.append("name", name ?? "");
   form.append("text", text ?? "");
   if (typeof note === "string" && note) form.append("note", note);
+  for (const model of Array.isArray(models) ? models : []) form.append("models", model);
   if (imageFile) form.append("image", imageFile);
   const response = await bpiFetch(`${API_ROOT}/saved-prompts`, { method: "POST", body: form });
   const payload = await response.json();
   if (!response.ok || payload.success === false) throw new Error(payload.error || "Saved prompt creation failed");
+  return payload.data;
+}
+
+async function updateSavedPrompt({ id, name, text, note, models, imageFile }) {
+  const form = new FormData();
+  form.append("name", name ?? "");
+  form.append("text", text ?? "");
+  if (typeof note === "string" && note) form.append("note", note);
+  for (const model of Array.isArray(models) ? models : []) form.append("models", model);
+  // 不选新图就不带 image 字段，后端据此保留原图
+  if (imageFile) form.append("image", imageFile);
+  const response = await bpiFetch(`${API_ROOT}/saved-prompts/${encodeURIComponent(id)}`, { method: "POST", body: form });
+  const payload = await response.json();
+  if (!response.ok || payload.success === false) throw new Error(payload.error || "Saved prompt update failed");
   return payload.data;
 }
 
@@ -386,34 +421,188 @@ function savedPromptImageUrl(promptId) {
   return `${API_ROOT}/saved-prompts/${encodeURIComponent(promptId)}/image`;
 }
 
-// 保存当前提示词的弹窗：文本自动带好，图片可拖、可选、可粘贴，不想要就空着。
-function openSavePromptDialog({ name = "", text = "", note = "" } = {}, onSaved) {
+// 「适合模型」：已选的排成一排可删的标签，输入框按关键词补全本机 models 目录里的模型名。
+// 列表里没有的名字照样能回车加进去（比如还没下载的模型），所以输入永远不会被拦。
+function buildModelPicker({ initial = [], onError } = {}) {
+  const root = element("div", "bpi-autocomplete");
+  const chips = element("div", "bpi-chip-row");
+  const input = element("input");
+  input.id = "bpi-field-models";
+  input.autocomplete = "off";
+  setPlaceholder(input, "Type keywords");
+  const menu = element("div", "bpi-ac-menu");
+  menu.hidden = true;
+
+  const values = Array.isArray(initial) ? initial.slice(0, MAX_SAVED_MODELS) : [];
+  let catalog = null;
+  let suggestions = [];
+  let active = -1;
+
+  const renderChips = () => {
+    chips.replaceChildren();
+    for (const name of values) {
+      const chip = element("span", "bpi-chip");
+      const label = element("span", "bpi-chip-label");
+      label.textContent = name; // 模型名是用户数据，不能进翻译层
+      const remove = element("button", "bpi-chip-x", "×");
+      remove.type = "button";
+      setTitle(remove, "Remove");
+      remove.addEventListener("click", (event) => {
+        event.preventDefault();
+        values.splice(values.indexOf(name), 1);
+        renderChips();
+      });
+      chip.append(label, remove);
+      chips.appendChild(chip);
+    }
+    chips.appendChild(input);
+  };
+
+  const closeMenu = () => {
+    menu.hidden = true;
+    active = -1;
+  };
+
+  const renderMenu = () => {
+    menu.replaceChildren();
+    if (!suggestions.length) {
+      closeMenu();
+      return;
+    }
+    suggestions.forEach((entry, index) => {
+      const row = element("div", `bpi-ac-item${index === active ? " bpi-ac-active" : ""}`);
+      const label = element("span", "bpi-ac-name");
+      label.textContent = entry.name;
+      const kind = element("span", "bpi-ac-kind");
+      kind.textContent = entry.kind;
+      row.append(label, kind);
+      // 用 mousedown：等到 click 时输入框已经失焦、菜单早被关掉了
+      row.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+        addModel(entry.name);
+      });
+      menu.appendChild(row);
+    });
+    menu.hidden = false;
+  };
+
+  const update = () => {
+    if (!catalog) {
+      suggestions = [];
+      renderMenu();
+      return;
+    }
+    suggestions = matchModelNames(catalog, input.value)
+      .filter((entry) => !values.some((name) => name.toLowerCase() === entry.name.toLowerCase()));
+    active = suggestions.length ? 0 : -1;
+    renderMenu();
+  };
+
+  const addModel = (raw) => {
+    const label = String(raw ?? "").trim();
+    if (!label) return;
+    if (values.length >= MAX_SAVED_MODELS) {
+      onError?.("Model limit reached");
+      return;
+    }
+    if (!values.some((name) => name.toLowerCase() === label.toLowerCase())) values.push(label);
+    input.value = "";
+    renderChips();
+    update();
+    input.focus();
+  };
+
+  input.addEventListener("input", update);
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      if (!suggestions.length) return;
+      event.preventDefault();
+      const step = event.key === "ArrowDown" ? 1 : -1;
+      active = (active + step + suggestions.length) % suggestions.length;
+      renderMenu();
+      return;
+    }
+    if (event.key === "Enter") {
+      // 必须拦下来，否则回车会顺带提交整个表单、直接触发保存
+      event.preventDefault();
+      event.stopPropagation();
+      addModel(active >= 0 && suggestions[active] ? suggestions[active].name : input.value);
+      return;
+    }
+    if (event.key === "Escape" && !menu.hidden) {
+      event.stopPropagation();
+      closeMenu();
+      return;
+    }
+    if (event.key === "Backspace" && !input.value && values.length) {
+      values.pop();
+      renderChips();
+      update();
+    }
+  });
+
+  // Nodes 2.0 会在捕获阶段拦掉侧边栏的 pointer 事件，所以点空白关闭也挂 document + 捕获
+  const onOutside = (event) => {
+    if (!root.contains(event.target)) closeMenu();
+  };
+  document.addEventListener("mousedown", onOutside, true);
+  const destroy = () => document.removeEventListener("mousedown", onOutside, true);
+
+  renderChips();
+  // 弹窗一打开就去取，等用户开始打字时基本已经就绪
+  listModelNames().then((items) => {
+    catalog = items;
+    update();
+  }).catch(() => {
+    catalog = [];
+  });
+
+  root.append(chips, menu);
+  return { root, destroy, models: () => values.slice() };
+}
+
+// 保存 / 编辑收藏的弹窗：文本自动带好，图片可拖、可选、可粘贴，不想要就空着。
+// 传了 editing（整条收藏）就是编辑：提示词文本放开手改，不选新图则保留原图。
+function openSavePromptDialog({ name = "", text = "", note = null, models = [], editing = null } = {}, onSaved) {
   const shade = element("div", "bpi-modal-shade");
   const modal = element("div", "bpi-modal");
-  const title = element("h3", "", "Save Current Prompt");
+  const title = element("h3", "", editing ? "Edit Favorite" : "Save Current Prompt");
   const form = element("form", "bpi-form");
+  const error = element("div", "bpi-status");
+  error.dataset.kind = "error";
+  error.style.gridColumn = "1 / -1";
   const nameInput = field(form, "Name", "name", (name || text.trim().slice(0, 24)).slice(0, 80), "Defaults to the start of the prompt");
+  const noteInput = field(form, "Note", "note", note ?? "", "Optional");
+  const modelPicker = buildModelPicker({ initial: models, onError: (message) => setText(error, message) });
+  const modelsLabel = element("label", "", "Models");
+  modelsLabel.htmlFor = "bpi-field-models";
+  const modelsHint = element("div", "bpi-form-hint", "Press Enter to add; ↑↓ to choose");
+  modelsHint.style.gridColumn = "1 / -1";
+  form.append(modelsLabel, modelPicker.root, modelsHint);
   const textLabel = element("label", "", "Prompt");
   textLabel.htmlFor = "bpi-save-prompt-text";
   const textPreview = element("textarea", "");
   textPreview.id = "bpi-save-prompt-text";
-  textPreview.readOnly = true;
+  textPreview.readOnly = !editing; // 新建时文本来自节点，不该手改；编辑时放开
   textPreview.value = text;
   form.append(textLabel, textPreview);
   const imageLabel = element("label", "", "Reference Image");
   const drop = element("div", "bpi-save-drop");
   const previewImage = element("img", "bpi-save-preview");
   const dropText = element("div", "", "Drop an image here, or click to select");
-  const fileInfo = element("div", "bpi-save-file", "Optional; PNG / JPG / WebP, max 5 MB");
+  const fileInfo = element("div", "bpi-save-file", editing
+    ? "Keep the current image, or pick a new one to replace it"
+    : "Optional; PNG / JPG / WebP, max 5 MB");
+  if (editing?.image) {
+    previewImage.src = savedPromptImageUrl(editing.id);
+    previewImage.style.display = "block";
+  }
   drop.append(previewImage, dropText, fileInfo);
   const picker = element("input");
   picker.type = "file";
   picker.accept = "image/png,image/jpeg,image/webp";
   picker.hidden = true;
   form.append(imageLabel, drop);
-  const error = element("div", "bpi-status");
-  error.dataset.kind = "error";
-  error.style.gridColumn = "1 / -1";
   form.appendChild(error);
 
   let imageFile = null;
@@ -447,18 +636,35 @@ function openSavePromptDialog({ name = "", text = "", note = "" } = {}, onSaved)
   window.addEventListener("paste", onPaste);
   const close = () => {
     window.removeEventListener("paste", onPaste);
+    modelPicker.destroy();
     shade.remove();
   };
 
   const actions = element("div", "bpi-modal-actions");
   const saveButton = button("Save", async () => {
-    if (!text.trim()) {
+    const promptText = editing ? textPreview.value : text;
+    if (!promptText.trim()) {
       setText(error, "Prompt is empty, cannot save");
       return;
     }
     saveButton.disabled = true;
     try {
-      const entry = await createSavedPrompt({ name: nameInput.value, text, note, imageFile });
+      const entry = editing
+        ? await updateSavedPrompt({
+          id: editing.id,
+          name: nameInput.value,
+          text: promptText,
+          note: noteInput.value.trim() || null,
+          models: modelPicker.models(),
+          imageFile,
+        })
+        : await createSavedPrompt({
+          name: nameInput.value,
+          text: promptText,
+          note: noteInput.value.trim() || null,
+          models: modelPicker.models(),
+          imageFile,
+        });
       window.dispatchEvent(new CustomEvent("bpi:saved-prompts-changed", { detail: entry }));
       onSaved?.(entry);
       close();
@@ -625,6 +831,22 @@ function injectBpiStyles() {
 .bpi-source-select:disabled{opacity:.45}
 .bpi-save-drop{position:relative;display:flex;flex-direction:column;gap:5px;align-items:center;justify-content:center;min-height:86px;border:1px dashed var(--bpi-border-2);border-radius:7px;background:var(--bpi-surface-3);color:var(--bpi-text-faint);font-size:11px;text-align:center;cursor:pointer}
 .bpi-save-drop.bpi-dragover{border-color:#4ca7e8;color:#9ed0ff}
+    .bpi-autocomplete{position:relative}
+    .bpi-chip-row{display:flex;flex-wrap:wrap;gap:5px;align-items:center;box-sizing:border-box;width:100%;min-height:30px;border:1px solid var(--bpi-border-2);border-radius:5px;background:var(--bpi-input-bg);padding:5px 6px}
+    .bpi-form .bpi-chip-row input{flex:1;min-width:90px;width:auto;border:0;outline:none;background:transparent;color:var(--bpi-input-text);padding:2px 0;font:12px Arial,sans-serif}
+    .bpi-chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:2px 5px 2px 8px;border:1px solid var(--bpi-border-2);border-radius:11px;background:var(--bpi-surface-3);color:var(--bpi-text);font:11px Arial,sans-serif}
+    .bpi-chip-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px}
+    .bpi-chip-x{border:0;background:transparent;color:var(--bpi-text-muted);cursor:pointer;font:12px Arial,sans-serif;line-height:1;padding:0 1px}
+    .bpi-chip-x:hover{color:#ff8b93}
+    .bpi-ac-menu{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:95;max-height:188px;overflow:auto;padding:3px;border:1px solid var(--bpi-border-2);border-radius:6px;background:var(--bpi-surface-modal);box-shadow:0 6px 16px rgba(0,0,0,.25)}
+    .bpi-ac-menu[hidden]{display:none}
+    .bpi-ac-item{display:flex;align-items:center;gap:8px;padding:5px 7px;border-radius:4px;color:var(--bpi-text);font:12px Arial,sans-serif;cursor:pointer}
+    .bpi-ac-item:hover,.bpi-ac-item.bpi-ac-active{background:var(--bpi-surface-3)}
+    .bpi-ac-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .bpi-ac-kind{margin-left:auto;flex:none;color:var(--bpi-text-faint);font-size:10px}
+    .bpi-form-hint{color:var(--bpi-text-faint);font-size:10px}
+    .bpi-model-tags{display:flex;flex-wrap:wrap;gap:4px}
+    .bpi-model-tag{padding:1px 7px;border:1px solid var(--bpi-border-2);border-radius:10px;background:var(--bpi-surface-3);color:var(--bpi-text-muted);font-size:10px}
 .bpi-save-preview{display:none;max-width:100%;max-height:150px;border-radius:5px;border:1px solid var(--bpi-border-2)}
 .bpi-save-file{color:var(--bpi-text-muted);font-size:10px}
 .bpi-fav-card{display:flex;gap:10px;border:1px solid var(--bpi-border);border-radius:7px;background:var(--bpi-surface-2);padding:8px}
@@ -633,8 +855,8 @@ function injectBpiStyles() {
 .bpi-fav-name{font-size:12px;color:var(--bpi-text);font-weight:500}
 .bpi-fav-name .bpi-fav-date{color:var(--bpi-text-muted);font-weight:400;font-size:10px;margin-left:6px}
 .bpi-fav-text{color:var(--bpi-text-muted);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:Consolas,monospace}
-.bpi-fav-meta{color:var(--bpi-text-faint);font-size:10px}
-.bpi-fav-actions{display:flex;gap:5px;margin-top:2px}
+.bpi-fav-meta{display:flex;flex-wrap:wrap;gap:5px;align-items:center;color:var(--bpi-text-faint);font-size:10px}
+.bpi-fav-actions{display:flex;flex-wrap:wrap;gap:5px;margin-top:2px}
     .bpi-hidden-bar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:5px 2px;border-top:1px solid var(--bpi-border-3)}.bpi-hidden-bar.bpi-hidden{display:none}.bpi-hidden-label{flex:none;color:var(--bpi-text-muted);font-size:11px}
     .bpi-hidden-chip{display:inline-flex;align-items:center;gap:5px;max-width:280px;overflow:hidden;border:1px dashed var(--bpi-border-2);border-radius:999px;padding:2px 8px;background:var(--bpi-surface-3);color:var(--bpi-text-muted);cursor:pointer;font-size:11px}.bpi-hidden-chip:hover{background:#31404f;border-color:#76c9ff;color:#d7e6f7}.bpi-hidden-en{text-decoration:line-through;white-space:nowrap}.bpi-hidden-zh{color:var(--bpi-text-muted);font-size:10px}.bpi-hidden-restore{color:#76c9ff;font-size:12px}
     .bpi-hidden-all{margin-left:auto}
@@ -732,6 +954,7 @@ export {
   importTags,
   bulkUpdateTags,
   injectBpiStyles,
+  listModelNames,
   listSavedPrompts,
   loadDictionary,
   loadPreferences,
@@ -754,4 +977,5 @@ export {
   setTitle,
   t,
   testAssistantConnection,
+  updateSavedPrompt,
 };

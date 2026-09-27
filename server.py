@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import sqlite3
 import re
 import secrets
@@ -720,30 +721,59 @@ async def list_saved_prompts(_request):
     return web.json_response({"success": True, "data": saved_prompt_store.list_prompts()})
 
 
+async def _read_saved_prompt_form(request):
+    """收藏表单：文本字段 + 一张可选图片 + 若干个 models（每个模型一个同名字段）。"""
+    form = {"name": None, "text": None, "note": None, "image_bytes": None, "models": []}
+    reader = await request.multipart()
+    async for part in reader:
+        if part.name == "image":
+            form["image_bytes"] = await part.read(decode=False)
+        elif part.name == "name":
+            form["name"] = await part.text()
+        elif part.name == "text":
+            form["text"] = await part.text()
+        elif part.name == "note":
+            form["note"] = await part.text()
+        elif part.name == "models":
+            # 脏数据（非字符串、重复…）交给 store 的清洗逻辑兜底
+            form["models"].append(await part.text())
+    return form
+
+
 @protected_route("post", "/bpi/saved-prompts")
 async def create_saved_prompt(request):
     if request.content_length is not None and request.content_length > _MAX_SAVED_PROMPT_BYTES:
         return error_response("收藏内容过大（图片最大 5 MB）", 413)
-    name = text = note = None
-    image_bytes = None
     try:
-        reader = await request.multipart()
-        async for part in reader:
-            if part.name == "image":
-                image_bytes = await part.read(decode=False)
-            elif part.name == "name":
-                name = await part.text()
-            elif part.name == "text":
-                text = await part.text()
-            elif part.name == "note":
-                note = await part.text()
+        form = await _read_saved_prompt_form(request)
     except (ValueError, web.HTTPException) as error:
         return error_response(f"读取表单失败：{error}")
     try:
-        entry = saved_prompt_store.create_prompt(name, text, note=note, image_bytes=image_bytes)
+        entry = saved_prompt_store.create_prompt(
+            form["name"], form["text"], note=form["note"],
+            image_bytes=form["image_bytes"], models=form["models"],
+        )
         return web.json_response({"success": True, "data": entry})
     except ValueError as error:
         return error_response(error)
+
+
+@protected_route("post", "/bpi/saved-prompts/{prompt_id}")
+async def update_saved_prompt(request):
+    if request.content_length is not None and request.content_length > _MAX_SAVED_PROMPT_BYTES:
+        return error_response("收藏内容过大（图片最大 5 MB）", 413)
+    try:
+        form = await _read_saved_prompt_form(request)
+    except (ValueError, web.HTTPException) as error:
+        return error_response(f"读取表单失败：{error}")
+    try:
+        entry = saved_prompt_store.update_prompt(
+            request.match_info["prompt_id"], form["name"], form["text"],
+            note=form["note"], image_bytes=form["image_bytes"], models=form["models"],
+        )
+        return web.json_response({"success": True, "data": entry})
+    except ValueError as error:
+        return error_response(error, 404)
 
 
 @protected_route("delete", "/bpi/saved-prompts/{prompt_id}")
@@ -780,3 +810,45 @@ async def import_saved_prompts(request):
         return web.json_response({"success": True, "data": result})
     except ValueError as error:
         return error_response(error)
+
+
+# ---------------------------------------------------------------------------
+# 模型名：给收藏弹窗的「适合模型」做自动补全
+# ---------------------------------------------------------------------------
+
+# 只取和提示词适配性有关的几类，别的（vae / upscale / controlnet…）混进来只会干扰补全
+_MODEL_FOLDERS = ("checkpoints", "diffusion_models", "loras", "embeddings", "text_encoders")
+_MAX_MODEL_NAMES = 3000
+
+
+def collect_model_names():
+    try:
+        import folder_paths
+    except ImportError:
+        return []
+    items = []
+    seen = set()
+    for folder in _MODEL_FOLDERS:
+        try:
+            filenames = folder_paths.get_filename_list(folder)
+        except Exception:
+            continue
+        for filename in filenames:
+            # 子目录里的模型保留目录前缀（同一个系列往往靠目录名区分），只去掉扩展名
+            label = os.path.splitext(filename.replace("\\", "/"))[0]
+            if not label:
+                continue
+            marker = (label.casefold(), folder)
+            if marker in seen:
+                continue
+            seen.add(marker)
+            items.append({"name": label, "kind": folder})
+            if len(items) >= _MAX_MODEL_NAMES:
+                return sorted(items, key=lambda item: item["name"].casefold())
+    return sorted(items, key=lambda item: item["name"].casefold())
+
+
+@protected_route("get", "/bpi/model-names")
+async def list_model_names(_request):
+    # 首次调用要遍历 models 目录，放到线程里免得卡住事件循环
+    return web.json_response({"success": True, "data": await asyncio.to_thread(collect_model_names)})

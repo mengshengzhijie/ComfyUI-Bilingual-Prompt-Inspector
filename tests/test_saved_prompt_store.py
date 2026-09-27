@@ -4,6 +4,7 @@ from pathlib import Path
 
 from saved_prompt_store import (
     MAX_IMAGE_BYTES,
+    MAX_MODELS,
     SavedPromptStore,
     sniff_image,
 )
@@ -65,6 +66,67 @@ class SavedPromptStoreTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             store.create_prompt("大图", "1girl", image_bytes=PNG_HEADER + b"\0" * (MAX_IMAGE_BYTES + 1))
         self.assertEqual(store.list_prompts(), [])
+
+    def test_create_cleans_models(self):
+        store = self.make_store()
+        entry = store.create_prompt("带模型", "1girl", models=["  Anima ", "anima", "Pony", 42, None, ""])
+        # 去空白、忽略大小写去重、只留字符串
+        self.assertEqual(entry["models"], ["Anima", "Pony"])
+
+    def test_create_caps_models(self):
+        store = self.make_store()
+        entry = store.create_prompt("很多模型", "1girl", models=[f"model-{index}" for index in range(MAX_MODELS + 5)])
+        self.assertEqual(len(entry["models"]), MAX_MODELS)
+
+    def test_create_without_models_stores_empty_list(self):
+        store = self.make_store()
+        self.assertEqual(store.create_prompt("无模型", "1girl", models="Anima")["models"], [])
+        self.assertEqual(store.create_prompt("无模型2", "1girl")["models"], [])
+
+    def test_export_and_import_keep_models(self):
+        store = self.make_store()
+        store.create_prompt("带模型", "1girl", models=["Anima"])
+        bundle = store.export_bundle()
+        self.assertEqual(bundle["prompts"][0]["models"], ["Anima"])
+
+        other = self.make_store()
+        other.import_bundle(bundle)
+        self.assertEqual(other.list_prompts()[0]["models"], ["Anima"])
+
+    def test_update_changes_fields_and_clears_note(self):
+        store = self.make_store()
+        entry = store.create_prompt("原名", "1girl", note="备注", models=["Anima"])
+        updated = store.update_prompt(entry["id"], "新名", "1girl, sunset", note=None, models=["Pony", "pony"])
+        self.assertEqual(updated["name"], "新名")
+        self.assertEqual(updated["text"], "1girl, sunset")
+        self.assertIsNone(updated["note"])
+        self.assertEqual(updated["models"], ["Pony"])
+        self.assertEqual(store.list_prompts()[0]["name"], "新名")
+
+    def test_update_keeps_image_when_no_new_one_given(self):
+        store = self.make_store()
+        entry = store.create_prompt("带图", "1girl", image_bytes=PNG_HEADER + b"payload")
+        updated = store.update_prompt(entry["id"], "带图", "1girl, sunset")
+        self.assertEqual(updated["image"], entry["image"])
+        self.assertTrue((store.store_dir / entry["image"]).is_file())
+
+    def test_update_replaces_image_and_deletes_old_file(self):
+        store = self.make_store()
+        entry = store.create_prompt("带图", "1girl", image_bytes=PNG_HEADER + b"payload")
+        old_path = store.store_dir / entry["image"]
+        updated = store.update_prompt(entry["id"], "带图", "1girl", image_bytes=JPEG_HEADER + b"payload")
+        self.assertEqual(updated["image"], f"{entry['id']}.jpg")
+        self.assertFalse(old_path.exists())
+        self.assertTrue((store.store_dir / updated["image"]).is_file())
+
+    def test_update_rejects_empty_text_and_missing_entry(self):
+        store = self.make_store()
+        entry = store.create_prompt("原名", "1girl")
+        with self.assertRaises(ValueError):
+            store.update_prompt(entry["id"], "空", "  ")
+        with self.assertRaises(ValueError):
+            store.update_prompt("does-not-exist", "名", "1girl")
+        self.assertEqual(store.list_prompts()[0]["text"], "1girl")
 
     def test_delete_removes_entry_and_image(self):
         store = self.make_store()

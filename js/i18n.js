@@ -291,6 +291,16 @@ const ZH = {
   "e.g.: looking at viewer": "例如：looking at viewer",
   "e.g.: pose, camera, style": "例如：pose、camera、style",
 
+  // ── 弹窗：保存 / 编辑收藏 ────────────────────────────────────────────
+  Note: "备注",
+  Remove: "移除",
+  "No note": "无",
+  "Model limit reached": "模型数量已达上限",
+  "Type keywords": "输入关键词",
+  "Press Enter to add; ↑↓ to choose": "回车添加，↑↓ 切换候选",
+  "Edit Favorite": "编辑收藏",
+  "Keep the current image, or pick a new one to replace it": "不换图就保持原样，选一张新的会替换掉原来的",
+
   // ── 关于 ────────────────────────────────────────────────────────────
   "About plugin": "关于插件",
   "View plugin version and project repository": "查看插件版本与项目仓库",
@@ -559,7 +569,6 @@ const ZH = {
   // 不是「连接正常」的 OK——那个是整句键 "Connection OK: {}"。
   OK: "确认",
   Untitled: "未命名",
-  "Source node not recorded": "未记录来源节点",
   "No matching favorites.": "没有匹配的收藏。",
   "No favorites yet. Click the star button on a node to save the current prompt.":
     "还没有收藏。点节点上的星标按钮即可保存当前提示词。",

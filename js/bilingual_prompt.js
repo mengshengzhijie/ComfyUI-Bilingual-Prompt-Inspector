@@ -2317,7 +2317,7 @@ function createPanel(node, textWidget) {
       setStatus("Prompt is empty; cannot favorite", "error");
       return;
     }
-    openSavePromptDialog({ text, note: `Node #${node.id} · ${state.tokens.length}  tags` });
+    openSavePromptDialog({ text });
   };
 
   sourceToggle.addEventListener("change", () => {

@@ -903,13 +903,30 @@ function favoriteCard(item) {
   const actions = element("div", "bpi-fav-actions");
   actions.append(
     button("Load to Node", () => loadFavoriteIntoNode(item), "bpi-primary"),
+    button("Edit", () => editFavorite(item)),
     button("Copy", () => copyFavorite(item)),
     button("Delete", () => removeFavorite(item), "bpi-danger"),
   );
+  const meta = element("div", "bpi-fav-meta");
+  // 模型名是用户数据，直接写进 textContent，不进翻译层
+  const models = Array.isArray(item.models) ? item.models.filter((value) => typeof value === "string" && value.trim()) : [];
+  if (models.length) {
+    const tags = element("div", "bpi-model-tags");
+    for (const model of models) {
+      const tag = element("span", "bpi-model-tag");
+      tag.textContent = model;
+      tags.appendChild(tag);
+    }
+    meta.appendChild(tags);
+  }
+  const note = element("span", "bpi-fav-note", item.note ? "" : "No note");
+  if (item.note) note.textContent = item.note;
+  meta.appendChild(note);
+
   info.append(
     name,
     element("div", "bpi-fav-text", item.text ?? ""),
-    element("div", "bpi-fav-meta", item.note || "Source node not recorded"),
+    meta,
     actions,
   );
   card.append(thumb, info);
@@ -922,7 +939,8 @@ function renderFavorites() {
   const query = String(refs.favoritesSearch?.value ?? "").trim().toLowerCase();
   const items = manager.favorites.filter((item) => !query
     || String(item.name ?? "").toLowerCase().includes(query)
-    || String(item.text ?? "").toLowerCase().includes(query));
+    || String(item.text ?? "").toLowerCase().includes(query)
+    || (Array.isArray(item.models) && item.models.some((model) => String(model ?? "").toLowerCase().includes(query))));
   list.replaceChildren();
   if (!items.length) {
     list.appendChild(element("div", "bpi-empty", manager.favorites.length
@@ -983,7 +1001,20 @@ async function createFavoriteFromNode() {
   const node = await pickInspectorNode();
   if (!node) return;
   const text = String(node.widgets?.find((widget) => widget.name === "text")?.value ?? "");
-  openSavePromptDialog({ text, note: `Node #${node.id}` }, async () => {
+  openSavePromptDialog({ text }, async () => {
+    await refreshFavorites();
+    setStatus("Saved", "ok");
+  });
+}
+
+function editFavorite(item) {
+  openSavePromptDialog({
+    name: item.name ?? "",
+    text: item.text ?? "",
+    note: item.note ?? null,
+    models: Array.isArray(item.models) ? item.models : [],
+    editing: item,
+  }, async () => {
     await refreshFavorites();
     setStatus("Saved", "ok");
   });

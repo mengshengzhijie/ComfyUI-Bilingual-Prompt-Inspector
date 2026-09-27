@@ -20,6 +20,8 @@ MAX_NOTE_CHARS = 500
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
 MAX_IMPORT_BYTES = 128 * 1024 * 1024
 BUNDLE_VERSION = 1
+# 一条收藏最多记多少个适用模型，单个名字的长度上限复用 MAX_NAME_CHARS
+MAX_MODELS = 20
 
 IMAGE_MIME_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".webp": "image/webp"}
 
@@ -80,6 +82,28 @@ class SavedPromptStore:
             note = None
         return name, text, (note[:MAX_NOTE_CHARS] if note else None)
 
+    @staticmethod
+    def _clean_models(value):
+        """适用模型：去掉空白与重复（忽略大小写），只留前 MAX_MODELS 个。"""
+        if not isinstance(value, (list, tuple)):
+            return []
+        cleaned = []
+        seen = set()
+        for item in value:
+            if not isinstance(item, str):
+                continue
+            label = " ".join(item.split())[:MAX_NAME_CHARS]
+            if not label:
+                continue
+            marker = label.casefold()
+            if marker in seen:
+                continue
+            seen.add(marker)
+            cleaned.append(label)
+            if len(cleaned) >= MAX_MODELS:
+                break
+        return cleaned
+
     def list_prompts(self):
         entries = self._load_index()
         entries.sort(key=lambda entry: entry.get("created_at") or 0, reverse=True)
@@ -91,36 +115,73 @@ class SavedPromptStore:
         latest = max([entry.get("created_at") or 0 for entry in entries], default=0)
         return max(int(time.time()), latest + 1)
 
-    def create_prompt(self, name, text, note=None, image_bytes=None, created_at=None):
+    def _write_image(self, prompt_id, image_bytes):
+        """写入配图并返回文件名；没传图片返回 None。"""
+        if not image_bytes:
+            return None
+        if not isinstance(image_bytes, (bytes, bytearray)) or len(image_bytes) > MAX_IMAGE_BYTES:
+            raise ValueError(f"图片过大或无效（最大 {MAX_IMAGE_BYTES // (1024 * 1024)} MB）")
+        sniffed = sniff_image(image_bytes)
+        if sniffed is None:
+            raise ValueError("图片格式仅支持 PNG / JPG / WebP")
+        image_name = f"{prompt_id}{sniffed}"
+        (self.store_dir / image_name).write_bytes(image_bytes)
+        return image_name
+
+    def _remove_image(self, image_name):
+        if not isinstance(image_name, str) or not image_name:
+            return
+        try:
+            (self.store_dir / image_name).unlink()
+        except OSError:
+            pass
+
+    def create_prompt(self, name, text, note=None, image_bytes=None, created_at=None, models=None):
         if not str(text or "").strip():
             raise ValueError("提示词内容为空，无法收藏")
         entries = self._load_index()
         if len(entries) >= MAX_PROMPTS:
             raise ValueError(f"收藏数量已达上限（{MAX_PROMPTS} 条），请先清理")
         name, text, note = self._clean_entry({"name": name, "text": text, "note": note})
+        models = self._clean_models(models)
 
         prompt_id = secrets.token_urlsafe(6)
-        image_name = None
-        if image_bytes:
-            if not isinstance(image_bytes, (bytes, bytearray)) or len(image_bytes) > MAX_IMAGE_BYTES:
-                raise ValueError(f"图片过大或无效（最大 {MAX_IMAGE_BYTES // (1024 * 1024)} MB）")
-            sniffed = sniff_image(image_bytes)
-            if sniffed is None:
-                raise ValueError("图片格式仅支持 PNG / JPG / WebP")
-            image_name = f"{prompt_id}{sniffed}"
-            (self.store_dir / image_name).write_bytes(image_bytes)
-
         entry = {
             "id": prompt_id,
             "name": name,
             "text": text,
             "note": note,
-            "image": image_name,
+            "models": models,
+            "image": self._write_image(prompt_id, image_bytes),
             "created_at": int(created_at) if created_at else self._next_created_at(entries),
         }
         entries.append(entry)
         self._save_index(entries)
         return entry
+
+    def update_prompt(self, prompt_id, name, text, note=None, models=None, image_bytes=None):
+        """改一条收藏；不传新图就保留原图（换图时先写新的、成功再删旧的）。"""
+        if not str(text or "").strip():
+            raise ValueError("提示词内容为空，无法保存")
+        entries = self._load_index()
+        for entry in entries:
+            if entry.get("id") != prompt_id:
+                continue
+            name, text, note = self._clean_entry({"name": name, "text": text, "note": note})
+            entry["name"] = name
+            entry["text"] = text
+            entry["note"] = note
+            entry["models"] = self._clean_models(models)
+            if image_bytes:
+                old_image = entry.get("image")
+                new_image = self._write_image(prompt_id, image_bytes)
+                # 换成同名文件（同 id 同格式）时别删，否则会把刚写进去的新图删掉
+                if new_image != old_image:
+                    self._remove_image(old_image)
+                entry["image"] = new_image
+            self._save_index(entries)
+            return entry
+        raise ValueError("收藏不存在或已删除")
 
     def delete_prompt(self, prompt_id):
         entries = self._load_index()
@@ -128,11 +189,8 @@ class SavedPromptStore:
         if len(remaining) == len(entries):
             raise ValueError("收藏不存在或已删除")
         for entry in entries:
-            if entry.get("id") == prompt_id and isinstance(entry.get("image"), str) and entry["image"]:
-                try:
-                    (self.store_dir / entry["image"]).unlink()
-                except OSError:
-                    pass
+            if entry.get("id") == prompt_id:
+                self._remove_image(entry.get("image"))
         self._save_index(remaining)
         return len(remaining)
 
@@ -155,6 +213,7 @@ class SavedPromptStore:
                 "name": entry.get("name"),
                 "text": entry.get("text"),
                 "note": entry.get("note"),
+                "models": self._clean_models(entry.get("models")),
                 "created_at": entry.get("created_at"),
                 "image": None,
             }
@@ -206,7 +265,8 @@ class SavedPromptStore:
             if not isinstance(created_at, int) or isinstance(created_at, bool):
                 created_at = None
             entry = self.create_prompt(
-                name, text, note=note, image_bytes=image_bytes, created_at=created_at
+                name, text, note=note, image_bytes=image_bytes, created_at=created_at,
+                models=self._clean_models(item.get("models")),
             )
             existing.append(entry)
             existing_ids.add(entry["id"])
