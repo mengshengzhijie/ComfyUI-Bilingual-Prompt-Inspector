@@ -29,4 +29,8 @@ jobs:
         run: npm test
 
       - name: Run backend tests
-        run: python -m unittest discover -s tests -p "test_*.py"
+        # server.py 依赖 aiohttp（由 ComfyUI 运行时提供，不作为插件依赖声明），
+        # test_upstream_gate 导入它，因此 CI 上要单独装一次。
+        run: |
+          pip install aiohttp
+          python -m unittest discover -s tests -p "test_*.py"
