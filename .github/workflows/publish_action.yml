@@ -1,0 +1,27 @@
+name: Publish to Comfy Registry
+
+# 只在并入 main 时发布：分支上的改动（哪怕改了 pyproject.toml）不会触发，
+# 因此"功能做完再合进 main"的开发节奏是安全的——合进来时才对外发布一次。
+# 触发条件是 pyproject.toml 变动，实际等价于"版本号升了才发"；
+# 版本号没升时 Registry 会报 Version already exists，本次 job 会失败，属预期。
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "pyproject.toml"
+
+permissions:
+  contents: read
+
+jobs:
+  publish-node:
+    name: Publish Custom Node to registry
+    runs-on: ubuntu-latest
+    steps:
+      # publish-node-action 自带 checkout（默认 skip_checkout=false），不要再写一遍
+      - name: Publish Custom Node
+        uses: Comfy-Org/publish-node-action@main
+        with:
+          personal_access_token: ${{ secrets.REGISTRY_ACCESS_TOKEN }}

@@ -51,17 +51,17 @@ include credentials or private prompt content.
 
 ## 发布顺序
 
-```bash
-git push origin main
-git tag -a v1.2.0 -m "v1.2.0"      # 版本号换成当次版本
-git push origin v1.2.0
-```
-
-然后在 GitHub 上基于该标签建 Release（内容取自 CHANGELOG 对应章节），最后：
+Registry 的发布由 `.github/workflows/publish_action.yml` **自动完成**：并入 main 且 `pyproject.toml` 有变动
+（实际就是版本号升了）时触发。所以在分支上怎么改都不会发布，只有合进 main 那一刻才对外发一次。
 
 ```bash
-comfy node publish     # 需要 registry.comfy.org 生成的 API key
+git push origin main                 # 版本号已升 → 自动发布
+git tag -a v1.2.10 -m "v1.2.10"      # 标签只用于 GitHub Release 与回溯，Registry 不读它
+git push origin v1.2.10
 ```
+
+版本号没升又想重发时，到 GitHub 的 Actions → "Publish to Comfy Registry" → Run workflow（预留了 `workflow_dispatch`）。
+本地 `comfy node publish` 只在 Actions 不可用时才用——它打的包是 **git 已跟踪的文件**，没 commit 的改动不会进包。
 
 ## 发布前必须确认（不可撤销）
 
@@ -69,8 +69,12 @@ comfy node publish     # 需要 registry.comfy.org 生成的 API key
 - **`version` 发布后不可覆盖**：1.2.0 发出去后，哪怕只改一个标点也只能发 1.2.1
 - 确认 `.comfyignore` 没有误伤 `data/`（内置词库）、`assets/`（README 截图）、`locales/`（中文节点名）——排除了插件会直接跑不起来
 
-## 自动发布（可选）
+## 自动发布（已启用）
 
-仓库里目前只有 `.github/workflows/tests.yml`，没有发布 workflow。想实现"升版本号 → 推 main → 自动发布"，可加
-`.github/workflows/publish_action.yml`（用 `Comfy-Org/publish-node-action@main`），并把 registry 的 API key
-存为仓库 secret `REGISTRY_ACCESS_TOKEN`。该 workflow 只在 `pyproject.toml` 变动时触发。
+`.github/workflows/publish_action.yml` 用 `Comfy-Org/publish-node-action@main`，凭据是仓库 secret
+`REGISTRY_ACCESS_TOKEN`（在 registry.comfy.org 进自己的 publisher 页面生成 API Key 后，填到
+Settings → Secrets and Variables → Actions → New repository secret）。
+
+- 触发条件：`push` 到 `main` 且 `pyproject.toml` 有变动，或手动 `workflow_dispatch`。
+- **所以每次要发布都必须 bump 版本号**：没升版本时 Registry 回 `Version already exists`，job 会报红，这是预期行为不是故障。
+- 反过来，改了 `pyproject.toml` 里除 `version` 以外的字段也会触发发布，同样会因版本已存在而失败——非必要别动那些字段。
