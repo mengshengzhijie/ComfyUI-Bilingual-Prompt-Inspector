@@ -431,6 +431,14 @@ const ZH = {
   "Uncategorized": "未分类",
   "Not indexed": "未收录",
   "Natural-language segment (pending translation or confirmation)": "自然语言片段（待翻译或确认）",
+  "Suspected natural language": "疑似自然语言",
+  Suspected: "疑似",
+  "Save to Dictionary": "保存的词库",
+  "Natural Language Dictionary": "自然语言词库",
+  "Not indexed · suspected natural language": "未收录 · 疑似自然语言",
+  // 句尾的 3 也是变量：VAR_PATTERN 同时吃「“…”」和数字
+  "{} ↔ {} | suspected natural language: more than {} spaces; confirm or split it into tags":
+    "{} ↔ {}｜疑似自然语言：空格超过 {} 个；请确认或拆成标签",
   "Custom": "自定义",
   "Pending": "待确认",
   Syntax: "语法",

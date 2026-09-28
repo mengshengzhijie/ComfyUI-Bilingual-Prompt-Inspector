@@ -409,6 +409,15 @@ function looksLikeTagSuffix(raw) {
   return true;
 }
 
+/**
+ * 标签里的空格超过 3 个（不含 3 个）时，它多半是被当成标签用的自然语言短语，
+ * 界面上标成「疑似自然语言」提醒确认。真正的 Danbooru 标签很少超过 3 个空格。
+ */
+export function looksSuspiciousNatural(raw) {
+  const value = String(raw ?? "").trim();
+  return (value.match(/ /g) ?? []).length > 3;
+}
+
 function trailingTagStart(segments, afterIndex) {
   let start = segments.length;
   while (start > afterIndex && looksLikeTagSuffix(segments[start - 1].raw)) start -= 1;
@@ -450,6 +459,15 @@ export function detectInputMode(text, requestedMode = "auto") {
   const naturalEnd = naturalStart >= 0 ? trailingTagStart(commaSegments, naturalStart + 1) : commaSegments.length;
   if (commaSegments.length >= 3 && naturalStart === 0 && naturalEnd < commaSegments.length) {
     return { mode: "mixed", reason: "Natural language followed by tag list", confidence: "high", naturalStart, naturalEnd };
+  }
+  // 上面没成立通常是尾部定界没认出标签流：trailingTagStart 还要求后缀里有 masterpiece /
+  // best quality 那类明星信号词，标签写得偏冷门时一个都命中不了。这时不该退化成整段自然语言——
+  // 开头那句是自然语言，后面明明是标签流，至少把开头的句子切出来。
+  if (naturalStart === 0 && commaSegments.length >= 4 && naturalEnd >= commaSegments.length && longCommaSegment) {
+    const tailTags = commaSegments.slice(1).filter((item) => looksLikeTagSuffix(item.raw)).length;
+    if (tailTags >= 4) {
+      return { mode: "mixed", reason: "Natural language followed by tag list", confidence: "medium", naturalStart, naturalEnd: naturalStart + 1 };
+    }
   }
   if (commaSegments.length >= 3 && naturalStart > 0) {
     const shortBefore = commaSegments.slice(0, naturalStart).filter((item) =>
@@ -611,6 +629,9 @@ export function parsePrompt(text, dictionaryIndex, machineTranslations = new Map
       chinese = "自然语言片段（待翻译或确认）";
     }
     const confidence = confidenceFor(status, dictionaryEntry);
+    const suspectedNatural = analyzed.syntax === "tag" &&
+      segment.segmentKind !== "natural" &&
+      looksSuspiciousNatural(segment.raw);
     return {
       ...segment,
       ...analyzed,
@@ -618,6 +639,7 @@ export function parsePrompt(text, dictionaryIndex, machineTranslations = new Map
       key,
       chinese,
       status,
+      suspectedNatural,
       ...confidence,
       inputMode: detected.mode,
       entry: dictionaryEntry ?? null,

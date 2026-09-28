@@ -67,7 +67,7 @@
 <td>提示词里的换行会渲染成行尾的 <code>↵</code> 块，标签区真的断行，中英两栏行数对齐。换行块本身也能拖动。</td>
 </tr>
 </table>
-![Demo — 编辑](https://raw.githubusercontent.com/mengshengzhijie/tuchuan/master/assets/ComfyUI-Bilingual-Prompt-Inspector/demo-editing.gif)
+![Demo — edit](https://raw.githubusercontent.com/mengshengzhijie/tuchuan/master/assets/ComfyUI-Bilingual-Prompt-Inspector/demo-editing.gif)
 
 ### 翻译与整理
 
@@ -168,7 +168,7 @@ git clone https://github.com/mengshengzhijie/ComfyUI-Bilingual-Prompt-Inspector.
 3. 在标签视图里逐个检查：点标签看中文解释，双击调权重，拖动手柄排顺序。
 4. 想确认某个标签到底有没有用？点眼睛图标隐藏它，重新出图对比，再一键恢复。
 
-![Demo — 上手](https://raw.githubusercontent.com/mengshengzhijie/tuchuan/master/assets/ComfyUI-Bilingual-Prompt-Inspector/demo-run.gif)
+![Demo — run](https://raw.githubusercontent.com/mengshengzhijie/tuchuan/master/assets/ComfyUI-Bilingual-Prompt-Inspector/demo-run.gif)
 
 ---
 

@@ -6,6 +6,7 @@ import {
   buildDictionaryIndex,
   detectInputMode,
   extractInstructionBody,
+  looksSuspiciousNatural,
   parsePrompt,
   removePromptToken,
   replacePromptTokenWeight,
@@ -89,6 +90,26 @@ assert.equal(tagsAroundTokens[6].term, "black pantyhose");
 assert.equal(tagsAroundTokens[7].segmentKind, "natural");
 assert.equal(tagsAroundTokens[8].term, "best quality");
 assert.equal(tagsAroundTokens.at(-1).term, "newest");
+
+// 开头的自然语言句很长、后面的标签又偏冷门（没有 masterpiece/best quality 那类信号词）时，
+// 仍要把开头那句切出来，而不是把整段当成一个自然语言段
+const coldTailSource = "A knight in dark gold armor holds a polearm spear amid overgrown ruins with red banners, cracked white stone, and red wildflowers under dramatic cinematic lighting\nultra-HD, masterwork, detailed, fs_ornstein, dark gold armor, breastplate, full armor, holding polearm, overgrown ruins, white and red theme";
+const coldTailMode = detectInputMode(coldTailSource);
+assert.equal(coldTailMode.mode, "mixed");
+assert.equal(coldTailMode.naturalStart, 0);
+const coldTailTokens = parsePrompt(coldTailSource, dictionary);
+assert.equal(coldTailTokens.filter((token) => token.segmentKind === "natural").length, 1);
+assert.equal(coldTailTokens.at(-1).term, "white and red theme");
+
+// 空格超过 3 个（不含 3 个）就标成「疑似自然语言」
+assert.equal(looksSuspiciousNatural("white and red theme"), false);
+assert.equal(looksSuspiciousNatural("dragon slayer ornstein"), false);
+assert.equal(looksSuspiciousNatural("overgrown with a variety of red wildflowers"), true);
+assert.equal(looksSuspiciousNatural("and red wildflowers under dramatic cinematic lighting"), true);
+const suspectedTokens = parsePrompt("1girl, white and red theme, overgrown with a variety of red wildflowers", dictionary);
+assert.equal(suspectedTokens[0].suspectedNatural, false);
+assert.equal(suspectedTokens[1].suspectedNatural, false);
+assert.equal(suspectedTokens[2].suspectedNatural, true);
 
 const commaRichNatural = "A woman walks home after the rain, feeling tired and cold, carrying a small umbrella, while the city grows quiet.";
 assert.equal(detectInputMode(commaRichNatural).mode, "natural");

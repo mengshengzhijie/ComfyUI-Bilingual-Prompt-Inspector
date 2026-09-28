@@ -41,6 +41,17 @@ class DictionaryStoreTests(unittest.TestCase):
         self.assertTrue(store.user_path.exists())
         self.assertEqual(store.user_tags()[0]["english"], "keep me")
 
+    def test_natural_language_pack_name_in_snapshot(self):
+        self.assertFalse(validate_tag({"english": "smile", "chinese": "微笑"})["natural"])
+        self.assertTrue(validate_tag({"english": "smile", "chinese": "微笑", "natural": True})["natural"])
+        temp, store = self.make_store()
+        self.addCleanup(temp.cleanup)
+        store.upsert({"english": "smile", "chinese": "微笑"})
+        store.upsert({"english": "a knight stands in the rain", "chinese": "一名骑士站在雨中", "natural": True})
+        names = {tag["english"]: tag["pack_name"] for tag in store.snapshot()["tags"]}
+        self.assertEqual(names["smile"], "个人词库")
+        self.assertEqual(names["a knight stands in the rain"], "自然语言词库")
+
     def test_normalize_matches_spaces_and_underscores(self):
         self.assertEqual(normalize_key(" Looking_At_Viewer "), "looking at viewer")
 

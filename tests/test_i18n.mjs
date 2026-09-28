@@ -77,6 +77,12 @@ for (const [source, expected] of [
   ["Translation complete 5 items, rejected abnormal results 2 items", "翻译完成 5 条，已拒绝异常结果 2 条"],
   ["uses “12,345”", "使用 12,345 次"],
   ["tag: “1girl” | Anima format: (Tag:Weight)", "标签：1girl｜Anima 格式：(标签:权重)"],
+  ["Suspected natural language", "疑似自然语言"],
+  ["Not indexed · suspected natural language", "未收录 · 疑似自然语言"],
+  [
+    "“overgrown with a variety of red wildflowers” ↔ “未收录” | suspected natural language: more than 3 spaces; confirm or split it into tags",
+    "overgrown with a variety of red wildflowers ↔ 未收录｜疑似自然语言：空格超过 3 个；请确认或拆成标签",
+  ],
   ["Node #3 · 12  tags", "节点 #3 · 12 个标签"],
   ["Translating: “1girl”", "正在翻译：1girl"],
   ["Re-translated “1girl”", "已重新翻译「1girl」"],

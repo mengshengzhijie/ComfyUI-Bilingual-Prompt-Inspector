@@ -1898,6 +1898,8 @@ function createPanel(node, textWidget) {
   };
 
   const tokenChineseLabel = (token) => {
+    // 疑似自然语言只在还没翻译时顶掉中文：翻译过就当普通标签显示译文
+    if (token.suspectedNatural && token.status === "unknown") return "Not indexed · suspected natural language";
     if (token.status === "unknown") return "Not indexed";
     const base = token.chinese || "";
     return token.weight === null ? base : `${base} ${t(`(weight ${token.weight})`)}`;
@@ -1905,6 +1907,9 @@ function createPanel(node, textWidget) {
 
   // 模式优先：customColors 只在 default 模式下看得见；status/random 覆盖它
   const tokenCardColor = (token) => {
+    // 「疑似自然语言」是独立种类：不管翻译没翻译都标淡青，跟未收录的淡橙、机器翻译的淡紫区分。
+    // 翻译过的仍然显示译文，只是底色保留标记。
+    if (token.suspectedNatural) return "rgba(58,132,160,.20)";
     if (state.colorMode === "status") {
       // 淡橙（未收录）、淡紫（机器翻译）、已收录不变 —— 柔和不鲜艳，跟换行行一个调子
       if (token.status === "unknown") return "rgba(184,120,50,.18)";
@@ -1935,9 +1940,11 @@ function createPanel(node, textWidget) {
     const label = token.raw.trim() || token.term;
     const chip = element("span", classes.join(" "), label);
     chip.dataset.tokenId = String(token.id);
-    setTitle(chip, token.segmentKind === "natural"
-      ? `“${token.term}” ↔ “${token.chinese}” | natural language supports only whole-segment editing; can drag to reorder the whole segment`
-      : `“${token.term}” ↔ “${token.chinese}” | click to link; double-click to edit weight; select then press Delete; drag to reorder or Alt+↑/↓ to nudge`);
+    setTitle(chip, token.suspectedNatural
+      ? `“${token.term}” ↔ “${token.chinese}” | suspected natural language: more than 3 spaces; confirm or split it into tags`
+      : token.segmentKind === "natural"
+        ? `“${token.term}” ↔ “${token.chinese}” | natural language supports only whole-segment editing; can drag to reorder the whole segment`
+        : `“${token.term}” ↔ “${token.chinese}” | click to link; double-click to edit weight; select then press Delete; drag to reorder or Alt+↑/↓ to nudge`);
     if (canHideTokens()) {
       const tokenHidden = isTokenHidden(token);
       const hideCorner = element("span", tokenHidden ? "bpi-chip-hide bpi-chip-hidden-mark" : "bpi-chip-hide");
@@ -2388,6 +2395,7 @@ function createPanel(node, textWidget) {
     } else {
       visibleTokens.forEach((token, visibleIndex) => {
         const row = element("div", `bpi-row bpi-${token.status}`);
+        if (token.suspectedNatural) row.classList.add("bpi-suspected-natural");
         const tokenHidden = isTokenHidden(token);
         if (tokenHidden) row.classList.add("bpi-row-hidden");
         const rowSeverity = errorsByKey.get(token.key);
@@ -2460,6 +2468,7 @@ function createPanel(node, textWidget) {
           special: "Syntax",
         };
         if (badgeLabels[token.status]) chineseCell.appendChild(element("span", "bpi-badge", badgeLabels[token.status]));
+        if (token.suspectedNatural) chineseCell.appendChild(element("span", "bpi-badge bpi-suspected", "Suspected"));
         if (token.weight !== null) chineseCell.appendChild(element("span", "bpi-badge", `Weight ${token.weight}`));
         const origin = token.entry?.pack_name ?? sourceLabel(token.source, token.status);
         const sourceBadge = element("span", "bpi-badge bpi-source", origin);

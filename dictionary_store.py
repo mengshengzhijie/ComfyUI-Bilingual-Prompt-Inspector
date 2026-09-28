@@ -101,6 +101,8 @@ def validate_tag(value, *, default_source="user"):
         "notes": notes,
         "source": source,
         "verified": bool(value.get("verified", default_source == "user")),
+        # 自然语言词库：与个人词库共用一个文件，靠这个标记区分来源
+        "natural": bool(value.get("natural", False)),
     }
 
 
@@ -246,7 +248,13 @@ class DictionaryStore:
         user = self.user_tags()
         effective = {normalize_key(tag["english"]): tag for tag in builtin}
         for tag in user:
-            clean = {**tag, "pack_id": "personal", "pack_name": "个人词库", "pack_source": "本机用户"}
+            clean = {
+                **tag,
+                "pack_id": "personal",
+                # 自然语言词库与个人词库共用一个文件，只在展示名上分开
+                "pack_name": "自然语言词库" if tag.get("natural") else "个人词库",
+                "pack_source": "本机用户",
+            }
             effective[normalize_key(tag["english"])] = clean
         return {
             "schema_version": SCHEMA_VERSION,
