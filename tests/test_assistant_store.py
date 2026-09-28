@@ -124,7 +124,33 @@ class AssistantStoreTests(unittest.TestCase):
         self.assertEqual(translation_direction("杰作, best quality"), "to_english")
         self.assertEqual(
             sanitize_anima_prompt("```text\nmasterpiece，(smile：1.2)；@artist！\n```"),
-            "masterpiece, (smile:1.2), @artist.",
+            "masterpiece, (smile:1.2), @artist",
+        )
+        # 模型把结果包成 JSON/代码字符串时会残留转义符，清洗后不应判废
+        self.assertEqual(
+            sanitize_anima_prompt('masterpiece, \\"blue eyes\\", 1girl'),
+            "masterpiece, blue eyes, 1girl",
+        )
+        self.assertEqual(
+            sanitize_anima_prompt("masterpiece\\n\\t1girl, ＂blue dress＂"),
+            "masterpiece, 1girl, blue dress",
+        )
+        # 模型用来断句的句点统一换成逗号，权重里的小数点必须原样保留
+        self.assertEqual(
+            sanitize_anima_prompt("masterpiece, 1girl, dragon slayer ornstein."),
+            "masterpiece, 1girl, dragon slayer ornstein",
+        )
+        self.assertEqual(
+            sanitize_anima_prompt("masterpiece, 1girl. A boy stands in the rain."),
+            "masterpiece, 1girl, A boy stands in the rain",
+        )
+        self.assertEqual(
+            sanitize_anima_prompt("(smile:1.2), (@rei (sanbonzakura):1.3), 1girl. A knight stands."),
+            "(smile:1.2), (@rei (sanbonzakura):1.3), 1girl, A knight stands",
+        )
+        self.assertEqual(
+            sanitize_anima_prompt("<lora:detail:0.8>, 1girl. A knight stands amid ruins, red banners."),
+            "<lora:detail:0.8>, 1girl, A knight stands amid ruins, red banners",
         )
         with self.assertRaisesRegex(ValueError, "不符合 Anima"):
             sanitize_anima_prompt("masterpiece [smile]")

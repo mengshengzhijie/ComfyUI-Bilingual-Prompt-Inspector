@@ -431,7 +431,10 @@ export function detectInputMode(text, requestedMode = "auto") {
 
   const words = value.match(/[A-Za-z]+(?:[-'][A-Za-z]+)*/g) ?? [];
   const commaSegments = splitPrompt(value);
-  const hasSentenceEnd = /[。！？.!?](?:\s|$)/.test(value);
+  // 权重小数和版本号里的句点（":1.2"、"1."）以及权重括号后的句点（"(...:1.2)."）都不是句子结束。
+  // 先把它们中和掉再判断，否则整串标签会只因为一个小数点被当成自然语言段落。
+  const sentenceEndCandidate = value.replace(/\d\s*[。！？.!?]|[)\]][。！？.!?]/g, (match) => match.replace(/[。！？.!?]/, ""));
+  const hasSentenceEnd = /[。！？.!?](?:\s|$)/.test(sentenceEndCandidate);
   const hasNaturalGrammar = /\b(?:she|he|they|who|which|is|are|was|were|wearing|holding|standing|sitting|with|while|under|inside|outside|in the|on the)\b/i.test(value);
   const longCommaSegment = commaSegments.some((item) => (item.raw.match(/[A-Za-z]+(?:[-'][A-Za-z]+)*/g) ?? []).length >= 10);
   const strongNaturalStart = commaSegments.findIndex((item) => looksLikeNaturalClause(item.raw));

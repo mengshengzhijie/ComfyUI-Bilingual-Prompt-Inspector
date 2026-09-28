@@ -113,6 +113,12 @@ assert.equal(
   "tags",
 );
 assert.equal(detectInputMode("A woman sits on a bed, asking for a hug.").mode, "natural");
+// 权重里的句点不能把整串标签判定成自然语言
+const weightedTagStream = "8K, ultra detailed, masterpiece, best quality, newest, absurdres, highres, very aesthetic, sharp focus, ultra-HD, amazing quality, masterwork, detailed, high detail, great atmosphere, amazing ambience, perfect composition, intricate, dynamic, rich color, 1boy, male focus, fs_ornstein, dragon slayer ornstein";
+assert.equal(detectInputMode(`${weightedTagStream}, (@rei (sanbonzakura):1. )`).mode, "tags");
+assert.equal(detectInputMode(`${weightedTagStream}, (@rei (sanbonzakura):1.\t`).mode, "tags");
+assert.equal(detectInputMode(`${weightedTagStream}, (@rei (sanbonzakura):1.2). `).mode, "tags");
+assert.equal(parsePrompt(`${weightedTagStream}, (@rei (sanbonzakura):1.2)`, dictionary).length, 25);
 assert.equal(detectInputMode("whatever", "natural").reason, "Manual override");
 const instructed = "翻译要求：转换为 Anima 标签\n正文：一位成年女性站在雨中";
 assert.equal(detectInputMode(instructed).mode, "instruction");

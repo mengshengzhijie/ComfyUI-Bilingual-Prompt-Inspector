@@ -157,6 +157,30 @@ def baidu_split_query(text, max_chars=600, max_lines=30):
     return chunks
 
 
+# 权重的句点只出现在「冒号后的小数」里：(tag:1.2)、[tag:1.2]、<lora:name:0.8>。
+# 断句用的句点则是「词 + 句点 + 空白」，形态完全不同，所以先把权重片段整段挑出来保护。
+WEIGHT_FRAGMENT = re.compile(r"[(\[<][^\n]*?:\s*-?\d+(?:\.\d+)?\s*[)\]>]")
+
+
+def replace_sentence_periods(text):
+    """把权重之外的句点换成逗号。
+
+    模型按规则会用句点把末尾自然语言接在标签后面，但那会让整串标签被前端当成自然语言段。
+    权重片段整段跳过，片段外再要求句点前后都不是数字，双保险。
+    """
+    def to_commas(segment):
+        return re.sub(r"(?<!\d)\s*\.\s*(?!\d)", ", ", segment)
+
+    parts = []
+    cursor = 0
+    for match in WEIGHT_FRAGMENT.finditer(text):
+        parts.append(to_commas(text[cursor:match.start()]))
+        parts.append(match.group(0))
+        cursor = match.end()
+    parts.append(to_commas(text[cursor:]))
+    return "".join(parts)
+
+
 def sanitize_anima_prompt(value):
     text = str(value or "").strip()
     fenced = re.fullmatch(r"```(?:text|plaintext)?\s*([\s\S]*?)\s*```", text, re.IGNORECASE)
@@ -165,17 +189,23 @@ def sanitize_anima_prompt(value):
         "，": ",", "、": ",", "；": ",", ";": ",", "。": ".",
         "！": ".", "!": ".", "？": ".", "?": ".", "：": ":",
         "（": "(", "）": ")", "＜": "<", "＞": ">", "—": "-", "–": "-", "…": ".",
-        "“": "", "”": "", "‘": "'", "’": "'", '"': "", "`": "",
+        "“": "", "”": "", "＂": "", "‘": "'", "’": "'", "＇": "'", '"': "", "`": "",
     }
     for source, target in replacements.items():
         text = text.replace(source, target)
+    # 模型常把结果写成 JSON 或代码字符串，留下 \" \n 这类转义；先把字面换行/制表还原成换行，
+    # 再去掉其余孤立反斜杠，否则一个转义符就会让整条提示词判废。
+    text = re.sub(r"\\+[nrt]", "\n", text)
+    text = text.replace("\\", "")
     text = re.sub(r"(?m)^\s*(?:[-*•]+|\d+[.)])\s*", "", text)
     text = re.sub(r"[\r\n]+", ", ", text)
     text = re.sub(r"\s*,\s*", ", ", text)
+    text = replace_sentence_periods(text)
     text = re.sub(r",(?:\s*,)+", ",", text)
-    text = re.sub(r"(?<!\d)\s*\.\s*(?!\d)", ". ", text)
-    text = re.sub(r",\s*\.\s*", ". ", text)
     text = re.sub(r"\s+", " ", text).strip(" ,")
+    # 模型常在结果末尾多留一个句点。规则里的句点是用来分隔末尾自然语言的，后面没有内容时
+    # 它没有意义，却会让前端把整串标签误判成自然语言段落，所以直接去掉。
+    text = re.sub(r"\s*[.]+\s*$", "", text)
     if re.search(r"[\u3400-\u9fff]", text):
         raise ValueError("助手返回的 Anima 提示词仍包含中文，请调整规则后重试")
     allowed_punctuation = set(",.():@_-'<>%+/&")
