@@ -712,6 +712,155 @@ function openSavePromptDialog({ name = "", text = "", note = null, models = [], 
   return { close };
 }
 
+// 分类候选：只收词库里真实出现过的 category，用得多的排前面。
+// 不预置任何「应该有但还没用过」的分类；中英文混着也不翻译，原样列出。
+function tagCategoryCounts(data) {
+  const counts = new Map();
+  for (const tag of data?.tags ?? []) {
+    const name = String(tag?.category ?? "").trim();
+    if (!name) continue;
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  return [...counts]
+    .map(([name, count]) => ({ name, count }))
+    .sort((left, right) => right.count - left.count || left.name.localeCompare(right.name, "zh-CN"));
+}
+
+// 「分类」输入框：下拉列出已有分类，边打字边收窄，第一项恒为「自定义」。
+// 青绿色的「自定义」标识只表示「这个值不是词库里的现成分类」—— 选了自定义才会挂上，
+// 手打的值一旦命中某个候选就自动摘掉；编辑历史标签时带进来的陌生值也当场算自定义。
+function buildCategoryPicker({ initial = "", categories = [] } = {}) {
+  const root = element("div", "bpi-autocomplete");
+  const wrap = element("div", "bpi-input-wrap");
+  const input = element("input");
+  input.id = "bpi-field-category";
+  input.name = "category";
+  input.autocomplete = "off";
+  input.value = initial ?? "";
+  setPlaceholder(input, "Type to filter; ↑↓ to choose");
+  const badge = element("span", "bpi-custom-badge", "Custom");
+  badge.hidden = true;
+  const menu = element("div", "bpi-ac-menu");
+  menu.hidden = true;
+  wrap.append(input, badge);
+  root.append(wrap, menu);
+
+  let catalog = categories;
+  let rows = [];
+  let active = -1;
+  let custom = false;
+
+  const setCustom = (flag) => {
+    custom = flag;
+    badge.hidden = !flag;
+  };
+  const closeMenu = () => {
+    menu.hidden = true;
+    active = -1;
+  };
+  const renderMenu = () => {
+    menu.replaceChildren();
+    if (!rows.length) {
+      closeMenu();
+      return;
+    }
+    rows.forEach((row, index) => {
+      const item = element("div", `bpi-ac-item${index === active ? " bpi-ac-active" : ""}${row.custom ? " bpi-ac-custom" : ""}`);
+      // 分类名是词库数据，不进翻译层
+      const name = element("span", "bpi-ac-name");
+      name.textContent = row.custom ? t("Custom") : row.name;
+      const hint = element("span", "bpi-ac-kind");
+      hint.textContent = row.custom ? (input.value.trim() || t("Manual input")) : t(`${row.count} items`);
+      item.append(name, hint);
+      // 用 mousedown：等到 click 时输入框已经失焦、菜单早被关掉了
+      item.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+        commit(row);
+      });
+      menu.appendChild(item);
+    });
+    menu.hidden = false;
+  };
+  const update = ({ reveal = true } = {}) => {
+    const needle = input.value.trim().toLowerCase();
+    const matches = catalog.filter((entry) => !needle || entry.name.toLowerCase().includes(needle));
+    rows = [{ custom: true }, ...matches];
+    if (!reveal) {
+      menu.hidden = true;
+      return;
+    }
+    // 打出来的字正好等于某个候选时，默认就落在它身上，省一次↓
+    const exact = rows.findIndex((row) => !row.custom && row.name === input.value.trim());
+    active = exact > 0 ? exact : 0;
+    renderMenu();
+  };
+  const commit = (row) => {
+    if (!row) return;
+    if (row.custom) {
+      setCustom(true);
+    } else {
+      input.value = row.name;
+      setCustom(false);
+    }
+    closeMenu();
+    input.focus();
+  };
+
+  input.addEventListener("input", () => {
+    if (custom && catalog.some((entry) => entry.name === input.value.trim())) setCustom(false);
+    update();
+  });
+  input.addEventListener("focus", () => update());
+  input.addEventListener("click", () => {
+    if (menu.hidden) update();
+  });
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      if (menu.hidden) {
+        update(); // 关着的时候先把列表开出来
+        return;
+      }
+      const step = event.key === "ArrowDown" ? 1 : -1;
+      active = (active + step + rows.length) % rows.length;
+      renderMenu();
+      return;
+    }
+    if (event.key === "Enter") {
+      // 菜单开着才拦回车；关着的时候回车照旧提交整个表单
+      if (menu.hidden) return;
+      event.preventDefault();
+      event.stopPropagation();
+      commit(rows[Math.max(0, active)]);
+      return;
+    }
+    if (event.key === "Escape" && !menu.hidden) {
+      event.stopPropagation();
+      closeMenu();
+    }
+  });
+
+  // Nodes 2.0 会在捕获阶段拦掉指针事件，所以点空白关闭也挂 document + 捕获
+  const onOutside = (event) => {
+    if (!root.contains(event.target)) closeMenu();
+  };
+  document.addEventListener("mousedown", onOutside, true);
+
+  return {
+    root,
+    destroy: () => document.removeEventListener("mousedown", onOutside, true),
+    value: () => input.value.trim(),
+    // 候选是异步取来的，取到之后不能把用户的菜单硬弹开
+    setCategories: (list) => {
+      catalog = list;
+      const current = input.value.trim();
+      if (current && !catalog.some((entry) => entry.name === current)) setCustom(true);
+      // 菜单本来开着就重画，没开就别突然弹出来打断用户
+      update({ reveal: !menu.hidden });
+    },
+  };
+}
+
 function openTagDialog(initial, onSaved) {
   const shade = element("div", "bpi-modal-shade");
   const modal = element("div", "bpi-modal");
@@ -720,7 +869,15 @@ function openTagDialog(initial, onSaved) {
   const english = field(form, "English Tag", "english", initial?.english, "e.g.: looking at viewer");
   const chinese = field(form, "Chinese Name", "chinese", initial?.chinese, "e.g.: looking at viewer");
   const aliases = field(form, "Chinese Aliases", "aliases", initial?.aliases?.join("，"), "Comma-separated");
-  const category = field(form, "Category", "category", initial?.category ?? "Custom", "e.g.: pose, camera, style");
+  const categoryLabel = element("label", "", "Category");
+  categoryLabel.htmlFor = "bpi-field-category";
+  // 分类留空也行：后端会把空值落成「自定义」，所以新建时不要预先塞值、免得一开窗就挂着标识
+  const categoryPicker = buildCategoryPicker({ initial: initial?.category ?? "" });
+  form.append(categoryLabel, categoryPicker.root);
+  // 候选按词库实际用词实时汇总；取不到就退化成普通手输，这行本来也能打字
+  loadDictionary()
+    .then((data) => categoryPicker.setCategories(tagCategoryCounts(data)))
+    .catch(() => {});
   const models = field(form, "Models", "models", initial?.models?.join("，") ?? "general, anima", "Comma-separated");
   const weight = field(form, "Recommended Weight", "recommended_weight", initial?.recommended_weight ?? "", "Optional");
   const notes = field(form, "Notes", "notes", initial?.notes, "Optional");
@@ -741,7 +898,10 @@ function openTagDialog(initial, onSaved) {
   error.style.gridColumn = "1 / -1";
   form.appendChild(error);
   const actions = element("div", "bpi-modal-actions");
-  const close = () => shade.remove();
+  const close = () => {
+    categoryPicker.destroy();
+    shade.remove();
+  };
   actions.append(
     button("Cancel", close),
     button("Save to Personal Dictionary", () => form.requestSubmit(), "bpi-primary"),
@@ -761,7 +921,7 @@ function openTagDialog(initial, onSaved) {
         english: english.value,
         chinese: chinese.value,
         aliases: aliases.value,
-        category: category.value,
+        category: categoryPicker.value(),
         models: models.value,
         recommended_weight: weight.value,
         notes: notes.value,
@@ -1015,10 +1175,10 @@ function injectBpiStyles() {
   const style = document.createElement("style");
   style.id = "bpi-styles";
   style.textContent = `
-    :root{--bpi-surface:rgba(255,255,255,.92);--bpi-surface-2:#f5f5f5;--bpi-surface-3:#eaeaea;--bpi-surface-table:#f0f0f0;--bpi-surface-modal:#fff;--bpi-text:#333;--bpi-text-muted:#666;--bpi-text-faint:#999;--bpi-border:#ccc;--bpi-border-2:#bbb;--bpi-border-3:#e0e0e0;--bpi-button-bg:#e8e8e8;--bpi-button-text:#333;--bpi-input-bg:#fff;--bpi-input-text:#333;--bpi-head-bg:#e8e8e8;--bpi-editor-bg:#fff}
-    .dark-theme{--bpi-surface:rgba(10,12,18,.72);--bpi-surface-2:#171b22;--bpi-surface-3:#14181f;--bpi-surface-table:#11151b;--bpi-surface-modal:#20252d;--bpi-text:#e6edf7;--bpi-text-muted:#aab5c5;--bpi-text-faint:#7f8a9a;--bpi-border:#3a4250;--bpi-border-2:#4c5668;--bpi-border-3:#29313d;--bpi-button-bg:#2c3340;--bpi-button-text:#e8edf5;--bpi-input-bg:#171b22;--bpi-input-text:#eef3fb;--bpi-head-bg:#252c36;--bpi-editor-bg:#111923}
-    [data-bpi-theme="dark"]{--bpi-surface:rgba(10,12,18,.72);--bpi-surface-2:#171b22;--bpi-surface-3:#14181f;--bpi-surface-table:#11151b;--bpi-surface-modal:#20252d;--bpi-text:#e6edf7;--bpi-text-muted:#aab5c5;--bpi-text-faint:#7f8a9a;--bpi-border:#3a4250;--bpi-border-2:#4c5668;--bpi-border-3:#29313d;--bpi-button-bg:#2c3340;--bpi-button-text:#e8edf5;--bpi-input-bg:#171b22;--bpi-input-text:#eef3fb;--bpi-head-bg:#252c36;--bpi-editor-bg:#111923}
-    [data-bpi-theme="light"]{--bpi-surface:rgba(255,255,255,.92);--bpi-surface-2:#f5f5f5;--bpi-surface-3:#eaeaea;--bpi-surface-table:#f0f0f0;--bpi-surface-modal:#fff;--bpi-text:#333;--bpi-text-muted:#666;--bpi-text-faint:#999;--bpi-border:#ccc;--bpi-border-2:#bbb;--bpi-border-3:#e0e0e0;--bpi-button-bg:#e8e8e8;--bpi-button-text:#333;--bpi-input-bg:#fff;--bpi-input-text:#333;--bpi-head-bg:#e8e8e8;--bpi-editor-bg:#fff}
+    :root{--bpi-custom-bg:#e6f6f1;--bpi-custom-border:#7fc9b0;--bpi-custom-text:#0f6e56;--bpi-surface:rgba(255,255,255,.92);--bpi-surface-2:#f5f5f5;--bpi-surface-3:#eaeaea;--bpi-surface-table:#f0f0f0;--bpi-surface-modal:#fff;--bpi-text:#333;--bpi-text-muted:#666;--bpi-text-faint:#999;--bpi-border:#ccc;--bpi-border-2:#bbb;--bpi-border-3:#e0e0e0;--bpi-button-bg:#e8e8e8;--bpi-button-text:#333;--bpi-input-bg:#fff;--bpi-input-text:#333;--bpi-head-bg:#e8e8e8;--bpi-editor-bg:#fff}
+    .dark-theme{--bpi-custom-bg:#17342c;--bpi-custom-border:#3f8f77;--bpi-custom-text:#7fdcbd;--bpi-surface:rgba(10,12,18,.72);--bpi-surface-2:#171b22;--bpi-surface-3:#14181f;--bpi-surface-table:#11151b;--bpi-surface-modal:#20252d;--bpi-text:#e6edf7;--bpi-text-muted:#aab5c5;--bpi-text-faint:#7f8a9a;--bpi-border:#3a4250;--bpi-border-2:#4c5668;--bpi-border-3:#29313d;--bpi-button-bg:#2c3340;--bpi-button-text:#e8edf5;--bpi-input-bg:#171b22;--bpi-input-text:#eef3fb;--bpi-head-bg:#252c36;--bpi-editor-bg:#111923}
+    [data-bpi-theme="dark"]{--bpi-custom-bg:#17342c;--bpi-custom-border:#3f8f77;--bpi-custom-text:#7fdcbd;--bpi-surface:rgba(10,12,18,.72);--bpi-surface-2:#171b22;--bpi-surface-3:#14181f;--bpi-surface-table:#11151b;--bpi-surface-modal:#20252d;--bpi-text:#e6edf7;--bpi-text-muted:#aab5c5;--bpi-text-faint:#7f8a9a;--bpi-border:#3a4250;--bpi-border-2:#4c5668;--bpi-border-3:#29313d;--bpi-button-bg:#2c3340;--bpi-button-text:#e8edf5;--bpi-input-bg:#171b22;--bpi-input-text:#eef3fb;--bpi-head-bg:#252c36;--bpi-editor-bg:#111923}
+    [data-bpi-theme="light"]{--bpi-custom-bg:#e6f6f1;--bpi-custom-border:#7fc9b0;--bpi-custom-text:#0f6e56;--bpi-surface:rgba(255,255,255,.92);--bpi-surface-2:#f5f5f5;--bpi-surface-3:#eaeaea;--bpi-surface-table:#f0f0f0;--bpi-surface-modal:#fff;--bpi-text:#333;--bpi-text-muted:#666;--bpi-text-faint:#999;--bpi-border:#ccc;--bpi-border-2:#bbb;--bpi-border-3:#e0e0e0;--bpi-button-bg:#e8e8e8;--bpi-button-text:#333;--bpi-input-bg:#fff;--bpi-input-text:#333;--bpi-head-bg:#e8e8e8;--bpi-editor-bg:#fff}
     .bpi-panel{box-sizing:border-box;width:100%;height:100%;min-height:var(--bpi-collapsed-height,390px);max-height:var(--bpi-collapsed-height,390px);padding:8px;display:flex;flex-direction:column;gap:7px;color:var(--bpi-text);font:12px/1.4 Arial,sans-serif;background:var(--bpi-surface);border:1px solid var(--bpi-border);border-radius:8px;overflow-y:auto;scrollbar-gutter:stable}
     .bpi-english-section{flex:none;border:1px solid #3e7197;border-radius:7px;background:var(--bpi-surface);overflow:hidden}.bpi-english-head{display:flex;align-items:center;gap:7px;padding:5px 8px;background:var(--bpi-head-bg);color:#cbe8ff;font-weight:700;flex-wrap:wrap}.bpi-english-hint{margin-left:auto;color:#91b4cf;font-size:10px;font-weight:400}.bpi-english-token-view{box-sizing:border-box;width:100%;height:auto;min-height:92px;max-height:360px;overflow:auto;scrollbar-gutter:stable;padding:8px 9px;outline:none;color:var(--bpi-text);font:12px/1.85 Consolas,monospace;white-space:normal}.bpi-english-token-view:focus{box-shadow:inset 0 0 0 1px #5aa6d8}.bpi-english-editor{box-sizing:border-box;width:100%;height:120px;min-height:92px;max-height:420px;overflow-y:auto;resize:vertical;border:0;border-top:1px solid #3e7197;background:var(--bpi-editor-bg);color:var(--bpi-text);padding:9px;outline:none;font:12px/1.55 Consolas,monospace}.bpi-english-editor:focus{box-shadow:inset 0 0 0 1px #5aa6d8}.bpi-english-token{font-family:Consolas,monospace;color:var(--bpi-text)}.bpi-english-token.bpi-linked{background:#147fc3;border-color:#76c9ff;color:#fff;box-shadow:0 0 0 1px rgba(118,201,255,.32)}
     .bpi-mirror-section{flex:none;border:1px solid #488739;border-radius:7px;background:var(--bpi-surface);overflow:visible}.bpi-section-head{display:flex;align-items:center;gap:7px;padding:5px 8px;background:var(--bpi-head-bg);color:#cbe9c8;font-weight:700;flex-wrap:wrap}.bpi-section-hint{margin-left:auto;color:#91ad93;font-size:10px;font-weight:400}.bpi-mirror-actions{display:flex;gap:4px;align-items:center;flex-wrap:wrap}.bpi-chinese-mirror{box-sizing:border-box;width:100%;height:auto;min-height:92px;max-height:360px;overflow:auto;resize:none;scrollbar-gutter:stable;padding:8px 9px;outline:none;color:var(--bpi-text);line-height:1.85;cursor:text;white-space:normal}.bpi-chinese-mirror:focus{box-shadow:inset 0 0 0 1px #70b35f}.bpi-category-table{display:grid;grid-template-columns:minmax(110px,150px) minmax(0,1fr);border:1px solid #315f3a;border-radius:6px;overflow:hidden;background:var(--bpi-surface-3)}.bpi-category-row{display:contents}.bpi-category-name,.bpi-category-content{padding:6px 8px;border-top:1px solid #31513a}.bpi-category-row:first-child .bpi-category-name,.bpi-category-row:first-child .bpi-category-content{border-top:0}.bpi-category-name{background:var(--bpi-head-bg);border-right:1px solid #31513a;color:#9ee8a7;font-weight:700}.bpi-category-content{min-width:0}.bpi-chinese-editor{box-sizing:border-box;width:100%;height:auto;min-height:110px;max-height:600px;overflow-y:auto;resize:vertical;border:0;border-top:1px solid #3b693c;background:var(--bpi-editor-bg);color:var(--bpi-text);padding:9px;outline:none;font:12px/1.65 Arial,sans-serif}.bpi-chinese-editor:focus{box-shadow:inset 0 0 0 1px #70b35f}.bpi-hidden{display:none!important}.bpi-mirror-empty{color:var(--bpi-text-muted)}.bpi-mirror-token{display:inline-flex;align-items:center;border:1px solid transparent;border-radius:5px;padding:0 3px;margin:1px 0;cursor:pointer;transition:background .12s,border-color .12s,color .12s}.bpi-mirror-token:hover{background:#345a3b;border-color:#5c8d63;color:#fff}.bpi-mirror-token.bpi-linked{background:#315f83;border-color:#76a9ff;color:#fff}
@@ -1101,6 +1261,11 @@ function injectBpiStyles() {
     .bpi-ac-item:hover,.bpi-ac-item.bpi-ac-active{background:var(--bpi-surface-3)}
     .bpi-ac-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .bpi-ac-kind{margin-left:auto;flex:none;color:var(--bpi-text-faint);font-size:10px}
+    .bpi-ac-custom{color:var(--bpi-custom-text);border-bottom:1px solid var(--bpi-border-3);border-radius:4px 4px 0 0}
+    .bpi-input-wrap{display:flex;align-items:center;gap:5px;box-sizing:border-box;width:100%;border:1px solid var(--bpi-border-2);border-radius:5px;background:var(--bpi-input-bg);padding:5px 6px}
+    .bpi-input-wrap:focus-within{border-color:#4ca7e8}
+    .bpi-form .bpi-input-wrap input{flex:1;min-width:0;width:auto;border:0;outline:none;background:transparent;color:var(--bpi-input-text);padding:0;font:12px Arial,sans-serif}
+    .bpi-custom-badge{flex:none;border:1px solid var(--bpi-custom-border);border-radius:8px;background:var(--bpi-custom-bg);color:var(--bpi-custom-text);font-size:10px;line-height:15px;padding:0 5px}
     .bpi-form-hint{color:var(--bpi-text-faint);font-size:10px}
     .bpi-model-tags{display:flex;flex-wrap:wrap;gap:4px}
     .bpi-model-tag{padding:1px 7px;border:1px solid var(--bpi-border-2);border-radius:10px;background:var(--bpi-surface-3);color:var(--bpi-text-muted);font-size:10px}

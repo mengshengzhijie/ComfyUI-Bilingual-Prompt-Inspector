@@ -315,6 +315,8 @@ const ZH = {
   "Model limit reached": "模型数量已达上限",
   "Type keywords": "输入关键词",
   "Press Enter to add; ↑↓ to choose": "回车添加，↑↓ 切换候选",
+  "Type to filter; ↑↓ to choose": "输入即筛选，↑↓ 切换候选",
+  "Manual input": "手动输入",
   "Edit Favorite": "编辑收藏",
   "Keep the current image, or pick a new one to replace it": "不换图就保持原样，选一张新的会替换掉原来的",
 
