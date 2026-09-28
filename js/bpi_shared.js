@@ -1,6 +1,7 @@
 import { app } from "../../scripts/app.js";
 import { normalizePreferences } from "./dictionary_tools.js";
 import { matchModelNames } from "./model_suggest.js";
+import { ANIMA_SLOTS } from "./anima_sorter.js";
 import {
   LANGUAGE_CHANGED_EVENT,
   applyLanguageToDom,
@@ -23,6 +24,14 @@ const MANAGER_TAB_ID = "bpi-manager";
 const MANAGER_OPEN_EVENT = "bpi:open-manager";
 // 后端把上游传来的提示词推给前端时使用的事件名
 const UPSTREAM_ARRIVED_EVENT = "bpi/upstream-arrived";
+// 按词库配色时，「没命中任何词库」也当成一个来源，与后端 token_color_store.UNINDEXED_PACK_ID 对齐
+const UNINDEXED_PACK_ID = "unindexed";
+// 骰子：点一下从 random_pool 里随机抽一个颜色
+const DICE_ICON = '<svg viewBox="0 0 14 14" width="13" height="13" aria-hidden="true">'
+  + '<rect x="1" y="1" width="12" height="12" rx="3" fill="none" stroke="currentColor" stroke-width="1.2"/>'
+  + '<circle cx="4.5" cy="4.5" r="1.15" fill="currentColor"/><circle cx="9.5" cy="4.5" r="1.15" fill="currentColor"/>'
+  + '<circle cx="7" cy="7" r="1.15" fill="currentColor"/>'
+  + '<circle cx="4.5" cy="9.5" r="1.15" fill="currentColor"/><circle cx="9.5" cy="9.5" r="1.15" fill="currentColor"/></svg>';
 
 let sessionTokenPromise = null;
 let dictionaryPromise = null;
@@ -196,6 +205,20 @@ function loadTokenColors(force = false) {
       });
   }
   return tokenColorsPromise;
+}
+
+// 只传要更新的那一类；没传的那类后端保持原样
+async function saveTokenColors({ pack_colors: packColors, anima_colors: animaColors } = {}) {
+  const response = await bpiFetch(`${API_ROOT}/token-colors/colors`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pack_colors: packColors, anima_colors: animaColors }),
+  });
+  const result = await response.json();
+  if (!response.ok || !result.success) throw new Error(result.error || "Failed to save colors");
+  // 缓存失效：保存完节点那边要重新拉一次才能看到新配色
+  tokenColorsPromise = null;
+  return result.data;
 }
 
 async function saveAssistantConfig(payload) {
@@ -755,6 +778,227 @@ function openTagDialog(initial, onSaved) {
   setTimeout(() => (initial?.english ? chinese : english).focus(), 0);
 }
 
+// 颜色区能配色的「来源」：内置 / 社区词库包 + 大词库 + 两个本机词库 + 未收录。
+// 后三者不在 packs 里（个人词库和自然语言词库共用 user_tags.json，未收录压根没有词条），得手工补。
+function colorTargets(data) {
+  const userTags = data?.user ?? [];
+  const items = (count) => t(`${count ?? 0} items`);
+  const targets = (data?.packs ?? []).map((pack) => ({ id: pack.id, name: pack.name, meta: items(pack.count) }));
+  const large = data?.large_dictionary;
+  if (large?.available) {
+    targets.push({ id: "danbooru_large", name: large.name, meta: items(large.count) });
+  }
+  targets.push({ id: "personal", name: t("Personal dictionary"), meta: items(userTags.filter((tag) => !tag.natural).length) });
+  targets.push({ id: "natural", name: t("Natural Language Dictionary"), meta: items(userTags.filter((tag) => tag.natural).length) });
+  targets.push({ id: UNINDEXED_PACK_ID, name: t("Not indexed"), meta: t("Tags matching no dictionary") });
+  return targets;
+}
+
+// #RGB / #RRGGBB 统一成小写 6 位；认不出来返回空串（= 不着色）
+function normalizeHexColor(value) {
+  const text = String(value ?? "").trim();
+  if (/^#[0-9a-fA-F]{6}$/.test(text)) return text.toLowerCase();
+  if (/^#[0-9a-fA-F]{3}$/.test(text)) return "#" + text.slice(1).split("").map((char) => char + char).join("").toLowerCase();
+  return "";
+}
+
+// 按 Anima 配色时的分类名：跟 anima_sorter.js 的 ANIMA_SLOTS 一一对应。
+// 网格卡片窄，用短名，ANIMA_SLOTS 里的英文全称放 meta。
+const ANIMA_SHORT_LABELS = {
+  quality: "Quality",
+  people: "People count",
+  character: "Character",
+  copyright: "Copyright",
+  artist: "Artist",
+  appearance: "Appearance",
+  action: "Expression",
+  camera: "Camera",
+  style: "Style",
+  environment: "Scene",
+  natural: "Natural language",
+  uncertain: "Uncertain",
+};
+
+function animaColorTargets() {
+  return ANIMA_SLOTS.map((slot) => ({
+    id: slot.id,
+    name: t(ANIMA_SHORT_LABELS[slot.id] ?? slot.label),
+    meta: slot.label,
+  }));
+}
+
+// 一块配色网格：按词库一块、按 Anima 一块，共用这套卡片。改动后由 onCommit 落盘。
+function buildColorGrid({ targets, initial, presets, dicePool, error, onCommit }) {
+  const grid = element("div", "bpi-color-grid");
+  const picked = new Map();
+  const setters = [];
+  for (const target of targets) {
+    picked.set(target.id, initial?.[target.id] || "");
+    const card = element("div", "bpi-color-card");
+    const chip = element("span", "bpi-color-chip");
+    const head = element("div", "bpi-color-card-head");
+    head.append(chip, element("span", "", target.name));
+    const swatchRow = element("div", "bpi-color-swatches");
+    const swatches = [];
+    for (const hex of presets) {
+      const dot = element("i");
+      dot.style.background = hex;
+      dot.dataset.color = hex;
+      setTitle(dot, hex);
+      swatchRow.appendChild(dot);
+      swatches.push(dot);
+    }
+    const input = element("input");
+    setPlaceholder(input, "#6b9b78");
+    const dice = element("button", "bpi-color-dice");
+    dice.type = "button";
+    dice.innerHTML = DICE_ICON;
+    setTitle(dice, "Random color");
+    const row = element("div", "bpi-color-row");
+    row.append(input, dice, button("None", () => {
+      apply("");
+      onCommit();
+    }));
+
+    function apply(value) {
+      const color = normalizeHexColor(value);
+      picked.set(target.id, color);
+      chip.style.background = color || "transparent";
+      for (const dot of swatches) dot.classList.toggle("bpi-swatch-on", Boolean(color) && dot.dataset.color === color);
+      input.value = color;
+      error.textContent = "";
+    }
+    swatchRow.addEventListener("click", (event) => {
+      const hex = event.target?.dataset?.color;
+      if (!hex) return;
+      apply(hex);
+      onCommit();
+    });
+    dice.addEventListener("click", () => {
+      apply(dicePool[Math.floor(Math.random() * dicePool.length)]);
+      onCommit();
+    });
+    input.addEventListener("change", () => {
+      const value = input.value.trim();
+      if (!value) {
+        apply("");
+        onCommit();
+        return;
+      }
+      if (!normalizeHexColor(value)) {
+        error.textContent = t("Invalid color; use #RGB or #RRGGBB");
+        return;
+      }
+      apply(value);
+      onCommit();
+    });
+    apply(picked.get(target.id));
+    setters.push(apply);
+
+    card.append(head, element("div", "bpi-color-meta", target.meta), swatchRow, row);
+    grid.appendChild(card);
+  }
+  return {
+    root: grid,
+    values() {
+      const payload = {};
+      for (const [id, color] of picked) {
+        if (color) payload[id] = color;
+      }
+      return payload;
+    },
+    reset() {
+      for (const set of setters) set("");
+    },
+  };
+}
+
+// 颜色面板：节点过滤栏点「颜色」就在过滤栏下面就地展开，不做弹窗。
+// 跟左边那排筛选按钮一个操作逻辑：点一下立刻生效；按词库 / 按 Anima 才展开对应的配色网格。
+function buildColorPanel({ data, colors, mode, onChange }) {
+  const root = element("div", "bpi-color-panel");
+  const modes = [
+    ["default", t("Default"), ["var(--bpi-border-2)"]],
+    ["status", t("By inclusion"), ["#c08a4a", "#8a6bb0"]],
+    ["random", t("Random"), ["#5b8a72", "#8a5b7a", "#5b6e8a"]],
+    ["by_pack", t("By dictionary"), ["#6b9b78", "#6b7b9b", "#9b6b8b"]],
+    ["by_anima", t("By Anima"), ["#9b8b6b", "#9b6b8b", "#6b9b9b"]],
+  ];
+  // 旧存档里可能有不在选项里的值，回落到默认，别让按钮组一个都不亮
+  let currentMode = modes.some(([value]) => value === mode) ? mode : "default";
+  let live = colors;
+  const error = element("div", "bpi-color-error");
+  const presets = (colors?.presets ?? []).length ? colors.presets : ["#6b9b78"];
+  const dicePool = (colors?.random_pool ?? []).length ? colors.random_pool : presets;
+
+  const modeRow = element("div", "bpi-color-modes");
+  const modeButtons = new Map();
+  for (const [value, label, dots] of modes) {
+    const item = element("button", "bpi-color-mode");
+    item.type = "button";
+    for (const dot of dots) {
+      const mark = element("i", "bpi-color-mode-dot");
+      mark.style.background = dot;
+      item.appendChild(mark);
+    }
+    item.appendChild(element("span", "", label));
+    // 模式本身不落盘，只有配色才写文件
+    item.addEventListener("click", () => setMode(value));
+    modeButtons.set(value, item);
+    modeRow.appendChild(item);
+  }
+
+  async function commit() {
+    try {
+      live = await saveTokenColors({ pack_colors: packGrid.values(), anima_colors: animaGrid.values() });
+      error.textContent = "";
+    } catch (saveError) {
+      error.textContent = saveError.message;
+      return;
+    }
+    onChange(currentMode, live);
+  }
+
+  const gridOptions = { presets, dicePool, error, onCommit: commit };
+  const packGrid = buildColorGrid({ ...gridOptions, targets: colorTargets(data), initial: colors?.pack_colors });
+  const animaGrid = buildColorGrid({ ...gridOptions, targets: animaColorTargets(), initial: colors?.anima_colors });
+
+  const gridActions = (reset) => {
+    const actions = element("div", "bpi-color-panel-actions");
+    actions.appendChild(button("Restore defaults", () => {
+      reset();
+      commit();
+    }));
+    return actions;
+  };
+  const packWrap = element("div");
+  packWrap.append(
+    element("div", "bpi-color-note", t("Pick a color for each dictionary; uncolored ones keep the default.")),
+    packGrid.root,
+    gridActions(() => packGrid.reset()),
+  );
+  const animaWrap = element("div");
+  animaWrap.append(
+    element("div", "bpi-color-note", t("Pick a color for each Anima category; unset ones keep the default.")),
+    animaGrid.root,
+    gridActions(() => animaGrid.reset()),
+  );
+
+  const setMode = (value, notify = true) => {
+    currentMode = value;
+    for (const [id, item] of modeButtons) item.classList.toggle("bpi-color-mode-active", id === value);
+    packWrap.hidden = value !== "by_pack";
+    animaWrap.hidden = value !== "by_anima";
+    error.textContent = "";
+    if (notify) onChange(value, live);
+  };
+
+  root.append(modeRow, packWrap, animaWrap, error);
+  // 首次只是把当前模式点亮、决定网格显不显示，不该顺带触发一次重绘和同步
+  setMode(currentMode, false);
+  return root;
+}
+
 function openManagerPanel(section = "", nodeId = null) {
   const manager = app.extensionManager;
   if (!manager?.registerSidebarTab || !manager?.sidebarTab) {
@@ -887,21 +1131,33 @@ function injectBpiStyles() {
 .bpi-color-custom{display:flex;align-items:center;gap:6px}
 .bpi-color-custom input{width:150px}
 .bpi-color-swatch-none{display:inline-flex;align-items:center;justify-content:center;background:var(--bpi-surface-3);border-style:dashed;border-color:var(--bpi-border-2);color:var(--bpi-text-muted);font:11px Arial,sans-serif}
+    .bpi-color-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(196px,1fr));gap:6px}
+    .bpi-color-card{border:1px solid var(--bpi-border-2);border-radius:6px;background:var(--bpi-surface-2);padding:7px}
+    .bpi-color-card-head{display:flex;align-items:center;gap:6px;font-weight:700;color:var(--bpi-text);word-break:break-word}
+    .bpi-color-chip{width:13px;height:13px;border-radius:3px;border:1px solid var(--bpi-border-2);background:transparent;flex:none}
+    .bpi-color-meta{font-size:10px;color:var(--bpi-text-muted);margin-top:2px}
+    .bpi-color-swatches{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-top:6px}
+    .bpi-color-swatches i{height:20px;border-radius:4px;border:1px solid var(--bpi-border);cursor:pointer;display:block}
+    .bpi-color-swatches i.bpi-swatch-on{border-color:#76c9ff;box-shadow:0 0 0 1px #76c9ff}
+    .bpi-color-row{display:flex;align-items:center;gap:5px;margin-top:6px}
+    .bpi-color-row input{width:92px;border:1px solid var(--bpi-border-2);border-radius:5px;background:var(--bpi-input-bg);color:var(--bpi-input-text);padding:3px 5px;font-size:11px}
+    .bpi-color-dice{width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--bpi-border-2);border-radius:5px;background:transparent;color:var(--bpi-text-muted);cursor:pointer;padding:0;flex:none}
+    .bpi-color-dice:hover{color:var(--bpi-text)}
+    .bpi-color-error{color:#ff9a9a;font-size:11px;margin-top:6px}
+    .bpi-color-panel{border:1px solid var(--bpi-border-2);border-radius:7px;background:var(--bpi-surface-3);padding:8px;margin:5px 0}
+    .bpi-color-panel-actions{display:flex;justify-content:flex-end;margin-top:8px}
+    .bpi-color-modes{display:flex;gap:6px;flex-wrap:wrap}
+    .bpi-color-mode{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--bpi-border-2);border-radius:6px;background:var(--bpi-surface-2);color:var(--bpi-text);padding:5px 9px;cursor:pointer;font-size:12px;font-family:inherit}
+    .bpi-color-mode:hover{border-color:var(--bpi-text-muted)}
+    .bpi-color-mode-active{border-color:#76c9ff;box-shadow:0 0 0 1px #76c9ff}
+    .bpi-color-mode-dot{width:9px;height:9px;border-radius:50%;display:inline-block;border:1px solid var(--bpi-border)}
+    .bpi-color-note{font-size:11px;color:var(--bpi-text-muted);margin:10px 0 6px}
+    .bpi-color-open{border-color:#76c9ff;box-shadow:0 0 0 1px #76c9ff}
 .bpi-filter-sep{width:1px;height:18px;background:var(--bpi-border);margin:0 4px;align-self:center}
-.bpi-color-label{display:inline-flex;align-items:center;gap:5px;font-size:12px}
-.bpi-dropdown{position:relative;display:inline-flex}
 .bpi-dropdown-trigger{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border:1px solid var(--bpi-border-2);border-radius:6px;background:var(--bpi-button-bg);color:var(--bpi-button-text);font:12px Arial,sans-serif;line-height:1.2;cursor:pointer;user-select:none}
 .bpi-dropdown-trigger:hover{border-color:var(--bpi-text-faint)}
 .bpi-dropdown-caret{font-size:9px;color:var(--bpi-text-muted);transition:transform .12s}
-.bpi-dropdown-open .bpi-dropdown-caret{transform:rotate(180deg)}
-.bpi-dropdown-menu{position:absolute;top:calc(100% + 5px);left:0;z-index:90;min-width:150px;padding:4px;border:1px solid var(--bpi-border-2);border-radius:6px;background:var(--bpi-surface-modal);box-shadow:0 6px 16px rgba(0,0,0,.25)}
-.bpi-dropdown-menu.bpi-hidden{display:none}
-.bpi-dropdown-item{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:4px;color:var(--bpi-text);font:12px Arial,sans-serif;white-space:nowrap;cursor:pointer}
-.bpi-dropdown-item:hover{background:var(--bpi-surface-3)}
-.bpi-dropdown-item-active{color:#76c9ff}
-.bpi-dropdown-dots{display:inline-flex;gap:3px}
-.bpi-dropdown-dot{width:9px;height:9px;border-radius:50%;display:inline-block}
-.bpi-dropdown-check{margin-left:auto;font-size:11px;color:#76c9ff}.bpi-about-modal{width:min(460px,calc(100vw - 32px))}.bpi-about-name{margin-bottom:7px;color:var(--bpi-text);font-weight:700}.bpi-config-note{color:var(--bpi-text-muted);font-size:10px;word-break:break-all}
+.bpi-about-modal{width:min(460px,calc(100vw - 32px))}.bpi-about-name{margin-bottom:7px;color:var(--bpi-text);font-weight:700}.bpi-config-note{color:var(--bpi-text-muted);font-size:10px;word-break:break-all}
 .bpi-help{position:relative;display:inline-flex;align-items:center;justify-content:center;width:13px;height:13px;margin-left:5px;border:1px solid var(--bpi-border);border-radius:50%;color:var(--bpi-text-muted);font:10px/1 Arial,sans-serif;vertical-align:middle;cursor:help;user-select:none}
 .bpi-help:hover,.bpi-help:focus{color:var(--bpi-text);border-color:var(--bpi-border-2)}
 .bpi-help-pop{position:absolute;left:50%;bottom:calc(100% + 6px);transform:translateX(-50%);z-index:80;display:none;box-sizing:border-box;width:290px;max-width:70vw;padding:7px 9px;border:1px solid var(--bpi-border-2);border-radius:6px;background:var(--bpi-surface-modal);color:var(--bpi-text-muted);font:11px/1.65 Arial,sans-serif;white-space:pre-line;text-align:left;cursor:default}
@@ -944,6 +1200,7 @@ export {
   LANGUAGE_CHANGED_EVENT,
   MANAGER_TAB_ID,
   MANAGER_OPEN_EVENT,
+  UNINDEXED_PACK_ID,
   UPSTREAM_ARRIVED_EVENT,
   applyBpiAppearance,
   applyLanguageToDom,
@@ -972,6 +1229,7 @@ export {
   loadDictionary,
   loadPreferences,
   lookupLargeDictionary,
+  buildColorPanel,
   openManagerPanel,
   openSavePromptDialog,
   openTagDialog,
@@ -981,6 +1239,7 @@ export {
   saveAssistantConfig,
   savePreferences,
   saveTag,
+  saveTokenColors,
   searchLargeDictionary,
   setLanguageMode,
   setLargeDictionaryEnabled,

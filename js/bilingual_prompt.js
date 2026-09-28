@@ -23,7 +23,7 @@ import {
   suggestedTags,
   toggleFavorite,
 } from "./dictionary_tools.js";
-import { groupAnimaTokensForDisplay, sortAnimaPrompt } from "./anima_sorter.js";
+import { classifyAnimaToken, groupAnimaTokensForDisplay, sortAnimaPrompt } from "./anima_sorter.js";
 import { panelSyncHub } from "./panel_sync.js";
 import { installBpiWheelGuard } from "./wheel_guard.js";
 import {
@@ -35,6 +35,7 @@ import {
   loadDictionary,
   loadPreferences,
   loadTokenColors,
+  buildColorPanel,
   lookupLargeDictionary,
   openManagerPanel,
   openSavePromptDialog,
@@ -48,6 +49,7 @@ import {
   setText,
   setTitle,
   t,
+  UNINDEXED_PACK_ID,
   UPSTREAM_ARRIVED_EVENT,
 } from "./bpi_shared.js";
 
@@ -289,10 +291,11 @@ function createPanel(node, textWidget) {
     searchVisibleLimit: 40,
     lastRenderedSearchQuery: "",
     categoryView: false,
-    // 节点标签卡颜色模式：default（不着色）| status（按收录：未收录淡橙、机器翻译淡紫、已收录不变）| random（从 token_colors.json 摇色）
+    // 节点标签卡颜色模式：default（不着色）| status（按收录：未收录淡橙、机器翻译淡紫、已收录不变）
+    // | random（从 token_colors.json 摇色）| by_pack（按标签所在词库取 pack_colors）
     colorMode: localStorage.getItem("bpi.colorMode") || "default",
-    // 从后端读到的 { presets, random_pool }
-    tokenColors: { presets: [], random_pool: [] },
+    // 从后端读到的 { presets, random_pool, pack_colors }
+    tokenColors: { presets: [], random_pool: [], pack_colors: {} },
     // 每个卡的双击自定义色，key = token.key；切到非默认模式时被模式覆盖
     customColors: new Map(),
     // 随机模式下每个 token.key 摇到的颜色
@@ -1394,6 +1397,8 @@ function createPanel(node, textWidget) {
     });
     customRow.appendChild(customInput);
     colorPanel.appendChild(customRow);
+    // 双击设的自定义色优先级最低：只有「默认」模式才轮到它显示，其它模式会盖住
+    colorPanel.appendChild(element("div", "bpi-color-note", t("This color has the lowest priority: it only shows in Default mode; other color modes override it.")));
 
     modal.append(weightPanel, colorPanel);
 
@@ -1907,9 +1912,13 @@ function createPanel(node, textWidget) {
 
   // 模式优先：customColors 只在 default 模式下看得见；status/random 覆盖它
   const tokenCardColor = (token) => {
-    // 「疑似自然语言」是独立种类：不管翻译没翻译都标淡青，跟未收录的淡橙、机器翻译的淡紫区分。
-    // 翻译过的仍然显示译文，只是底色保留标记。
-    if (token.suspectedNatural) return "rgba(58,132,160,.20)";
+    // 「疑似自然语言」是形状上的怀疑标记，跟收不收录无关，也不管翻译没翻译都标淡青。
+    // 它只在诊断类模式（默认 / 按收录）下显示；随机和按词库是配色方案模式，
+    // 让用户自己摇出来或配出来的颜色正常显示，不被诊断标记盖住。
+    // 用排除法判断，旧存档里的未知值也跟默认一样显示。
+    if (token.suspectedNatural && !["random", "by_pack", "by_anima"].includes(state.colorMode)) {
+      return "rgba(58,132,160,.20)";
+    }
     if (state.colorMode === "status") {
       // 淡橙（未收录）、淡紫（机器翻译）、已收录不变 —— 柔和不鲜艳，跟换行行一个调子
       if (token.status === "unknown") return "rgba(184,120,50,.18)";
@@ -1926,6 +1935,14 @@ function createPanel(node, textWidget) {
         }
       }
       return state.randomColors.get(token.key);
+    }
+    if (state.colorMode === "by_pack") {
+      // 没命中词库的标签归到 unindexed；没给某个词库配色的就保持默认底色
+      return state.tokenColors.pack_colors?.[token.entry?.pack_id || UNINDEXED_PACK_ID] || null;
+    }
+    if (state.colorMode === "by_anima") {
+      // 分类沿用「按 Anima 顺序排序」那套判定，分不出来的归到 uncertain
+      return state.tokenColors.anima_colors?.[classifyAnimaToken(token).slot] || null;
     }
     // default：只显示双击设过的自定义色
     return state.customColors.get(token.key) || null;
@@ -2788,90 +2805,42 @@ function createPanel(node, textWidget) {
     state.filterButtons.set(filter, control);
     filtersBar.appendChild(control);
   }
-  // 颜色模式下拉：原生 select 在深色面板里又土又难配色，改成自己画的按钮 + 弹出菜单
-  const buildDropdown = ({ options, value, onChange }) => {
-    const root = element("span", "bpi-dropdown");
-    const trigger = element("button", "bpi-dropdown-trigger");
-    trigger.type = "button";
-    const valueLabel = element("span", "", "");
-    const caret = element("span", "bpi-dropdown-caret", "▾");
-    trigger.append(valueLabel, caret);
-    const menu = element("div", "bpi-dropdown-menu bpi-hidden");
-    const items = new Map();
-    const closeMenu = () => {
-      menu.classList.add("bpi-hidden");
-      root.classList.remove("bpi-dropdown-open");
-    };
-    const setValue = (next) => {
-      const active = options.find((option) => option.value === next) || options[0];
-      valueLabel.textContent = active.label;
-      items.forEach((item, itemValue) => {
-        item.classList.toggle("bpi-dropdown-item-active", itemValue === next);
-        const check = item.querySelector(".bpi-dropdown-check");
-        if (check) check.textContent = itemValue === next ? "✓" : "";
-      });
-    };
-    for (const option of options) {
-      const item = element("div", "bpi-dropdown-item");
-      const dots = element("span", "bpi-dropdown-dots");
-      for (const color of option.dots || []) {
-        const dot = element("i", "bpi-dropdown-dot");
-        dot.style.background = color;
-        dots.appendChild(dot);
-      }
-      item.append(dots, element("span", "", option.label), element("span", "bpi-dropdown-check", ""));
-      item.addEventListener("click", (event) => {
-        event.stopPropagation();
-        setValue(option.value);
-        closeMenu();
-        onChange(option.value);
-      });
-      items.set(option.value, item);
-      menu.appendChild(item);
-    }
-    setValue(value);
-    trigger.addEventListener("click", (event) => {
-      event.stopPropagation();
-      if (menu.classList.contains("bpi-hidden")) {
-        menu.classList.remove("bpi-hidden");
-        root.classList.add("bpi-dropdown-open");
-      } else {
-        closeMenu();
-      }
-    });
-    trigger.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") closeMenu();
-    });
-    // 点空白处关闭：Nodes 2.0 下 Vue 祖先会在捕获阶段拦事件，所以走 document + 捕获阶段
-    document.addEventListener("pointerdown", (event) => {
-      if (root.contains(event.target)) return;
-      closeMenu();
-    }, true);
-    root.append(trigger, menu);
-    return root;
-  };
-  // 只有节点主视图的卡会着色，侧边栏明细表不受影响
+  // 只有节点主视图的卡会着色，侧边栏明细表不受影响。
+  // 颜色不占侧边栏分区（那边已经够挤了）：这里一个按钮，点一下就在过滤栏下面原地展开，
+  // 跟左边那排筛选按钮一个操作逻辑——选了立刻生效，不弹窗。
   const colorSeparator = element("span", "bpi-filter-sep");
   filtersBar.appendChild(colorSeparator);
-  const colorModeLabel = element("span", "bpi-color-label");
-  colorModeLabel.appendChild(element("span", "", t("Color")));
-  colorModeLabel.appendChild(buildDropdown({
-    options: [
-      { value: "default", label: t("Default"), dots: ["var(--bpi-border-2)"] },
-      { value: "status", label: t("By inclusion"), dots: ["#c08a4a", "#8a6bb0"] },
-      { value: "random", label: t("Random"), dots: ["#5b8a72", "#8a5b7a", "#5b6e8a"] },
-    ],
-    // 旧存档里可能有不在选项里的值，回落到默认，别让下拉显示空白
-    value: ["default", "status", "random"].includes(state.colorMode) ? state.colorMode : "default",
-    onChange: (next) => {
-      state.colorMode = next;
-      localStorage.setItem("bpi.colorMode", next);
-      // 切到随机 → 重新摇一轮；切走 → 清掉旧的随机色，下次回来再摇
-      state.randomColors.clear();
-      render();
-    },
-  }));
-  filtersBar.appendChild(colorModeLabel);
+  const colorButton = element("button", "bpi-button bpi-dropdown-trigger");
+  colorButton.type = "button";
+  colorButton.append(
+    element("span", "", t("Colors")),
+    element("span", "bpi-dropdown-caret", "▾"),
+  );
+  setTitle(colorButton, t("Colors"));
+  // 面板内容每次展开都重建，这样词库增删、配色被别处改过都能立刻反映出来
+  const colorPanel = element("div", "bpi-color-panel");
+  colorPanel.hidden = true;
+  colorButton.addEventListener("click", () => {
+    colorPanel.hidden = !colorPanel.hidden;
+    colorButton.classList.toggle("bpi-color-open", !colorPanel.hidden);
+    if (colorPanel.hidden) return;
+    colorPanel.replaceChildren(buildColorPanel({
+      data: state.data,
+      colors: state.tokenColors,
+      mode: state.colorMode,
+      onChange: (nextMode, savedColors) => {
+        state.colorMode = nextMode;
+        localStorage.setItem("bpi.colorMode", nextMode);
+        if (savedColors) state.tokenColors = savedColors;
+        // 切到随机 → 重新摇一轮；切走 → 清掉旧的随机色，下次回来再摇
+        state.randomColors.clear();
+        render();
+        // 让画布上其它检查器节点也重新拉一次配色，别只有这一个变
+        panelSyncHub.notify("colors", state.syncSource);
+      },
+    }));
+  });
+  filtersBar.appendChild(colorButton);
   leftTools.append(
     button("Add tag", () => openTagDialog({}, refreshDictionary), "bpi-primary"),
     translateAllButton,
@@ -2889,7 +2858,7 @@ function createPanel(node, textWidget) {
   toolbar.append(leftTools, rightTools);
   searchLine.append(modeSelect, searchLabel, search);
   summary.append(counts, modeInfo, status);
-  detailsBody.append(toolbar, searchLine, results, summary, filtersBar, machineBatchBar, issuesPanel, table, detailsHiddenBar);
+  detailsBody.append(toolbar, searchLine, results, summary, filtersBar, colorPanel, machineBatchBar, issuesPanel, table, detailsHiddenBar);
   // 底部快捷输入：中文先翻译再追加，英文直接追加。只挂在节点面板上，
   // 明细表（detailsBody）才会被侧边栏「标签管理」复用，这个输入框不会跟着过去。
   const quickSection = element("section", "bpi-quick-section");
@@ -3120,6 +3089,11 @@ function createPanel(node, textWidget) {
       render();
     } else if (kind === "dictionary") {
       await refreshDictionary(false);
+    } else if (kind === "colors") {
+      // 侧边栏改完配色：缓存已被保存接口清掉，这里重新拉一次就能立刻看到
+      const colors = await loadTokenColors();
+      state.tokenColors = colors;
+      render();
     }
   };
   const unsubscribePanelSync = panelSyncHub.subscribe(syncFromPeer);

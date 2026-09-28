@@ -22,5 +22,18 @@
     "#5b7a8a",
     "#8a8a5b",
     "#5b8a5b"
-  ]
+  ],
+  "pack_colors": {
+    "base": "#8a6b5b",
+    "anima": "#7a8a5b",
+    "characters": "#5b8a72",
+    "poses": "#8a5b7a",
+    "camera": "#8a725b",
+    "clothing": "#5b8a8a",
+    "adult": "#5b8a5b",
+    "personal": "#8a8a5b",
+    "natural": "#5b8a72",
+    "unindexed": "#5b6e8a"
+  },
+  "anima_colors": {}
 }

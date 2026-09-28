@@ -518,7 +518,8 @@ def dictionary_translate(text, dictionary_store):
             large = dictionary_store.search_large_tags(lookup_part, limit=30)
             exact = [tag for tag in large if lookup_part == tag.get("chinese")]
         if exact:
-            exact.sort(key=lambda tag: (tag.get("pack_id") == "personal", int(tag.get("post_count", 0))), reverse=True)
+            # 个人词库与自然语言词库都算本机自建，优先于内置词库（与 dictionary_store.USER_PACK_IDS 一致）
+            exact.sort(key=lambda tag: (tag.get("pack_id") in ("personal", "natural"), int(tag.get("post_count", 0))), reverse=True)
             english = exact[0]["english"]
             output.append(f"({english}:{weighted.group(2)})" if weighted else english)
         else:

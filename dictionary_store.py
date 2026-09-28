@@ -12,6 +12,11 @@ from pathlib import Path
 
 SCHEMA_VERSION = 1
 PACK_SCHEMA_VERSION = 1
+# 个人词库与自然语言词库共用 user_tags.json，靠 natural 标记分成两个 pack，
+# 这样按词库筛选、配色都能把它们分开处理。
+PERSONAL_PACK_ID = "personal"
+NATURAL_PACK_ID = "natural"
+USER_PACK_IDS = (PERSONAL_PACK_ID, NATURAL_PACK_ID)
 MAX_TEXT_LENGTH = 500
 MAX_ALIASES = 30
 MAX_LARGE_LOOKUP_TERMS = 200
@@ -248,11 +253,11 @@ class DictionaryStore:
         user = self.user_tags()
         effective = {normalize_key(tag["english"]): tag for tag in builtin}
         for tag in user:
+            natural = bool(tag.get("natural"))
             clean = {
                 **tag,
-                "pack_id": "personal",
-                # 自然语言词库与个人词库共用一个文件，只在展示名上分开
-                "pack_name": "自然语言词库" if tag.get("natural") else "个人词库",
+                "pack_id": NATURAL_PACK_ID if natural else PERSONAL_PACK_ID,
+                "pack_name": "自然语言词库" if natural else "个人词库",
                 "pack_source": "本机用户",
             }
             effective[normalize_key(tag["english"])] = clean

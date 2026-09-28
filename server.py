@@ -30,9 +30,11 @@ from .saved_prompt_store import (
     MAX_IMAGE_BYTES,
     SavedPromptStore,
 )
+from .token_color_store import TokenColorStore
 
 
 store = DictionaryStore()
+token_color_store = TokenColorStore()
 assistant_store = AssistantStore()
 assistant_store.config()  # 进程启动时立即清除与当前安装身份不匹配的旧配置和凭据
 
@@ -388,26 +390,26 @@ async def get_dictionary(_request):
         return error_response(error, 500)
 
 
-# 节点标签卡的颜色配置：用户可以直接编辑 data/token_colors.json 增删色块，
-# 不用改源码。文件不在或格式不对时回退内置默认，不影响功能。
-_DEFAULT_TOKEN_COLORS = {
-    "presets": ["#6b9b78", "#9b8b6b", "#6b7b9b", "#9b6b8b", "#8b9b6b", "#6b9b9b", "#9b7b6b", "#7b6b9b"],
-    "random_pool": ["#5b8a72", "#8a725b", "#5b6e8a", "#8a5b7a", "#7a8a5b", "#5b8a8a", "#8a6b5b", "#6b5b8a"],
-}
-
-
+# 节点标签卡的颜色配置：色块池只读（用户可以直接编辑 data/token_colors.json），
+# 按词库配色由侧边栏「颜色」区写回同一个文件。
 @protected_route("get", "/bpi/token-colors")
 async def get_token_colors(_request):
-    from pathlib import Path
-    path = Path(__file__).resolve().parent / "data" / "token_colors.json"
     try:
-        if path.exists():
-            data = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(data, dict) and isinstance(data.get("presets"), list) and isinstance(data.get("random_pool"), list):
-                return web.json_response({"success": True, "data": data})
-    except (OSError, ValueError):
-        pass
-    return web.json_response({"success": True, "data": _DEFAULT_TOKEN_COLORS})
+        return web.json_response({"success": True, "data": token_color_store.config()})
+    except OSError as error:
+        return error_response(error, 500)
+
+
+@protected_route("post", "/bpi/token-colors/colors")
+async def save_token_colors(request):
+    try:
+        payload = await _read_json(request, _MAX_JSON_BYTES)
+        if not isinstance(payload, dict):
+            raise ValueError("配色内容必须是对象")
+        data = token_color_store.save_colors(payload.get("pack_colors"), payload.get("anima_colors"))
+        return web.json_response({"success": True, "data": data})
+    except (OSError, ValueError) as error:
+        return error_response(error)
 
 
 @protected_route("post", "/bpi/large/lookup")

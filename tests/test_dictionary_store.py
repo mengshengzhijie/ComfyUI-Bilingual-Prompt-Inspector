@@ -135,6 +135,17 @@ class DictionaryStoreTests(unittest.TestCase):
         self.assertEqual(effective["smile"]["chinese"], "个人微笑")
         self.assertEqual(effective["smile"]["pack_id"], "personal")
 
+    def test_natural_language_dictionary_is_a_separate_pack(self):
+        temp, store = self.make_pack_store()
+        self.addCleanup(temp.cleanup)
+        store.upsert({"english": "smile", "chinese": "个人微笑"})
+        store.upsert({"english": "a woman is standing in the rain", "chinese": "一个女人站在雨中", "natural": True})
+        effective = {tag["english"]: tag for tag in store.snapshot()["tags"]}
+        self.assertEqual(effective["smile"]["pack_id"], "personal")
+        self.assertEqual(effective["smile"]["pack_name"], "个人词库")
+        self.assertEqual(effective["a woman is standing in the rain"]["pack_id"], "natural")
+        self.assertEqual(effective["a woman is standing in the rain"]["pack_name"], "自然语言词库")
+
     def test_community_pack_lifecycle(self):
         temp, store = self.make_pack_store()
         self.addCleanup(temp.cleanup)

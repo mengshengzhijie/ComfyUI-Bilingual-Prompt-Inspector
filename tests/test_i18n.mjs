@@ -34,6 +34,27 @@ assert.equal(t("restored 3 hidden tags; press Ctrl+Z to undo"), "已恢复 3 个
 assert.equal(t("items 3 | recognized 1 | unknown 2"), "共 3 个标签｜已识别 1｜未收录 2");
 assert.equal(t("items 3 | recognized 1 | unknown 2 | pending 1"), "共 3 个标签｜已识别 1｜未收录 2｜待确认 1");
 assert.equal(t("Personal"), "个人");
+// 过滤栏颜色下拉的第四项：按标签所在词库上色
+assert.equal(t("By dictionary"), "按词库");
+// 侧边栏「颜色」区：分区名、按钮、词条数、未收录项
+assert.equal(t("Colors"), "颜色");
+assert.equal(t("Restore defaults"), "恢复默认");
+assert.equal(t("Random color"), "随机颜色");
+assert.equal(t("Not indexed"), "未收录");
+assert.equal(t("3 items"), "3 条");
+assert.equal(t("952 items"), "952 条");
+// 按 Anima 配色的分类短名（跟 anima_sorter.js 的槽位一一对应）
+assert.equal(t("By Anima"), "按 Anima");
+assert.equal(t("Quality"), "质量");
+assert.equal(t("Expression"), "表情");
+assert.equal(t("Camera"), "镜头");
+assert.equal(t("Scene"), "场景");
+assert.equal(t("Copyright"), "作品");
+// 双击改色面板底部那句优先级说明
+assert.equal(
+  t("This color has the lowest priority: it only shows in Default mode; other color modes override it."),
+  "这里改的颜色优先级最低：只有「默认」上色模式才显示，按收录、随机、按词库、按 Anima 都会盖住它。",
+);
 assert.equal(t("Highest"), "最高");
 assert.equal(t("12 items | Local user | Always enabled, overrides same-name entries"), "12 条｜本地用户｜始终启用，覆盖同名条目");
 
