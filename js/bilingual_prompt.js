@@ -27,6 +27,7 @@ import { classifyAnimaToken, groupAnimaTokensForDisplay, sortAnimaPrompt } from 
 import { panelSyncHub } from "./panel_sync.js";
 import { installBpiWheelGuard } from "./wheel_guard.js";
 import {
+  buildTagFields,
   button,
   deletePersonalTag,
   element,
@@ -1323,17 +1324,19 @@ function createPanel(node, textWidget) {
     const modal = element("div", "bpi-modal");
     // 这两句直接写中文：带变量 + 固定术语，走翻译层反而匹配不上，界面必须中文
     modal.appendChild(element("h3", "", `编辑标签：${token.term}`));
-    modal.appendChild(element("div", "bpi-config-note", "Anima 格式：(标签:权重)"));
 
-    // Tab 切换：权重 / 颜色
+    // Tab 切换：权重 / 颜色 / 编辑（第三个改的是整条词条，不是这行文本）
     const tabs = element("div", "bpi-editor-tabs");
     const tabWeight = element("button", "bpi-editor-tab bpi-editor-tab-active", t("Weight"));
     const tabColor = element("button", "bpi-editor-tab", t("Color"));
-    tabWeight.type = tabColor.type = "button";
-    tabs.append(tabWeight, tabColor);
+    const tabEdit = element("button", "bpi-editor-tab", t("Entry info"));
+    tabWeight.type = tabColor.type = tabEdit.type = "button";
+    tabs.append(tabWeight, tabColor, tabEdit);
     modal.appendChild(tabs);
 
     const weightPanel = element("div", "bpi-editor-panel");
+    // 这句直接写中文：固定术语，走翻译层反而匹配不上
+    weightPanel.appendChild(element("div", "bpi-config-note", "Anima 格式：(标签:权重)"));
     const form = element("div", "bpi-form");
     const input = element("input", "");
     input.type = "number";
@@ -1400,9 +1403,26 @@ function createPanel(node, textWidget) {
     // 双击设的自定义色优先级最低：只有「默认」模式才轮到它显示，其它模式会盖住
     colorPanel.appendChild(element("div", "bpi-color-note", t("This color has the lowest priority: it only shows in Default mode; other color modes override it.")));
 
-    modal.append(weightPanel, colorPanel);
+    // 编辑 Tab：整套词条字段（含分类下拉），跟「新增／编辑个人标签」弹窗同一份构件。
+    // 命中词库就整条带过来改；没命中就按这条标签卡起个头，存进去即新建。
+    const editPanel = element("div", "bpi-editor-panel bpi-hidden");
+    editPanel.appendChild(element("div", "bpi-config-note", t("Edits go to the personal dictionary and override same-name entries.")));
+    const editForm = element("div", "bpi-form");
+    const editFields = buildTagFields(editForm, state.index.get(token.key) ?? {
+      english: token.term,
+      chinese: token.chinese ?? "",
+      models: ["general", "anima"],
+      source: "user",
+      verified: true,
+    }, { withTarget: false });
+    editPanel.appendChild(editForm);
 
-    const close = () => shade.remove();
+    modal.append(weightPanel, colorPanel, editPanel);
+
+    const close = () => {
+      editFields.destroy();
+      shade.remove();
+    };
     const apply = () => {
       const numeric = Number(input.value);
       if (!input.value.trim() || !Number.isFinite(numeric) || numeric < 0 || numeric > 3) {
@@ -1432,17 +1452,33 @@ function createPanel(node, textWidget) {
       close();
       render();
     };
+    // 编辑页：只改词条，不动当前这行提示词文本，所以不进撤销栈
+    const applyEdit = async () => {
+      try {
+        await saveTag(editFields.collect());
+        await refreshDictionary();
+        close();
+        setStatus(t("Tag saved"), "ok");
+      } catch (saveError) {
+        setStatus(saveError.message, "error");
+      }
+    };
     const actions = element("div", "bpi-modal-actions");
+    // 「清除权重」只对权重页有意义，切到别的页就收起来
+    let clearWeightButton = null;
     if (token.weight !== null) {
-      actions.appendChild(button("Clear weight", () => {
+      clearWeightButton = button("Clear weight", () => {
         if (applyTokenWeight(token, null)) close();
-      }, "bpi-danger"));
+      }, "bpi-danger");
+      actions.appendChild(clearWeightButton);
     }
     actions.append(button("Cancel", close));
     // 先声明再让 applyButton 引用它：let 有 TDZ，声明放在闭包之后会有隐患
-    let onColorTab = false;
+    let activeTab = "weight";
     const applyButton = button(t("Apply"), () => {
-      if (onColorTab) applyColor(); else apply();
+      if (activeTab === "color") applyColor();
+      else if (activeTab === "edit") applyEdit();
+      else apply();
     }, "bpi-primary");
     actions.append(applyButton);
     modal.appendChild(actions);
@@ -1459,22 +1495,30 @@ function createPanel(node, textWidget) {
         close();
       }
     });
-    // Tab 切换：权重走 apply，颜色走 applyColor；通过共享的 Apply 按钮 + onColorTab 标志分派
+    // Tab 切换：共用底部那个 Apply 按钮，按 activeTab 分派到三个动作
+    const showPanel = (tab) => {
+      tabWeight.classList.toggle("bpi-editor-tab-active", tab === "weight");
+      tabColor.classList.toggle("bpi-editor-tab-active", tab === "color");
+      tabEdit.classList.toggle("bpi-editor-tab-active", tab === "edit");
+      weightPanel.classList.toggle("bpi-hidden", tab !== "weight");
+      colorPanel.classList.toggle("bpi-hidden", tab !== "color");
+      editPanel.classList.toggle("bpi-hidden", tab !== "edit");
+      if (clearWeightButton) clearWeightButton.hidden = tab !== "weight";
+    };
     tabWeight.addEventListener("click", () => {
-      onColorTab = false;
-      tabWeight.classList.add("bpi-editor-tab-active");
-      tabColor.classList.remove("bpi-editor-tab-active");
-      weightPanel.classList.remove("bpi-hidden");
-      colorPanel.classList.add("bpi-hidden");
-      setTimeout(() => input.focus(), 0);
+      activeTab = "weight";
+      showPanel("weight");
+      setTimeout(() => { input.focus(); input.select(); }, 0);
     });
     tabColor.addEventListener("click", () => {
-      onColorTab = true;
-      tabColor.classList.add("bpi-editor-tab-active");
-      tabWeight.classList.remove("bpi-editor-tab-active");
-      colorPanel.classList.remove("bpi-hidden");
-      weightPanel.classList.add("bpi-hidden");
+      activeTab = "color";
+      showPanel("color");
       setTimeout(() => { customInput.focus(); customInput.select(); }, 0);
+    });
+    tabEdit.addEventListener("click", () => {
+      activeTab = "edit";
+      showPanel("edit");
+      setTimeout(() => editFields.focus(), 0);
     });
     setTimeout(() => { input.focus(); input.select(); }, 0);
   };

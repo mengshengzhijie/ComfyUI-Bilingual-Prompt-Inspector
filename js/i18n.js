@@ -317,6 +317,9 @@ const ZH = {
   "Press Enter to add; ↑↓ to choose": "回车添加，↑↓ 切换候选",
   "Type to filter; ↑↓ to choose": "输入即筛选，↑↓ 切换候选",
   "Manual input": "手动输入",
+  "Tag saved": "词条已保存",
+  "Entry info": "词条信息",
+  "Edits go to the personal dictionary and override same-name entries.": "改动存入个人词库，会覆盖同名词条的显示。",
   "Edit Favorite": "编辑收藏",
   "Keep the current image, or pick a new one to replace it": "不换图就保持原样，选一张新的会替换掉原来的",
 

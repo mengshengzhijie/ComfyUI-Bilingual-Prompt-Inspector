@@ -861,45 +861,72 @@ function buildCategoryPicker({ initial = "", categories = [] } = {}) {
   };
 }
 
+// 「标签字段」那一整套：独立的「新增／编辑个人标签」弹窗和节点里双击标签卡后的
+// 「编辑」页签共用同一份，免得两边各抄一遍字段。
+// withTarget = false 时不给「保存到哪个词库」的下拉：双击进来的一定是标签
+// （自然语言片段进不了这个入口），恒存个人词库，让选项出现反而是噪音。
+function buildTagFields(parent, initial = {}, { withTarget = true } = {}) {
+  const english = field(parent, "English Tag", "english", initial?.english, "e.g.: looking at viewer");
+  const chinese = field(parent, "Chinese Name", "chinese", initial?.chinese, "e.g.: looking at viewer");
+  const aliases = field(parent, "Chinese Aliases", "aliases", initial?.aliases?.join("，"), "Comma-separated");
+  const categoryLabel = element("label", "", "Category");
+  categoryLabel.htmlFor = "bpi-field-category";
+  // 分类留空也行：后端会把空值落成「自定义」，所以新建时不要预先塞值、免得一开窗就挂着标识
+  const categoryPicker = buildCategoryPicker({ initial: initial?.category ?? "" });
+  parent.append(categoryLabel, categoryPicker.root);
+  // 候选按词库实际用词实时汇总；取不到就退化成普通手输，这行本来也能打字
+  loadDictionary()
+    .then((data) => categoryPicker.setCategories(tagCategoryCounts(data)))
+    .catch(() => {});
+  const models = field(parent, "Models", "models", initial?.models?.join("，") ?? "general, anima", "Comma-separated");
+  const weight = field(parent, "Recommended Weight", "recommended_weight", initial?.recommended_weight ?? "", "Optional");
+  const notes = field(parent, "Notes", "notes", initial?.notes, "Optional");
+  let dictionary = null;
+  if (withTarget) {
+    const dictionaryLabel = element("label", "", "Save to Dictionary");
+    dictionaryLabel.htmlFor = "bpi-field-dictionary";
+    dictionary = element("select", "bpi-mode");
+    dictionary.id = dictionaryLabel.htmlFor;
+    dictionary.name = "dictionary";
+    for (const [value, label] of [["personal", "Personal dictionary"], ["natural", "Natural Language Dictionary"]]) {
+      const option = element("option", "", label);
+      option.value = value;
+      dictionary.appendChild(option);
+    }
+    dictionary.value = initial?.natural ? "natural" : "personal";
+    parent.append(dictionaryLabel, dictionary);
+  }
+  return {
+    destroy: () => categoryPicker.destroy(),
+    focus: () => (initial?.english ? chinese : english).focus(),
+    collect: () => ({
+      english: english.value,
+      chinese: chinese.value,
+      aliases: aliases.value,
+      category: categoryPicker.value(),
+      models: models.value,
+      recommended_weight: weight.value,
+      notes: notes.value,
+      natural: dictionary ? dictionary.value === "natural" : Boolean(initial?.natural),
+      source: initial?.source === "bpi-assistant" ? initial.source : "user",
+      verified: initial?.verified ?? true,
+    }),
+  };
+}
+
 function openTagDialog(initial, onSaved) {
   const shade = element("div", "bpi-modal-shade");
   const modal = element("div", "bpi-modal");
   const title = element("h3", "", initial?.english ? "Add or Edit Personal Tag" : "Add Personal Tag");
   const form = element("form", "bpi-form");
-  const english = field(form, "English Tag", "english", initial?.english, "e.g.: looking at viewer");
-  const chinese = field(form, "Chinese Name", "chinese", initial?.chinese, "e.g.: looking at viewer");
-  const aliases = field(form, "Chinese Aliases", "aliases", initial?.aliases?.join("，"), "Comma-separated");
-  const categoryLabel = element("label", "", "Category");
-  categoryLabel.htmlFor = "bpi-field-category";
-  // 分类留空也行：后端会把空值落成「自定义」，所以新建时不要预先塞值、免得一开窗就挂着标识
-  const categoryPicker = buildCategoryPicker({ initial: initial?.category ?? "" });
-  form.append(categoryLabel, categoryPicker.root);
-  // 候选按词库实际用词实时汇总；取不到就退化成普通手输，这行本来也能打字
-  loadDictionary()
-    .then((data) => categoryPicker.setCategories(tagCategoryCounts(data)))
-    .catch(() => {});
-  const models = field(form, "Models", "models", initial?.models?.join("，") ?? "general, anima", "Comma-separated");
-  const weight = field(form, "Recommended Weight", "recommended_weight", initial?.recommended_weight ?? "", "Optional");
-  const notes = field(form, "Notes", "notes", initial?.notes, "Optional");
-  const dictionaryLabel = element("label", "", "Save to Dictionary");
-  dictionaryLabel.htmlFor = "bpi-field-dictionary";
-  const dictionary = element("select", "bpi-mode");
-  dictionary.id = dictionaryLabel.htmlFor;
-  dictionary.name = "dictionary";
-  for (const [value, label] of [["personal", "Personal dictionary"], ["natural", "Natural Language Dictionary"]]) {
-    const option = element("option", "", label);
-    option.value = value;
-    dictionary.appendChild(option);
-  }
-  dictionary.value = initial?.natural ? "natural" : "personal";
-  form.append(dictionaryLabel, dictionary);
+  const fields = buildTagFields(form, initial);
   const error = element("div", "bpi-status");
   error.dataset.kind = "error";
   error.style.gridColumn = "1 / -1";
   form.appendChild(error);
   const actions = element("div", "bpi-modal-actions");
   const close = () => {
-    categoryPicker.destroy();
+    fields.destroy();
     shade.remove();
   };
   actions.append(
@@ -917,25 +944,14 @@ function openTagDialog(initial, onSaved) {
     event.preventDefault();
     error.textContent = "";
     try {
-      await saveTag({
-        english: english.value,
-        chinese: chinese.value,
-        aliases: aliases.value,
-        category: categoryPicker.value(),
-        models: models.value,
-        recommended_weight: weight.value,
-        notes: notes.value,
-        natural: dictionary.value === "natural",
-        source: initial?.source === "bpi-assistant" ? initial.source : "user",
-        verified: initial?.verified ?? true,
-      });
+      await saveTag(fields.collect());
       close();
       await onSaved();
     } catch (saveError) {
       error.textContent = saveError.message;
     }
   });
-  setTimeout(() => (initial?.english ? chinese : english).focus(), 0);
+  setTimeout(() => fields.focus(), 0);
 }
 
 // 颜色区能配色的「来源」：内置 / 社区词库包 + 大词库 + 两个本机词库 + 未收录。
@@ -1369,6 +1385,7 @@ export {
   UPSTREAM_ARRIVED_EVENT,
   applyBpiAppearance,
   applyLanguageToDom,
+  buildTagFields,
   button,
   createSavedPrompt,
   deleteCommunityPack,
