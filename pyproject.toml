@@ -23,6 +23,6 @@ requires-comfyui = ">=0.3.40"
 # 和 __init__.py 的 WEB_DIRECTORY（key = 模块名），两者指向同一个 js/ 目录时
 # /extensions 接口会把每个 js 列两遍，前端加载两次 → "Extension already registered"。
 # 前端资源统一由 __init__.py 的 WEB_DIRECTORY = "./js" 提供（各版本 ComfyUI 都支持）。
-# 图标与横幅（可选，填好图片的公开 URL 后取消注释即可）
-# Icon = "https://..."    # 方形，≤400×400，PNG/SVG/JPG/GIF
-# Banner = "https://..."  # 21:9 横幅，PNG/SVG/JPG/GIF
+# 图标与横幅
+Icon = "https://raw.githubusercontent.com/mengshengzhijie/ComfyUI-Bilingual-Prompt-Inspector/main/assets/icon.png"      # 方形 400×400（缩过的小图）
+Banner = "https://raw.githubusercontent.com/mengshengzhijie/ComfyUI-Bilingual-Prompt-Inspector/main/assets/banner.png"  # 原图 941×941（未缩放），站点会自行裁切并加背景虚化
