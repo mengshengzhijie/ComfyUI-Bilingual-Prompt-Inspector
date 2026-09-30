@@ -26,9 +26,23 @@ include credentials or private prompt content.
 
 # 版本号与发布（改版本前必读）
 
+## 一键升版本（平时用这个就够了）
+
+    python tools/bump_version.py 1.2.16
+
+脚本会把下面 5 处全部改好，并在 `CHANGELOG.md` 顶部插入新的一节（正文留「- （待补充）」，自己填）。
+只做字符串替换，`pyproject.toml` 里的 description / Icon / Banner 原样保留。
+任何一处没匹配上就整体中止，不会留下改了一半的文件。
+
+脚本跑完之后剩下的事（commit / push / 打 tag）自己来做：
+
+    git add -A && git commit -m 'chore: 发布 v1.2.16 / Release v1.2.16'
+    git push origin main
+    git tag -a v1.2.16 -m 'v1.2.16' && git push origin v1.2.16
+
 ## 需要同步修改的 5 个文件
 
-升版本号时**这 5 处必须一起改**，漏一处就会出现"上架版本是 1.2.1、关于框还显示 1.2.0"这类不一致。
+升版本号时**这 5 处必须一起改**（即上面脚本做的事，手动改时照这张表逐项核对），漏一处就会出现"上架版本是 1.2.1、关于框还显示 1.2.0"这类不一致。
 
 | # | 文件 | 位置 | 当前写法 | 说明 |
 |---|------|------|----------|------|

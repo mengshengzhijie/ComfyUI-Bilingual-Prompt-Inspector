@@ -1,6 +1,6 @@
 [project]
 name = "prompt-translator-manager"
-version = "1.2.15"
+version = "1.2.16"
 # 与 Comfy Registry 页面上显示的描述保持一致： publish 会用这里的值覆盖网页上的手改
 description = "ComfyUI prompt node with translation and management: bilingual tag view, drag-to-reorder, temporary hiding, multiple translation services and a sidebar dictionary manager.\nComfyUI 提示节点，支持翻译和管理：双语标签视图、拖拽排序、临时隐藏、多翻译服务和侧边栏词典管理器。"
 license = { file = "LICENSE" }
