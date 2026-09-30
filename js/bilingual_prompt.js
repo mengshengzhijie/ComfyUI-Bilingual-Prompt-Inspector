@@ -2399,6 +2399,8 @@ function createPanel(node, textWidget) {
     renderSourceBar();
   });
 
+  // 快捷添加区要等面板搭完才存在，这里先占位，render 里用可选链调用就不会撞 TDZ
+  let updateQuickTarget = null;
   const render = () => {
     renderSourceBar();
     // 输出管道跟着视图一起刷：任何文本/隐藏列表变化最后都会走到 render，
@@ -2422,6 +2424,7 @@ function createPanel(node, textWidget) {
     queueLargeLookup(state.tokens);
     state.issues = analyzePromptSyntax(text, state.tokens, state.modeInfo);
     if (state.pinned !== null && !state.tokens.some((token) => token.id === state.pinned)) state.pinned = null;
+    updateQuickTarget?.();
     renderEnglishTokenView(text);
     if (hasNodeSize()) requestNodeResize();
     const personalKeys = new Set(state.data.user.map((tag) => normalizeKey(tag.english)));
@@ -2919,11 +2922,38 @@ function createPanel(node, textWidget) {
   setPlaceholder(quickInput, "Type Chinese to translate it into English tags, or type English tags to add them directly");
   const quickButton = button("Add", () => submitQuickInput("translate"), "bpi-primary");
   quickRow.append(quickInput, quickButton);
-  quickSection.append(quickHead, quickRow);
+  // 落点提示：加之前就让用户看见新标签会落在哪，省得猜
+  const quickTarget = element("div", "bpi-quick-target");
+  quickSection.append(quickHead, quickRow, quickTarget);
+  updateQuickTarget = () => {
+    const token = state.tokens.find((item) => item.id === state.pinned);
+    quickTarget.classList.toggle("bpi-quick-target-linked", Boolean(token));
+    if (token) {
+      const term = token.term ?? token.raw;
+      setText(quickTarget, `Insert after “${term}”`);
+      setTitle(quickTarget, `The new tag goes right after “${term}”`);
+    } else {
+      setText(quickTarget, "Add to the end (no tag selected)");
+      setTitle(quickTarget, "No tag is selected, so the new tag goes at the end of the prompt");
+    }
+  };
+  updateQuickTarget();
   let quickBusy = false;
+  // 快捷添加的落点：选中了标签就插到它后面（token.end 是它在原文里的结束位置），
+  // 没选中、或选中的标签已经不在文本里，就落到末尾 —— 判定跟「插入换行」按钮一致。
+  // 中文要先翻译，是异步的，所以位置只能在真正插入那一刻算：提前算的话，等翻译那几秒里
+  // 用户点了别的标签，新标签就会插到旧位置上。
+  const insertPieceAtTarget = (current, piece) => {
+    const token = state.tokens.find((item) => item.id === state.pinned);
+    const at = token?.end;
+    if (Number.isInteger(at) && at > 0 && at <= current.length) {
+      return `${current.slice(0, at)}, ${piece}${current.slice(at)}`;
+    }
+    const trimmed = current.replace(/[\s,，]+$/u, "");
+    return trimmed ? `${trimmed}, ${piece}` : piece;
+  };
   const appendToPrompt = (piece) => {
-    const current = String(textWidget.value ?? "").replace(/[\s,，]+$/u, "");
-    updateText(current ? `${current}, ${piece}` : piece);
+    updateText(insertPieceAtTarget(String(textWidget.value ?? ""), piece));
   };
   async function submitQuickInput(mode = "translate") {
     if (quickBusy) return;

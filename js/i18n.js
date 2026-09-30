@@ -283,6 +283,10 @@ const ZH = {
   "Type Chinese to translate it into English tags, or type English tags to add them directly":
     "输入中文会自动翻译为英文标签；直接输入英文则原样添加",
   Add: "添加",
+  "Insert after {}": "插到「{}」之后",
+  "Add to the end (no tag selected)": "添加到末尾（未选中标签）",
+  "The new tag goes right after {}": "新标签会插到「{}」之后",
+  "No tag is selected, so the new tag goes at the end of the prompt": "没有选中标签，新标签会添加到提示词末尾",
   "Enter Chinese or an English tag first": "请先输入中文或英文标签",
   "Added {} to the prompt": "已把「{}」添加到提示词",
   "Translating {}…": "正在翻译「{}」…",
