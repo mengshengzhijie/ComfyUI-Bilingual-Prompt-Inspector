@@ -2261,9 +2261,11 @@ function createPanel(node, textWidget) {
       // 还在文本里 → 点击就是取消隐藏；旧版工作流里不在文本的 → 点击插回原位
       const inText = state.tokens.some((token) => hiddenEntryMatches(item, token));
       const chip = element("span", "bpi-hidden-chip");
+      // 胶囊改成单行截断后长提示词会显示不全，完整内容放进 tooltip
+      const full = item.chinese ? `“${item.raw}” — “${item.chinese}”` : `“${item.raw}”`;
       setTitle(chip, inText
-        ? `Click to unhide “${item.raw}”`
-        : `Click to restore “${item.raw}” to its original position`);
+        ? `Click to unhide ${full}`
+        : `Click to restore ${full} to its original position`);
       chip.appendChild(element("span", "bpi-hidden-en", item.raw));
       if (item.chinese) chip.appendChild(element("span", "bpi-hidden-zh", item.chinese));
       chip.appendChild(element("span", "bpi-hidden-restore", "↩"));

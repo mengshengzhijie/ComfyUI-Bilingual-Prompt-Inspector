@@ -225,6 +225,8 @@ const ZH = {
   "These tags stay visible above (strikethrough) but will not enter the actual output; click a tag to unhide":
     "这些标签仍显示在上方（加删除线），但不会进入实际输出；点击标签取消隐藏",
   "Click to unhide {}": "点击取消隐藏「{}」",
+  "Click to unhide {} — {}": "点击取消隐藏「{}」——{}",
+  "Click to restore {} — {} to its original position": "点击把「{}」恢复到原位置——{}",
   "Unhide all {} hidden tags": "全部取消隐藏（{} 个）",
   "hidden ({})": "已隐藏（{}）",
   "Delete personal override and restore built-in explanation": "删除个人覆盖并恢复内置解释",
