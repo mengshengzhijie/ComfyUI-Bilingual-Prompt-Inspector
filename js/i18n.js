@@ -88,7 +88,6 @@ const ZH = {
   "Chinese explanation (read-only)": "中文解释（只读）",
   "Category table view | click tags to link; category names are not written to the prompt":
     "分类表视图 | 点击标签联动；分类名不会写入提示词",
-  "Click tags to link; select then press Delete": "点击标签联动；选中后按 Delete",
   "Enter the English prompt; after editing, it will be shown as selectable, deletable tags.":
     "输入英文提示词；编辑完成后会显示成可选中、可删除的标签。",
   "Enter a prompt in the English text box above; per-tag bilingual mapping will appear here.":
