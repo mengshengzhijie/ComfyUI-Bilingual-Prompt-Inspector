@@ -7,6 +7,7 @@ import {
   normalizeKey,
   parsePrompt,
   removePromptToken,
+  replacePromptSpan,
   replacePromptTokenWeight,
   restorePromptToken,
   validateTranslationResult,
@@ -262,6 +263,8 @@ function createPanel(node, textWidget) {
     machine: panelSyncHub.machineTranslations,
     translating: new Set(),
     pinned: null,
+    // Ctrl+点出来的多选，存 token.id；pinned 那一个恒在其中
+    selected: new Set(),
     lastText: null,
     renderTimer: null,
     modePreference: "auto",
@@ -709,13 +712,40 @@ function createPanel(node, textWidget) {
     englishTokenView.querySelector(`.bpi-english-token[data-token-id="${token.id}"]`)?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
   };
 
-  const activateToken = (token) => {
+  // Ctrl / Cmd 点是加减选；普通点落在已多选的成员上就保留整组，只把「当前」挪过去
+  // （双击编辑要靠这条保住整组，不然第一次 click 就把它打回单选了）
+  const activateToken = (token, options = {}) => {
     if (!token) return;
-    state.pinned = token.id;
+    if (options.additive) {
+      if (state.selected.has(token.id)) state.selected.delete(token.id);
+      else state.selected.add(token.id);
+      const first = state.tokens.find((item) => state.selected.has(item.id));
+      state.pinned = first ? first.id : null;
+    } else if (state.selected.has(token.id) && state.selected.size > 1) {
+      state.pinned = token.id;
+    } else {
+      state.selected.clear();
+      state.selected.add(token.id);
+      state.pinned = token.id;
+    }
     render();
     requestAnimationFrame(() => {
       revealLinkedToken(token);
     });
+  };
+
+  // 多选名单（按原文顺序）；单选时就是 pinned 那一个
+  const selectedTokenList = () => state.tokens.filter((token) => state.selected.has(token.id));
+
+  // 双击编辑的范围：选中那几个 token 在原文里的整段，中间的标签一并进来
+  const spanForEdit = (token) => {
+    const list = selectedTokenList();
+    if (!list.some((item) => item.id === token.id)) list.push(token);
+    return {
+      tokens: list.slice().sort((a, b) => a.start - b.start),
+      start: Math.min(...list.map((item) => item.start)),
+      end: Math.max(...list.map((item) => item.end)),
+    };
   };
 
   const deleteTokenOccurrence = (token) => {
@@ -1325,16 +1355,18 @@ function createPanel(node, textWidget) {
     // 这两句直接写中文：带变量 + 固定术语，走翻译层反而匹配不上，界面必须中文
     modal.appendChild(element("h3", "", `编辑标签：${token.term}`));
 
-    // Tab 切换：权重 / 颜色 / 编辑（第三个改的是整条词条，不是这行文本）
+    // 多选着进来就直接停在编辑页：权重只对单个标签有意义
+    const multiOpen = state.selected.size > 1;
+    // Tab 切换：权重与颜色（一页管两样）/ 编辑（改这行原文）/ 词条信息（改的是整条词条）
     const tabs = element("div", "bpi-editor-tabs");
-    const tabWeight = element("button", "bpi-editor-tab bpi-editor-tab-active", t("Weight"));
-    const tabColor = element("button", "bpi-editor-tab", t("Color"));
+    const tabWeight = element("button", `bpi-editor-tab${multiOpen ? "" : " bpi-editor-tab-active"}`, t("Weight / color"));
+    const tabRaw = element("button", `bpi-editor-tab${multiOpen ? " bpi-editor-tab-active" : ""}`, t("Edit"));
     const tabEdit = element("button", "bpi-editor-tab", t("Entry info"));
-    tabWeight.type = tabColor.type = tabEdit.type = "button";
-    tabs.append(tabWeight, tabColor, tabEdit);
+    tabWeight.type = tabRaw.type = tabEdit.type = "button";
+    tabs.append(tabWeight, tabRaw, tabEdit);
     modal.appendChild(tabs);
 
-    const weightPanel = element("div", "bpi-editor-panel");
+    const weightPanel = element("div", `bpi-editor-panel${multiOpen ? " bpi-hidden" : ""}`);
     // 这句直接写中文：固定术语，走翻译层反而匹配不上
     weightPanel.appendChild(element("div", "bpi-config-note", "Anima 格式：(标签:权重)"));
     const form = element("div", "bpi-form");
@@ -1356,8 +1388,11 @@ function createPanel(node, textWidget) {
     }
     weightPanel.appendChild(presets);
 
-    // 颜色 Tab：预设色块 + 自定义输入框；只在 default 模式下才看得见效果
-    const colorPanel = element("div", "bpi-editor-panel bpi-hidden");
+    // 同一页下半部分是配色：预设色块 + 自定义输入框；只在 default 模式下才看得见效果
+    // 说明跟上方的「Anima 格式」一样放在控件上面
+    weightPanel.appendChild(element("div", "bpi-editor-divider"));
+    // 双击设的自定义色优先级最低：只有「默认」模式才轮到它显示，其它模式会盖住
+    weightPanel.appendChild(element("div", "bpi-color-note", t("This color has the lowest priority: it only shows in Default mode; other color modes override it.")));
     const presetsRow = element("div", "bpi-color-presets");
     let pickedColor = state.customColors.get(token.key) || "";
     const customInput = element("input", "");
@@ -1387,7 +1422,7 @@ function createPanel(node, textWidget) {
       presetsRow.appendChild(swatch);
     }
     if (!pickedColor) noneSwatch.classList.add("bpi-color-swatch-active");
-    colorPanel.appendChild(presetsRow);
+    weightPanel.appendChild(presetsRow);
     const customRow = element("div", "bpi-color-custom");
     customRow.appendChild(element("span", "", t("Custom")));
     setPlaceholder(customInput, "#5b8a72 or rgb(91,138,114)");
@@ -1396,17 +1431,30 @@ function createPanel(node, textWidget) {
       markPicked(customInput.value.trim(), true);
     });
     customInput.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") { event.preventDefault(); applyColor(); }
+      if (event.key === "Enter") { event.preventDefault(); apply(); }
     });
     customRow.appendChild(customInput);
-    colorPanel.appendChild(customRow);
-    // 双击设的自定义色优先级最低：只有「默认」模式才轮到它显示，其它模式会盖住
-    colorPanel.appendChild(element("div", "bpi-color-note", t("This color has the lowest priority: it only shows in Default mode; other color modes override it.")));
+    weightPanel.appendChild(customRow);
+
+    // 编辑 Tab：把选中那段原文原样搬进输入框，怎么改都行，应用时整段写回提示词
+    const rawPanel = element("div", `bpi-editor-panel${multiOpen ? "" : " bpi-hidden"}`);
+    const rawSpan = spanForEdit(token);
+    const originalSlice = String(textWidget.value ?? "").slice(rawSpan.start, rawSpan.end).trim();
+    // 这三句直接写中文：本页专属说明，走翻译层反而匹配不上，界面必须中文
+    rawPanel.appendChild(element("div", "bpi-config-note", rawSpan.tokens.length > 1
+      ? `已选中 ${rawSpan.tokens.length} 个标签，下面是它们在原文里的整段（含中间的标签）`
+      : "下面是这个标签在原文里的那段文字"));
+    const rawEditor = element("textarea", "bpi-raw-editor");
+    rawEditor.value = originalSlice;
+    rawPanel.appendChild(rawEditor);
+    rawPanel.appendChild(element("div", "bpi-config-note", "怎么改都行：逗号会被重新切成标签，清空等于删除这一段；Ctrl+Enter 应用，应用后 Ctrl+Z 可撤销"));
 
     // 编辑 Tab：整套词条字段（含分类下拉），跟「新增／编辑个人标签」弹窗同一份构件。
     // 命中词库就整条带过来改；没命中就按这条标签卡起个头，存进去即新建。
     const editPanel = element("div", "bpi-editor-panel bpi-hidden");
     editPanel.appendChild(element("div", "bpi-config-note", t("Edits go to the personal dictionary and override same-name entries.")));
+    // 这句直接写中文：本页专属说明，走翻译层反而匹配不上，界面必须中文
+    editPanel.appendChild(element("div", "bpi-config-note", "英文标签在这里只读；要改提示词里的文字，请用「编辑」页。"));
     const editForm = element("div", "bpi-form");
     const editFields = buildTagFields(editForm, state.index.get(token.key) ?? {
       english: token.term,
@@ -1414,45 +1462,85 @@ function createPanel(node, textWidget) {
       models: ["general", "anima"],
       source: "user",
       verified: true,
-    }, { withTarget: false });
+      // 英文只读：改它只会另存一条词条，不会动提示词；改文字请去「编辑」页
+    }, { withTarget: false, readonlyEnglish: true });
     editPanel.appendChild(editForm);
 
-    modal.append(weightPanel, colorPanel, editPanel);
+    modal.append(weightPanel, rawPanel, editPanel);
 
     const close = () => {
       editFields.destroy();
       shade.remove();
     };
+    // 配色跟权重在同一页，所以 Apply 一次存两样；改动与否各自判断，
+    // 只想改颜色的人不会被「权重没有变化」挡住
+    const saveColor = () => {
+      const value = String(customInput.value || "").trim();
+      const previous = state.customColors.get(token.key) || "";
+      // 任何模式下都允许设置（切回 default 就显示）；显示与否由 tokenCardColor 按模式决定
+      if (!value) state.customColors.delete(token.key);
+      else {
+        const okHex = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value);
+        const okRgb = /^rgb\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\)$/.test(value);
+        if (!okHex && !okRgb) {
+          setStatus("Invalid color; use #hex or rgb(r,g,b)", "error");
+          customInput.focus();
+          return null;
+        }
+        state.customColors.set(token.key, value);
+      }
+      return value !== previous;
+    };
     const apply = () => {
-      const numeric = Number(input.value);
-      if (!input.value.trim() || !Number.isFinite(numeric) || numeric < 0 || numeric > 3) {
+      const raw = String(input.value ?? "").trim();
+      const numeric = Number(raw);
+      if (!raw || !Number.isFinite(numeric) || numeric < 0 || numeric > 3) {
         setStatus("Weight must be between 0 and 3", "error");
         input.focus();
         return;
       }
-      if (applyTokenWeight(token, numeric)) close();
-    };
-    const applyColor = () => {
-      const value = String(customInput.value || "").trim();
-      // 任何模式下都允许设置（切回 default 就显示）；显示与否由 tokenCardColor 按模式决定
-      if (!value) {
-        state.customColors.delete(token.key);
-        close();
-        render();
+      const colorChanged = saveColor();
+      if (colorChanged === null) return;
+      // 原来没写权重时留着 1 也算改动，跟合并前的行为一致（会落成 (标签:1)）
+      const weightDirty = token.weight === null || Math.abs(numeric - token.weight) > 1e-9;
+      if (weightDirty) {
+        // 改文本会顺带重绘，配色不用再刷一次
+        if (applyTokenWeight(token, numeric)) close();
         return;
       }
-      const okHex = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value);
-      const okRgb = /^rgb\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\)$/.test(value);
-      if (!okHex && !okRgb) {
-        setStatus("Invalid color; use #hex or rgb(r,g,b)", "error");
-        customInput.focus();
-        return;
-      }
-      state.customColors.set(token.key, value);
+      if (colorChanged) render();
       close();
-      render();
     };
-    // 编辑页：只改词条，不动当前这行提示词文本，所以不进撤销栈
+    // 编辑页：整段写回当前节点的提示词原文，跟手改原文一样进撤销栈
+    const applyRawEdit = () => {
+      const before = String(textWidget.value ?? "");
+      const result = replacePromptSpan(before, rawSpan.start, rawSpan.end, rawEditor.value);
+      if (!result.changed) {
+        setStatus("No content change", "ok");
+        close();
+        return;
+      }
+      const multi = rawSpan.tokens.length > 1;
+      const label = multi ? `Edit ${rawSpan.tokens.length} tags` : `Edit “${rawSpan.tokens[0].term}”`;
+      state.undoStack.push({
+        before,
+        after: result.text,
+        beforeStart: rawSpan.start,
+        beforeEnd: rawSpan.end,
+        afterCursor: result.cursor,
+        label,
+      });
+      if (state.undoStack.length > 50) state.undoStack.shift();
+      state.redoStack = [];
+      state.pinned = null;
+      updateText(result.text, result.cursor);
+      close();
+      // 状态栏这两句分开写：套一层「“…”」再塞带引号的 label 会打乱变量折叠
+      setStatus(multi
+        ? `rewrote ${rawSpan.tokens.length} tags; press Ctrl+Z to undo`
+        : `rewrote “${rawSpan.tokens[0].term}”; press Ctrl+Z to undo`, "ok");
+    };
+    // 词条页：只改词条，不动当前这行提示词文本，所以不进撤销栈
     const applyEdit = async () => {
       try {
         await saveTag(editFields.collect());
@@ -1464,20 +1552,22 @@ function createPanel(node, textWidget) {
       }
     };
     const actions = element("div", "bpi-modal-actions");
-    // 「清除权重」只对权重页有意义，切到别的页就收起来
+    // 「清除权重」只对权重页有意义，切到别的页就收起来；先存配色再清，别丢改动
     let clearWeightButton = null;
     if (token.weight !== null) {
       clearWeightButton = button("Clear weight", () => {
+        if (saveColor() === null) return;
         if (applyTokenWeight(token, null)) close();
       }, "bpi-danger");
+      clearWeightButton.hidden = multiOpen;
       actions.appendChild(clearWeightButton);
     }
     actions.append(button("Cancel", close));
     // 先声明再让 applyButton 引用它：let 有 TDZ，声明放在闭包之后会有隐患
-    let activeTab = "weight";
+    let activeTab = multiOpen ? "raw" : "weight";
     const applyButton = button(t("Apply"), () => {
-      if (activeTab === "color") applyColor();
-      else if (activeTab === "edit") applyEdit();
+      if (activeTab === "edit") applyEdit();
+      else if (activeTab === "raw") applyRawEdit();
       else apply();
     }, "bpi-primary");
     actions.append(applyButton);
@@ -1495,13 +1585,23 @@ function createPanel(node, textWidget) {
         close();
       }
     });
+    // 编辑框要能打换行，所以 Enter 不提交，只有 Ctrl/Cmd+Enter 才应用
+    rawEditor.addEventListener("keydown", (event) => {
+      if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+        event.preventDefault();
+        applyRawEdit();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        close();
+      }
+    });
     // Tab 切换：共用底部那个 Apply 按钮，按 activeTab 分派到三个动作
     const showPanel = (tab) => {
       tabWeight.classList.toggle("bpi-editor-tab-active", tab === "weight");
-      tabColor.classList.toggle("bpi-editor-tab-active", tab === "color");
+      tabRaw.classList.toggle("bpi-editor-tab-active", tab === "raw");
       tabEdit.classList.toggle("bpi-editor-tab-active", tab === "edit");
       weightPanel.classList.toggle("bpi-hidden", tab !== "weight");
-      colorPanel.classList.toggle("bpi-hidden", tab !== "color");
+      rawPanel.classList.toggle("bpi-hidden", tab !== "raw");
       editPanel.classList.toggle("bpi-hidden", tab !== "edit");
       if (clearWeightButton) clearWeightButton.hidden = tab !== "weight";
     };
@@ -1510,17 +1610,18 @@ function createPanel(node, textWidget) {
       showPanel("weight");
       setTimeout(() => { input.focus(); input.select(); }, 0);
     });
-    tabColor.addEventListener("click", () => {
-      activeTab = "color";
-      showPanel("color");
-      setTimeout(() => { customInput.focus(); customInput.select(); }, 0);
+    tabRaw.addEventListener("click", () => {
+      activeTab = "raw";
+      showPanel("raw");
+      setTimeout(() => { rawEditor.focus(); rawEditor.select(); }, 0);
     });
     tabEdit.addEventListener("click", () => {
       activeTab = "edit";
       showPanel("edit");
       setTimeout(() => editFields.focus(), 0);
     });
-    setTimeout(() => { input.focus(); input.select(); }, 0);
+    if (multiOpen) setTimeout(() => { rawEditor.focus(); rawEditor.select(); }, 0);
+    else setTimeout(() => { input.focus(); input.select(); }, 0);
   };
 
   const undoStructuredEdit = () => {
@@ -2005,7 +2106,7 @@ function createPanel(node, textWidget) {
       ? `“${token.term}” ↔ “${token.chinese}” | suspected natural language: more than 3 spaces; confirm or split it into tags`
       : token.segmentKind === "natural"
         ? `“${token.term}” ↔ “${token.chinese}” | natural language supports only whole-segment editing; can drag to reorder the whole segment`
-        : `“${token.term}” ↔ “${token.chinese}” | click to link; double-click to edit weight; select then press Delete; drag to reorder or Alt+↑/↓ to nudge`);
+        : `“${token.term}” ↔ “${token.chinese}” | click to link; Ctrl+click to select multiple; double-click to open the editor; select then press Delete; drag to reorder or Alt+↑/↓ to nudge`);
     if (canHideTokens()) {
       const tokenHidden = isTokenHidden(token);
       const hideCorner = element("span", tokenHidden ? "bpi-chip-hide bpi-chip-hidden-mark" : "bpi-chip-hide");
@@ -2038,6 +2139,8 @@ function createPanel(node, textWidget) {
     if (isTokenHidden(token)) card.classList.add("bpi-card-hidden");
     // 选中反馈给整张卡片，而不是只有英文那一行
     if (state.pinned === token.id) card.classList.add("bpi-card-linked");
+    // 多选的虚线框只在真的多选时出现，单选保持原样不打扰
+    if (state.selected.size > 1 && state.selected.has(token.id)) card.classList.add("bpi-card-multi");
     const cardColor = tokenCardColor(token);
     if (cardColor && !card.classList.contains("bpi-card-linked")) card.style.background = cardColor;
     card.append(chip, chinese);
@@ -2049,7 +2152,7 @@ function createPanel(node, textWidget) {
     card.addEventListener("click", (event) => {
       event.stopPropagation();
       if (chipClickSuppressed) return;
-      activateToken(token);
+      activateToken(token, { additive: event.ctrlKey || event.metaKey });
       englishTokenView.focus({ preventScroll: true });
     });
     card.addEventListener("dblclick", (event) => {
@@ -2057,7 +2160,8 @@ function createPanel(node, textWidget) {
       event.stopPropagation();
       if (chipClickSuppressed) return;
       window.getSelection()?.removeAllRanges();
-      activateToken(token);
+      // 已经在多选里就不重选，否则整组会被打回单选、没法一起编辑
+      if (!state.selected.has(token.id)) activateToken(token);
       englishTokenView.focus({ preventScroll: true });
       openWeightEditor(token);
     });
@@ -2424,6 +2528,18 @@ function createPanel(node, textWidget) {
     queueLargeLookup(state.tokens);
     state.issues = analyzePromptSyntax(text, state.tokens, state.modeInfo);
     if (state.pinned !== null && !state.tokens.some((token) => token.id === state.pinned)) state.pinned = null;
+    // 多选跟着 pinned 走：没有当前标签就整组清空（改文本、撤销等路径都是这么清的），
+    // 否则顺手丢掉已经不存在的 id，并保证 pinned 一定在名单里
+    if (state.pinned === null) {
+      state.selected.clear();
+    } else {
+      const liveIds = new Set(state.tokens.map((token) => token.id));
+      for (const id of [...state.selected]) if (!liveIds.has(id)) state.selected.delete(id);
+      if (!state.selected.has(state.pinned)) {
+        state.selected.clear();
+        state.selected.add(state.pinned);
+      }
+    }
     updateQuickTarget?.();
     renderEnglishTokenView(text);
     if (hasNodeSize()) requestNodeResize();
@@ -2469,6 +2585,7 @@ function createPanel(node, textWidget) {
         else if (rowSeverity === "warning") row.classList.add("bpi-has-warning");
         row.dataset.tokenId = String(token.id);
         if (state.pinned === token.id) row.classList.add("bpi-pinned");
+        if (state.selected.size > 1 && state.selected.has(token.id)) row.classList.add("bpi-row-multi");
         const englishCell = element("div", "bpi-cell bpi-en");
         if (token.status === "machine") englishCell.appendChild(buildRowCheckButton(token));
         if (state.tableFilter === "all" && canReorderTokens()) {
@@ -2643,8 +2760,8 @@ function createPanel(node, textWidget) {
         }
         if (actions.children.length) chineseCell.appendChild(actions);
         row.append(englishCell, chineseCell);
-        row.addEventListener("click", () => {
-          activateToken(token);
+        row.addEventListener("click", (event) => {
+          activateToken(token, { additive: event.ctrlKey || event.metaKey });
         });
         table.appendChild(row);
         // 当前 token 与下一个 token 之间的 gap 有换行，就在这里插一行换行行。

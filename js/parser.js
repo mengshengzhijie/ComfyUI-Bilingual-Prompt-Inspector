@@ -185,6 +185,43 @@ export function replacePromptTokenWeight(text, token, weight) {
 }
 
 /**
+ * Replace a raw slice of the prompt with whatever the user typed.
+ *
+ * Used by the "cut a piece out, edit it, paste it back" editor: the slice is a
+ * span of the ORIGINAL text (usually first-selected.start .. last-selected.end),
+ * so whatever sits between two selected tags comes along in the editor and is
+ * replaced with it.  No parsing or validation happens here — commas the user
+ * typed simply get re-split by the next parse.
+ *
+ * Clearing the slice means deleting it, so the seam is tidied to avoid leaving
+ * `a, , b` behind: the comma on the left is dropped, or the one on the right
+ * when the slice started at the very beginning.  A plain line break is left
+ * alone so multi-line layouts survive.
+ *
+ * The slice keeps its own leading / trailing whitespace in the text (that is
+ * where the space after a comma lives), so it is put back around what the user
+ * typed — otherwise the seam would come out as `a,b`.
+ */
+export function replacePromptSpan(text, start, end, replacement) {
+  const value = String(text ?? "");
+  const from = Math.max(0, Math.min(value.length, Number.isInteger(start) ? start : 0));
+  const to = Math.max(from, Math.min(value.length, Number.isInteger(end) ? end : from));
+  const span = value.slice(from, to);
+  const typed = String(replacement ?? "").trim();
+  const insert = typed ? `${span.match(/^\s*/)[0]}${typed}${span.match(/\s*$/)[0]}` : "";
+  if (span === insert) return { text: value, cursor: to, changed: false };
+  let left = value.slice(0, from);
+  let right = value.slice(to);
+  if (!insert) {
+    const trimmedLeft = left.replace(/[ \t]*,\r?\n?[ \t]*$/, "");
+    if (trimmedLeft !== left) left = trimmedLeft;
+    else right = right.replace(/^[\s,]+/, "");
+  }
+  const nextText = left + insert + right;
+  return { text: nextText, cursor: Math.min(from + insert.length, nextText.length), changed: true };
+}
+
+/**
  * Move one parsed prompt token to a new position in the token order.
  *
  * `tokens` must be the current parse of `text` (as produced by parsePrompt),

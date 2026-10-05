@@ -9,6 +9,7 @@ import {
   looksSuspiciousNatural,
   parsePrompt,
   removePromptToken,
+  replacePromptSpan,
   replacePromptTokenWeight,
   splitMixedText,
   splitNaturalText,
@@ -181,6 +182,23 @@ assert.equal(replacePromptTokenWeight(weightedSource, weightedTokens[1], null).t
 assert.equal(replacePromptTokenWeight(weightSource, weightTokens[1], 4).changed, false);
 const naturalWeightToken = parsePrompt("A woman is standing in the rain.", dictionary)[0];
 assert.equal(replacePromptTokenWeight("A woman is standing in the rain.", naturalWeightToken, 1.2).changed, false);
+
+// 「剪切出来改完再粘回去」：整段替换，段首段尾的空白是原文排版，要跟着补回去
+const spanSource = "masterpiece, best quality, solo";
+const spanTokens = parsePrompt(spanSource, dictionary);
+assert.deepEqual(replacePromptSpan(spanSource, spanTokens[1].start, spanTokens[1].end, "high quality, ultra detailed"), {
+  text: "masterpiece, high quality, ultra detailed, solo",
+  cursor: 41,
+  changed: true,
+});
+assert.equal(replacePromptSpan(spanSource, spanTokens[1].start, spanTokens[2].end, "1girl").text, "masterpiece, 1girl");
+// 清空 = 删除这一段，接缝处的逗号只留一个；开头那段没有左逗号就吃右边那个
+assert.equal(replacePromptSpan(spanSource, spanTokens[1].start, spanTokens[2].end, "").text, "masterpiece");
+assert.equal(replacePromptSpan(spanSource, spanTokens[0].start, spanTokens[0].end, "").text, "best quality, solo");
+// 原样写回不算改动
+assert.equal(replacePromptSpan(spanSource, spanTokens[1].start, spanTokens[1].end, "best quality").changed, false);
+// 换行不是逗号，删掉标签后要留下，别把多行排版压平
+assert.equal(replacePromptSpan("a\n1girl\n, b", 2, 7, "").text, "a\nb");
 
 const diagnosticSource = "1girl, solo, 2girls, standing, sitting, red hair, red_hair, (smile:abc), [open";
 const diagnosticTokens = parsePrompt(diagnosticSource, dictionary);

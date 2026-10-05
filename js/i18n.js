@@ -44,7 +44,7 @@ const ZH = {
   Discard: "丢弃",
   Resume: "继续",
   Weight: "权重",
-  Color: "颜色",
+  "Weight / color": "权重 / 颜色",
   Apply: "应用",
   Default: "默认",
   Random: "随机",
@@ -193,6 +193,8 @@ const ZH = {
   "deleted {}; press Ctrl+Z to undo": "已删除「{}」；按 Ctrl+Z 可撤销",
   "{}; press Ctrl+Z to undo": "{}；按 Ctrl+Z 可撤销",
   "moved {}; press Ctrl+Z to undo": "已移动「{}」；按 Ctrl+Z 可撤销",
+  "rewrote {}; press Ctrl+Z to undo": "已改写「{}」；按 Ctrl+Z 可撤销",
+  "rewrote {} tags; press Ctrl+Z to undo": "已改写 {} 个标签；按 Ctrl+Z 可撤销",
   "hidden {} (excluded from actual output); can be restored anytime in the hidden section; press Ctrl+Z to undo":
     "已隐藏「{}」（不计入实际输出）；随时可在隐藏区恢复；按 Ctrl+Z 可撤销",
   "restored {} to its original position; press Ctrl+Z to undo": "已把「{}」恢复到原位置；按 Ctrl+Z 可撤销",
@@ -240,8 +242,8 @@ const ZH = {
   "Aliases: {}": "别名：{}",
   "{} ↔ {} | natural language supports only whole-segment editing; can drag to reorder the whole segment":
     "「{}」↔「{}」｜自然语言只支持整段编辑；可拖动整段调整顺序",
-  "{} ↔ {} | click to link; double-click to edit weight; select then press Delete; drag to reorder or Alt+↑/↓ to nudge":
-    "「{}」↔「{}」｜点击联动；双击编辑权重；选中后按 Delete；拖动排序或 Alt+↑/↓ 微调",
+  "{} ↔ {} | click to link; Ctrl+click to select multiple; double-click to open the editor; select then press Delete; drag to reorder or Alt+↑/↓ to nudge":
+    "「{}」↔「{}」｜点击联动；Ctrl+点可多选；双击打开编辑；选中后按 Delete；拖动排序或 Alt+↑/↓ 微调",
   "Insert line break": "插入换行",
   "Delete line break": "删除换行",
   "Move line break": "移动换行",
@@ -537,6 +539,8 @@ const ZH = {
   "Save Personal": "保存为个人",
   "Reset Built-in": "重置为内置",
   "Select all ({} items)": "全选（{} 条）",
+  "Edit {}": "编辑「{}」",
+  "Edit {} tags": "编辑 {} 个标签",
   "pack:": "词包：",
   "Copied {}": "已复制 {}",
   "Processed {}": "已处理「{}」",
