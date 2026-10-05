@@ -56,7 +56,7 @@ import {
 } from "./bpi_shared.js";
 
 const NODE_NAME = "BilingualPromptInspector";
-const EXTENSION_VERSION = "v1.2.16";
+const EXTENSION_VERSION = "v1.2.18";
 const PROJECT_URL = "https://github.com/mengshengzhijie/ComfyUI-Bilingual-Prompt-Inspector";
 const COLLAPSED_WIDGET_FALLBACK_HEIGHT = 390;
 const COLLAPSED_NODE_MIN_HEIGHT = 360;
