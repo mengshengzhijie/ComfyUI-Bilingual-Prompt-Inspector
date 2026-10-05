@@ -1,3 +1,4 @@
+from .duplicate_check import dedupe_prompt, find_duplicates, format_duplicates
 from .server import announce_upstream, current_prompt_id, upstream_gate
 
 
@@ -52,3 +53,43 @@ class BilingualPromptInspector:
         released = await upstream_gate.wait(node_id, future)
         # 前端放行时带回的是节点上编辑后的文本；无人接管（无浏览器或 API 调用）时原样透传。
         return (released if isinstance(released, str) else prompt,)
+
+
+class DuplicateChecker:
+    """
+    @title: 重复检查
+    @nickname: Duplicate Check
+    @description: 检查提示词里的重复标签：节点上用淡橙色提示有几处重复，「提示词」输出直通下游，「重复项」输出可接预览任意查看。开关打开时只保留第一次出现的标签。
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "text": ("STRING", {"forceInput": True}),
+            },
+            "optional": {
+                "keep_first": ("BOOLEAN", {"default": False}),
+            },
+        }
+
+    RETURN_TYPES = ("STRING", "STRING")
+    RETURN_NAMES = ("提示词", "重复项")
+    FUNCTION = "check"
+    CATEGORY = "text/prompt"
+    DESCRIPTION = "Experimental duplicate tag checker: flags repeated tags with a soft amber tint, passes the prompt through, and exposes the duplicated tags for preview."
+
+    def check(self, text, keep_first=False):
+        value = str(text or "")
+        report = find_duplicates(value)
+        # 开关没开就原样直通，连格式都不重写，免得改了用户没要求改的东西。
+        prompt = dedupe_prompt(value) if keep_first else value
+        # ui 里每个值都必须是列表：execution.py 会把它们展开拼接成一个列表，
+        # 传裸 int 会直接抛 "'int' object is not iterable"。
+        return {
+            "ui": {
+                "duplicate_count": [report["extra"]],
+                "duplicate_terms": [item["term"] for item in report["terms"]],
+            },
+            "result": (prompt, format_duplicates(report)),
+        }

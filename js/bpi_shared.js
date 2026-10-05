@@ -84,6 +84,17 @@ async function postUpstreamAction(action, nodeId, text = null) {
   return result;
 }
 
+async function checkDuplicateTags(text) {
+  const response = await bpiFetch(`${API_ROOT}/duplicate-check`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text: String(text ?? "") }),
+  });
+  const result = await response.json().catch(() => null);
+  if (!response.ok || !result?.success) throw new Error(result?.error || `Duplicate check failed (${response.status})`);
+  return result.data;
+}
+
 function loadPreferences() {
   try {
     return normalizePreferences(JSON.parse(localStorage.getItem(PREFERENCES_KEY) || "{}"));
@@ -1410,6 +1421,7 @@ export {
   applyLanguageToDom,
   buildTagFields,
   button,
+  checkDuplicateTags,
   createSavedPrompt,
   deleteCommunityPack,
   deletePersonalTag,
