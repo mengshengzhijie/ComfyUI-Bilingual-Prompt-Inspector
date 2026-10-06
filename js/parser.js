@@ -720,6 +720,23 @@ const CONFLICT_GROUPS = [
   { left: ["full body"], right: ["extreme close-up", "close-up"], label: "Full body vs close-up" },
 ];
 
+// 重复分组：按 token.key 聚拢，只保留出现 2 次以上的组，组内按原文顺序。
+// 问题行的「重复标签」提示和「唯一」开关都从这里取数，两边口径不会打架。
+// 口径沿用 key：忽略大小写、连续空格、强调括号与权重（(1girl:1.3) ≡ 1girl）；
+// 下划线按一个空格算，所以 sm_ile ≠ smile。BREAK 与 <lora:…> 不算重复标签。
+export function duplicateGroups(tokens) {
+  const groups = new Map();
+  for (const token of tokens ?? []) {
+    if (!token.key || token.syntax !== "tag") continue;
+    const list = groups.get(token.key) ?? [];
+    list.push(token);
+    groups.set(token.key, list);
+  }
+  return [...groups]
+    .filter(([, list]) => list.length > 1)
+    .map(([key, list]) => ({ key, tokens: list }));
+}
+
 export function analyzePromptSyntax(text, tokens, modeInfo = detectInputMode(text)) {
   const value = String(text ?? "");
   const issues = bracketIssues(value);
@@ -739,8 +756,8 @@ export function analyzePromptSyntax(text, tokens, modeInfo = detectInputMode(tex
       issues.push(issue("warning", "unusual-weight", `Weight ${token.weight} outside common range 0–3`, [token.key]));
     }
   }
-  for (const [key, matches] of keys) {
-    if (matches.length > 1) issues.push(issue("warning", "duplicate", `Duplicate tag: “${matches[0].term}”`, [key]));
+  for (const { key, tokens: matches } of duplicateGroups(tokens ?? [])) {
+    issues.push(issue("warning", "duplicate", `Duplicate tag: “${matches[0].term}”`, [key]));
   }
 
   const present = new Set(keys.keys());

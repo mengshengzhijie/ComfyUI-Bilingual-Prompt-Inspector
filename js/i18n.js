@@ -643,6 +643,27 @@ const ZH = {
   "Bracket mismatch: extra or misplaced {}": "括号不匹配：多了或位置不对的 {}",
   "Unclosed bracket: missing {}": "括号未闭合：缺少 {}",
   "Duplicate tag: {}": "重复标签：{}",
+  // 重复标签的「唯一」开关 + 重复栏
+  Unique: "唯一",
+  "Keep only the first {} in the actual output; later occurrences stay here with a strikethrough":
+    "只让第一次出现的「{}」进入实际输出；其余照常显示在界面上（划线）",
+  "Tags repeated in this prompt; click a chip to step through its occurrences, double-click to delete the one you stepped to; click empty space here to clear the selection":
+    "提示词里重复的标签：单击胶囊依次跳到每一次出现，双击删掉跳到的那一处；点这里空白处取消选中",
+  "{} appears {} times; click to jump to the first one": "「{}」出现了 {} 次；单击跳到第一次",
+  "{} appears {} times; {} is on, only the first reaches the actual output": "「{}」出现了 {} 次；已开「{}」：只有第一次进入实际输出",
+  "{} appears {} times; now at {}, click for the next one, double-click to delete it":
+    "「{}」出现了 {} 次；当前第 {} 处，单击跳下一处，双击删除这一处",
+  "{} occurrence {} of {}; click again for the next one, double-click to delete it":
+    "「{}」第 {} / {} 处；再点一次跳下一处，双击删除这一处",
+  "Click a duplicate chip once to step to it before double-clicking to delete":
+    "先单击一次重复胶囊定位到某一处，再双击才会删除",
+  "{} now unique: only the first occurrence enters the actual output; press Ctrl+Z to undo":
+    "「{}」已设为唯一：只有第一次出现进入实际输出；按 Ctrl+Z 可撤销",
+  "{} no longer unique: all occurrences enter the actual output again; press Ctrl+Z to undo":
+    "「{}」已取消唯一：所有重复项重新进入实际输出；按 Ctrl+Z 可撤销",
+  "Query: {} | {} is on: only the first occurrence reaches the actual output": "查询「{}」｜已开「{}」：只有第一次出现进入实际输出",
+  "keep only the first {}": "只保留第一次出现的「{}」",
+  "restore duplicates of {}": "恢复「{}」的重复项",
   "Invalid weight format: {}": "权重格式无效：{}",
   "Full-width separator detected; Anima tag flow usually uses ASCII commas": "检测到全角分隔符；Anima 标签流一般用半角逗号",
   "Consecutive commas or empty tags detected": "检测到连续逗号或空标签",

@@ -3,6 +3,7 @@ import {
   analyzePromptSyntax,
   buildDictionaryIndex,
   detectInputMode,
+  duplicateGroups,
   movePromptToken,
   normalizeKey,
   parsePrompt,
@@ -151,6 +152,9 @@ function createPanel(node, textWidget) {
   setPlaceholder(englishEditor, "Enter the English prompt; after editing, it will be shown as selectable, deletable tags.");
   const englishHiddenBar = element("div", "bpi-hidden-bar bpi-hidden");
   setTitle(englishHiddenBar, "Hidden tags will not enter the actual output");
+  // 重复标签栏：紧跟在已隐藏栏下面，每个重复标签一个胶囊
+  const englishDupBar = element("div", "bpi-dup-bar bpi-hidden");
+  setTitle(englishDupBar, "Tags repeated in this prompt; click a chip to step through its occurrences, double-click to delete the one you stepped to; click empty space here to clear the selection");
   // 上游输入条：只在节点接到上游 prompt 连线时出现
   const sourceBar = element("div", "bpi-source-bar bpi-hidden");
   // 注意别叫 sourceLabel：模块顶层已有同名函数（标签来源文案），会把它遮蔽掉
@@ -176,7 +180,7 @@ function createPanel(node, textWidget) {
   }, "bpi-primary");
   const cancelButton = button("Discard", () => cancelUpstreamWait());
   sourceBar.append(sourceCaption, sourceToggleLabel, sourceSelect, sourceState, resumeButton, cancelButton);
-  englishSection.append(sourceBar, englishHead, englishTokenView, englishHiddenBar, englishEditor);
+  englishSection.append(sourceBar, englishHead, englishTokenView, englishHiddenBar, englishDupBar, englishEditor);
   const detailsBody = element("div", "bpi-details-body");
   const detailsHiddenBar = element("div", "bpi-hidden-bar bpi-hidden");
   const toolbar = element("div", "bpi-toolbar");
@@ -277,6 +281,12 @@ function createPanel(node, textWidget) {
     filterButtons: new Map(),
     // 表格里勾选待入库的机器翻译词条，只存 token.key
     batchSelected: new Set(),
+    // 重复分组（render 里重算）与每个 token 在组里的次序：token.id → { rank, total }
+    duplicateGroups: [],
+    duplicateRanks: new Map(),
+    // 重复栏当前定位到的那一处：{ key, index }；-1 表示还没定位过
+    dupFocus: null,
+    dupFocusId: null,
     searchMatches: [],
     searchIndex: -1,
     largeCache: new Map(),
@@ -969,6 +979,37 @@ function createPanel(node, textWidget) {
   const hiddenIndexOf = (token) => getHiddenTags().findIndex((item) => hiddenEntryMatches(item, token));
   const isTokenHidden = (token) => hiddenIndexOf(token) >= 0;
 
+  // ---- Duplicate tags ------------------------------------------------------
+  // 重复标签走两条互不干扰的线路：
+  //   1. 「唯一」开关（问题行里）：按 key 记进 node.properties.bpiUniqueKeys，
+  //      打开后第 2 次及以后出现的那几次不进实际输出，界面照常显示（划线）。
+  //      和隐藏标记一样按节点存，跟着工作流一起保存/读取。
+  //   2. 英文标签区下面的「重复」栏：单击依次跳到每一次出现（标红 + 联动选中），
+  //      已经定位过再双击就删掉当前这一处。
+  const getUniqueKeys = () => {
+    if (!node.properties || typeof node.properties !== "object") node.properties = {};
+    if (!Array.isArray(node.properties.bpiUniqueKeys)) node.properties.bpiUniqueKeys = [];
+    return node.properties.bpiUniqueKeys;
+  };
+  const setUniqueKeys = (nextList) => {
+    if (!node.properties || typeof node.properties !== "object") node.properties = {};
+    node.properties.bpiUniqueKeys = Array.isArray(nextList) ? nextList : [];
+  };
+  const isUniqueKey = (key) => Boolean(key) && getUniqueKeys().includes(key);
+
+  // 同一个标签的第 2 次及以后出现，被「唯一」开关排除在输出之外
+  const isTokenSuppressed = (token) => {
+    const rank = state.duplicateRanks.get(token.id);
+    return Boolean(rank && rank.rank > 0 && isUniqueKey(token.key));
+  };
+
+  // 重复栏当前标红的那一处所在的 token（跨 render 只记 key + 第几次，够稳）
+  const dupFocusToken = () => {
+    if (!state.dupFocus) return null;
+    const group = state.duplicateGroups.find((item) => item.key === state.dupFocus.key);
+    return group?.tokens[state.dupFocus.index] ?? null;
+  };
+
   // ---- 输出管道 ------------------------------------------------------------
   // 隐藏的标签留在 text 里（界面上划线显示，照常拖动/改色/改权重），真正输出
   // 走两个隐藏 widget：effective_text = 剔除隐藏标签后的文本，use_effective = true。
@@ -984,6 +1025,20 @@ function createPanel(node, textWidget) {
       for (;;) {
         const tokens = parsePrompt(out, state.index, state.machine, { mode: state.modePreference });
         const target = tokens.find((token) => hidden.some((item) => hiddenEntryMatches(item, token)));
+        if (!target) break;
+        const step = removePromptToken(out, target);
+        if (!step.changed) break;
+        out = step.text;
+      }
+    }
+    // 「唯一」再去重：同一个 key 只留第一次出现的那一次
+    const unique = getUniqueKeys();
+    if (unique.length) {
+      for (;;) {
+        const tokens = parsePrompt(out, state.index, state.machine, { mode: state.modePreference });
+        const target = duplicateGroups(tokens)
+          .filter((group) => unique.includes(group.key))
+          .flatMap((group) => group.tokens.slice(1))[0];
         if (!target) break;
         const step = removePromptToken(out, target);
         if (!step.changed) break;
@@ -1632,6 +1687,7 @@ function createPanel(node, textWidget) {
     state.pinned = null;
     if (typeof entry.beforeCategoryView === "boolean") state.categoryView = entry.beforeCategoryView;
     if (Array.isArray(entry.hiddenBefore)) setHiddenTags(entry.hiddenBefore);
+    if (Array.isArray(entry.uniqueBefore)) setUniqueKeys(entry.uniqueBefore);
     updateText(entry.before, entry.beforeStart);
     setStatus(`Undone: “${entry.label}”`, "ok");
     return true;
@@ -1645,6 +1701,7 @@ function createPanel(node, textWidget) {
     state.pinned = null;
     if (typeof entry.afterCategoryView === "boolean") state.categoryView = entry.afterCategoryView;
     if (Array.isArray(entry.hiddenAfter)) setHiddenTags(entry.hiddenAfter);
+    if (Array.isArray(entry.uniqueAfter)) setUniqueKeys(entry.uniqueAfter);
     updateText(entry.after, entry.afterCursor);
     setStatus(`Redone: “${entry.label}”`, "ok");
     return true;
@@ -2137,12 +2194,15 @@ function createPanel(node, textWidget) {
     const card = element("span", "bpi-token-card");
     // 隐藏的卡：划线 + 灰化褪色，但拖动/双击改权重/改色都照常
     if (isTokenHidden(token)) card.classList.add("bpi-card-hidden");
+    // 「唯一」排除掉的第 2 次及以后出现：和隐藏一样划线褪色，但仍留在这里能操作
+    if (isTokenSuppressed(token)) card.classList.add("bpi-dup-off");
+    if (state.dupFocusId === token.id) card.classList.add("bpi-dup-hit");
     // 选中反馈给整张卡片，而不是只有英文那一行
     if (state.pinned === token.id) card.classList.add("bpi-card-linked");
     // 多选的虚线框只在真的多选时出现，单选保持原样不打扰
     if (state.selected.size > 1 && state.selected.has(token.id)) card.classList.add("bpi-card-multi");
     const cardColor = tokenCardColor(token);
-    if (cardColor && !card.classList.contains("bpi-card-linked")) card.style.background = cardColor;
+    if (cardColor && !card.classList.contains("bpi-card-linked") && !card.classList.contains("bpi-dup-hit")) card.style.background = cardColor;
     card.append(chip, chinese);
     // 拖拽也挂在整个方块上：抓中文行一样能拖，不必精确抓英文。
     // 注意必须放在 card 声明之后：在 const card 之前引用它会触发 TDZ 报错，
@@ -2384,6 +2444,126 @@ function createPanel(node, textWidget) {
     container.appendChild(restoreAll);
   };
 
+  // 问题行里的「唯一」开关：打开后只有第一次出现进入实际输出。文本本身不动，
+  // 所以 undo 条目 before === after，和隐藏/恢复一样只回滚记的那份名单。
+  const toggleUniqueKey = (key, on, term) => {
+    const keys = getUniqueKeys();
+    const after = on ? [...keys.filter((item) => item !== key), key] : keys.filter((item) => item !== key);
+    pushHistoryWithHidden({
+      before: String(textWidget.value ?? ""),
+      after: String(textWidget.value ?? ""),
+      beforeStart: 0,
+      beforeEnd: 0,
+      afterCursor: 0,
+      label: on ? `keep only the first “${term}”` : `restore duplicates of “${term}”`,
+      uniqueBefore: keys.slice(),
+      uniqueAfter: after,
+    });
+    setUniqueKeys(after);
+    render();
+    setStatus(on
+      ? `“${term}” now unique: only the first occurrence enters the actual output; press Ctrl+Z to undo`
+      : `“${term}” no longer unique: all occurrences enter the actual output again; press Ctrl+Z to undo`, "ok");
+  };
+
+  const buildUniqueToggle = (key, group) => {
+    const term = group?.tokens[0]?.term ?? key;
+    const label = element("label", "bpi-source-toggle bpi-unique-toggle");
+    const box = element("input");
+    box.type = "checkbox";
+    box.checked = isUniqueKey(key);
+    label.append(box, element("span", "", "Unique"));
+    setTitle(label, `Keep only the first “${term}” in the actual output; later occurrences stay here with a strikethrough`);
+    box.addEventListener("click", (event) => event.stopPropagation());
+    box.addEventListener("change", () => toggleUniqueKey(key, box.checked, term));
+    return label;
+  };
+
+  // 重复栏里单击：从「没定位」到第 1 处，之后每次往后挪一处，到底就回第 1 处。
+  // 顺带 activateToken 把提示词那边联动选中，便于直接改权重/拖动。
+  const focusNextDuplicate = (key) => {
+    const group = state.duplicateGroups.find((item) => item.key === key);
+    if (!group) { state.dupFocus = null; return; }
+    const current = state.dupFocus?.key === key ? state.dupFocus.index : -1;
+    const next = current < 0 ? 0 : (current + 1) % group.tokens.length;
+    state.dupFocus = { key, index: next };
+    const token = group.tokens[next];
+    activateToken(token);
+    setStatus(`“${token.term}” occurrence ${next + 1} of ${group.tokens.length}; click again for the next one, double-click to delete it`, "ok");
+  };
+
+  // 双击删掉当前定位到的那一处；没先单击定位过就不动，避免手滑删内容
+  const deleteFocusedDuplicate = (key) => {
+    if (state.dupFocus?.key !== key) {
+      setStatus("Click a duplicate chip once to step to it before double-clicking to delete", "error");
+      return;
+    }
+    const group = state.duplicateGroups.find((item) => item.key === key);
+    const token = group?.tokens[state.dupFocus.index];
+    if (!token) return;
+    state.dupFocus = null;
+    deleteTokenOccurrence(token);
+  };
+
+  // 英文标签区下面的「重复」栏：单击胶囊会顺带选中提示词里那一个标签，所以它的
+  // 空白处也得像提示词那样「点一下就取消」，否则选中了就没法干净地退出来。
+  const clearDuplicateFocus = () => {
+    state.dupFocus = null;
+    state.dupFocusId = null;
+  };
+
+  const renderDupBar = (container) => {
+    if (!container) return;
+    const groups = state.duplicateGroups;
+    container.replaceChildren();
+    if (!groups.length) {
+      container.classList.add("bpi-hidden");
+      return;
+    }
+    container.classList.remove("bpi-hidden");
+    container.appendChild(element("span", "bpi-dup-label", `Duplicates ${groups.length}`));
+    for (const group of groups) {
+      const armed = state.dupFocus?.key === group.key;
+      const term = group.tokens[0].term;
+      const unique = isUniqueKey(group.key);
+      const chip = element("span", `bpi-dup-chip${armed ? " bpi-dup-armed" : ""}${unique ? " bpi-dup-chip-unique" : ""}`);
+      chip.appendChild(element("span", "bpi-dup-en", term));
+      // 定位到某一处之后，数字位置直接换成「第几处 / 共几处」，不再显示 ×N
+      if (armed) chip.appendChild(element("span", "bpi-dup-index", `${state.dupFocus.index + 1}/${group.tokens.length}`));
+      else chip.appendChild(element("span", "bpi-dup-count", `×${group.tokens.length}`));
+      if (unique) chip.appendChild(element("span", "bpi-dup-flag", "Unique"));
+      setTitle(chip, armed
+        ? `“${term}” appears ${group.tokens.length} times; now at ${state.dupFocus.index + 1}, click for the next one, double-click to delete it`
+        : unique
+          ? `“${term}” appears ${group.tokens.length} times; “Unique” is on, only the first reaches the actual output`
+          : `“${term}” appears ${group.tokens.length} times; click to jump to the first one`);
+      // 双击会先送两个 click：把第二个吃掉，不然第 2 下会把定位挪走再删。
+      let clickTimer = null;
+      chip.addEventListener("click", (event) => {
+        event.stopPropagation();
+        if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; return; }
+        clickTimer = setTimeout(() => { clickTimer = null; focusNextDuplicate(group.key); }, 220);
+      });
+      chip.addEventListener("dblclick", (event) => {
+        event.stopPropagation();
+        if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; }
+        deleteFocusedDuplicate(group.key);
+      });
+      container.appendChild(chip);
+    }
+    // 末尾撑一段空白：胶囊排满时也有地方点得到，不然就取消不掉选中了
+    container.appendChild(element("span", "bpi-dup-space"));
+  };
+
+  // 点重复栏的空白处 = 取消选中（胶囊自己会吃掉 click，所以只有空白处能走到这）
+  englishDupBar.addEventListener("click", (event) => {
+    if (event.target !== englishDupBar && !event.target.classList?.contains("bpi-dup-space")) return;
+    if (state.pinned === null && !state.dupFocus) return;
+    state.pinned = null;
+    clearDuplicateFocus();
+    render();
+  });
+
   const upstreamSettings = () => {
     const stored = node.properties?.bpiUpstream ?? {};
     return {
@@ -2526,6 +2706,18 @@ function createPanel(node, textWidget) {
       };
     });
     queueLargeLookup(state.tokens);
+    // 重复分组要在渲染两个视图之前算好，标签区和明细表都吃这份数据
+    state.duplicateGroups = duplicateGroups(state.tokens);
+    state.duplicateRanks = new Map();
+    for (const group of state.duplicateGroups) {
+      group.tokens.forEach((token, index) => state.duplicateRanks.set(token.id, { rank: index, total: group.tokens.length }));
+    }
+    // 定位过的那一处被删了 / 文本换了不够那么多处了，就把定位作废
+    if (state.dupFocus) {
+      const group = state.duplicateGroups.find((item) => item.key === state.dupFocus.key);
+      if (!group || state.dupFocus.index >= group.tokens.length) state.dupFocus = null;
+    }
+    state.dupFocusId = dupFocusToken()?.id ?? null;
     state.issues = analyzePromptSyntax(text, state.tokens, state.modeInfo);
     if (state.pinned !== null && !state.tokens.some((token) => token.id === state.pinned)) state.pinned = null;
     // 多选跟着 pinned 走：没有当前标签就整组清空（改文本、撤销等路径都是这么清的），
@@ -2563,9 +2755,16 @@ function createPanel(node, textWidget) {
       }
     }
     issuesPanel.replaceChildren();
-    for (const item of state.issues.slice(0, 12)) {
+    // 重复标签要带「唯一」开关，不能被 12 条的显示上限挤掉，所以排到最前面
+    const duplicateIssues = state.issues.filter((item) => item.code === "duplicate");
+    const otherIssues = state.issues.filter((item) => item.code !== "duplicate");
+    for (const item of [...duplicateIssues, ...otherIssues].slice(0, Math.max(12, duplicateIssues.length))) {
       const issueRow = element("div", "bpi-issue", item.message);
       issueRow.dataset.severity = item.severity;
+      const duplicateKey = item.code === "duplicate" ? item.tokenKeys?.[0] : null;
+      if (duplicateKey) {
+        issueRow.appendChild(buildUniqueToggle(duplicateKey, state.duplicateGroups.find((group) => group.key === duplicateKey)));
+      }
       issuesPanel.appendChild(issueRow);
     }
     issuesPanel.classList.toggle("bpi-visible", state.issues.length > 0);
@@ -2579,7 +2778,10 @@ function createPanel(node, textWidget) {
         const row = element("div", `bpi-row bpi-${token.status}`);
         if (token.suspectedNatural) row.classList.add("bpi-suspected-natural");
         const tokenHidden = isTokenHidden(token);
+        const tokenSuppressed = isTokenSuppressed(token);
         if (tokenHidden) row.classList.add("bpi-row-hidden");
+        if (tokenSuppressed) row.classList.add("bpi-dup-off");
+        if (state.dupFocusId === token.id) row.classList.add("bpi-dup-hit");
         const rowSeverity = errorsByKey.get(token.key);
         if (rowSeverity === "error") row.classList.add("bpi-has-error");
         else if (rowSeverity === "warning") row.classList.add("bpi-has-warning");
@@ -2595,8 +2797,10 @@ function createPanel(node, textWidget) {
           englishCell.appendChild(buildRowHideButton(token));
         }
         const chineseCell = element("div", "bpi-cell bpi-zh");
-        const englishText = element("span", tokenHidden ? "bpi-hidden-term" : "", token.raw);
-        setTitle(englishText, `Query: “${token.term}”${token.weight === null ? "" : ` | weight: ${token.weight}`}`);
+        const englishText = element("span", tokenHidden || tokenSuppressed ? "bpi-hidden-term" : "", token.raw);
+        setTitle(englishText, tokenSuppressed
+          ? `Query: “${token.term}” | “Unique” is on: only the first occurrence reaches the actual output`
+          : `Query: “${token.term}”${token.weight === null ? "" : ` | weight: ${token.weight}`}`);
         englishText.addEventListener("dblclick", (event) => {
           event.stopPropagation();
           setEnglishEditing(true);
@@ -2782,6 +2986,7 @@ function createPanel(node, textWidget) {
     for (const [filter, control] of state.filterButtons) control.classList.toggle("bpi-filter-active", filter === state.tableFilter);
     renderHiddenBar(detailsHiddenBar);
     renderHiddenBar(englishHiddenBar);
+    renderDupBar(englishDupBar);
   };
 
   const scheduleRender = (immediate = false) => {
@@ -3149,6 +3354,8 @@ function createPanel(node, textWidget) {
     // 分行之后空白处的点击目标是行容器，也算点在空白处
     if (event.target !== englishTokenView && !event.target.classList?.contains("bpi-token-line")) return;
     state.pinned = null;
+    // 重复栏里定位到的那一处属于同一个选中语义，一起退掉，不然红标记会一直挂着
+    clearDuplicateFocus();
     render();
   });
   const bindMirrorAction = (control, action) => control.addEventListener("click", (event) => {
