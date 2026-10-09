@@ -26,6 +26,7 @@ from .assistant_store import (
     translation_direction,
 )
 from .dictionary_store import DictionaryStore, normalize_key
+from .duplicate_check import find_duplicates
 from .saved_prompt_store import (
     MAX_IMAGE_BYTES,
     SavedPromptStore,
@@ -854,3 +855,21 @@ def collect_model_names():
 async def list_model_names(_request):
     # 首次调用要遍历 models 目录，放到线程里免得卡住事件循环
     return web.json_response({"success": True, "data": await asyncio.to_thread(collect_model_names)})
+
+
+# ---------------------------------------------------------------------------
+# 重复检查：节点上输入一变就要立刻提示，和节点执行走同一个 find_duplicates
+# ---------------------------------------------------------------------------
+
+
+@protected_route("post", "/bpi/duplicate-check")
+async def check_duplicate_tags(request):
+    try:
+        payload = await _read_json(request)
+    except (ValueError, web.HTTPBadRequest) as error:
+        return error_response(error)
+    report = find_duplicates(payload.get("text") or "")
+    return web.json_response(
+        {"success": True, "data": {"count": report["extra"], "terms": report["terms"]}},
+        headers={"Cache-Control": "no-store"},
+    )

@@ -578,6 +578,8 @@ const ZH = {
   "Added {}": "新增 {}",
   "Conflicts {}": "冲突 {}",
   "Duplicates {}": "重复 {}",
+  "No duplicates": "无重复",
+  "Waiting for prompt": "等待提示词",
   "Invalid {}": "无效 {}",
   "Import complete: added {}, overwrote {}, skipped {} | auto-backed up": "导入完成：新增 {}、覆盖 {}、跳过 {}｜已自动备份",
   "Import complete: {} added": "导入完成：新增 {} 条",
