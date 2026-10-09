@@ -2164,9 +2164,12 @@ function createPanel(node, textWidget) {
       : token.segmentKind === "natural"
         ? `“${token.term}” ↔ “${token.chinese}” | natural language supports only whole-segment editing; can drag to reorder the whole segment`
         : `“${token.term}” ↔ “${token.chinese}” | click to link; Ctrl+click to select multiple; double-click to open the editor; select then press Delete; drag to reorder or Alt+↑/↓ to nudge`);
+    // 隐藏角标挂在整张卡片上（不是英文那一行）：定位基准是卡片方框，
+    // 角标才会落在方框的右上角，而不是跟着英文行的宽度跑到中间去。
+    let hideCorner = null;
     if (canHideTokens()) {
       const tokenHidden = isTokenHidden(token);
-      const hideCorner = element("span", tokenHidden ? "bpi-chip-hide bpi-chip-hidden-mark" : "bpi-chip-hide");
+      hideCorner = element("span", tokenHidden ? "bpi-chip-hide bpi-chip-hidden-mark" : "bpi-chip-hide");
       hideCorner.appendChild(tokenHidden ? buildEyeOffIcon() : buildEyeIcon());
       setTitle(hideCorner, tokenHidden
         ? `Unhide “${token.raw}”: back into the actual output`
@@ -2178,7 +2181,6 @@ function createPanel(node, textWidget) {
         if (isTokenHidden(token)) unhideToken(token);
         else hideToken(token);
       });
-      chip.appendChild(hideCorner);
     }
     if (state.pinned === token.id && ["tags", "mixed"].includes(state.modeInfo.mode) && token.segmentKind !== "natural") {
       const remove = element("span", "bpi-mirror-delete", "×");
@@ -2204,6 +2206,7 @@ function createPanel(node, textWidget) {
     const cardColor = tokenCardColor(token);
     if (cardColor && !card.classList.contains("bpi-card-linked") && !card.classList.contains("bpi-dup-hit")) card.style.background = cardColor;
     card.append(chip, chinese);
+    if (hideCorner) card.appendChild(hideCorner);
     // 拖拽也挂在整个方块上：抓中文行一样能拖，不必精确抓英文。
     // 注意必须放在 card 声明之后：在 const card 之前引用它会触发 TDZ 报错，
     // 一报错整个 render 中断，标签区会整个空白。
