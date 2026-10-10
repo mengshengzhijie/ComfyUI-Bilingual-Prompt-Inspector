@@ -1729,9 +1729,32 @@ function createPanel(node, textWidget) {
     state.textareaListeners = [];
   };
 
+  // 把当前文本解析成标签列表。render 用它，插入标签后也立刻刷一次：
+  // 连着插入（双击、回车连按）时下一次要拿新坐标，否则会拿着上一次的
+  // 位置去切已经变长的文本，落点就偏了。
+  const parseTokens = (text) => parsePrompt(text, state.index, state.machine, { mode: state.modePreference }).map((token) => {
+    const override = state.localOverrides.get(token.key);
+    if (!override) return token;
+    return {
+      ...token,
+      chinese: override.text,
+      source: override.source,
+      status: "session",
+      confidence: "medium",
+      confidenceLabel: "Medium · session-only",
+    };
+  });
+
   const insertEnglish = (english, keepSearch = false) => {
     const current = String(textWidget.value ?? "");
-    const start = state.englishEditing ? (englishEditor.selectionStart ?? current.length) : current.length;
+    // 标签视图下没有光标可依，落点跟底部「快捷添加」一致：插到当前选中标签后面，
+    // 没选中标签才落到末尾。侧边栏「标签管理」复用的就是这份明细表，所以那边
+    // 搜词库点结果也是走这里。
+    const anchor = state.englishEditing ? null : state.tokens.find((item) => item.id === state.pinned);
+    const at = anchor?.end;
+    const start = state.englishEditing
+      ? (englishEditor.selectionStart ?? current.length)
+      : (Number.isInteger(at) && at > 0 && at <= current.length ? at : current.length);
     const end = state.englishEditing ? (englishEditor.selectionEnd ?? start) : start;
     const before = current.slice(0, start);
     const after = current.slice(end);
@@ -1739,7 +1762,16 @@ function createPanel(node, textWidget) {
     const needsSuffix = after.trim() && !/^[\s,\n]/.test(after);
     const insertion = `${needsPrefix ? ", " : ""}${english}${needsSuffix ? ", " : ""}`;
     const nextText = before + insertion + after;
+    // 新标签落在选中标签之后，也就是原来排在它前面的那些标签之后：加完把它设为选中，
+    // 连着加几个才会依次往后排，不用每次重新点一遍落点。
+    const nextId = state.englishEditing ? null : state.tokens.filter((token) => token.end <= start).length;
     updateText(nextText, state.englishEditing ? start + insertion.length : null);
+    if (nextId !== null) {
+      state.tokens = parseTokens(nextText);
+      state.pinned = nextId;
+      state.selected.clear();
+      state.selected.add(nextId);
+    }
     rememberRecent(english);
     if (!keepSearch) search.value = "";
     renderSearch();
@@ -2696,18 +2728,7 @@ function createPanel(node, textWidget) {
     const text = String(textWidget.value ?? "");
     state.lastText = text;
     state.modeInfo = detectInputMode(text, state.modePreference);
-    state.tokens = parsePrompt(text, state.index, state.machine, { mode: state.modePreference }).map((token) => {
-      const override = state.localOverrides.get(token.key);
-      if (!override) return token;
-      return {
-        ...token,
-        chinese: override.text,
-        source: override.source,
-        status: "session",
-        confidence: "medium",
-        confidenceLabel: "Medium · session-only",
-      };
-    });
+    state.tokens = parseTokens(text);
     queueLargeLookup(state.tokens);
     // 重复分组要在渲染两个视图之前算好，标签区和明细表都吃这份数据
     state.duplicateGroups = duplicateGroups(state.tokens);
