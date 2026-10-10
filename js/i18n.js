@@ -146,6 +146,10 @@ const ZH = {
   "Personal dictionary": "个人词库",
   "No inspector node on canvas": "画布上没有检查器节点",
   "No matching items under the current filter.": "当前筛选条件下没有匹配项。",
+  "Find in the current prompt": "在当前提示词里查找",
+  "Clear search": "清除查找",
+  "No tag matches {}": "没有匹配“…”的标签",
+  "Filter the detail list by keyword; matches the English original or the Chinese explanation; the prompt itself never changes": "按关键词筛明细表；英文原文和中文解释都参与匹配，提示词本身不会变",
   "No unknown tags currently": "当前没有未收录标签",
   "Edit directly": "直接编辑",
 

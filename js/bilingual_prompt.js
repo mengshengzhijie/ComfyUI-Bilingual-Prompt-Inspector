@@ -201,6 +201,21 @@ function createPanel(node, textWidget) {
   // 机器翻译批量入库操作栏：只在表格里出现机器翻译词条时才显示（详见 renderMachineBatchBar）
   const machineBatchBar = element("div", "bpi-filters bpi-batch-bar bpi-hidden");
   const table = element("div", "bpi-table");
+  // 明细表查找：只筛视图，不动提示词。视觉上跟表格扣成一块（上圆角、无下边框），
+  // 好跟上面那个「搜词库插标签」的输入框区分开——那个改提示词，这个不改。
+  const tableSearch = element("div", "bpi-table-search");
+  const tableSearchIcon = element("span", "bpi-table-search-icon");
+  tableSearchIcon.innerHTML = '<svg viewBox="0 0 12 12" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="5" cy="5" r="3.3"/><path d="M7.5 7.5 10.6 10.6"/></svg>';
+  const tableSearchInput = element("input", "bpi-search bpi-table-search-input");
+  // 不用 type=search：Chrome 会再画一个原生清除按钮，跟我们自己的 × 重复
+  tableSearchInput.type = "text";
+  setPlaceholder(tableSearchInput, "Find in the current prompt");
+  setTitle(tableSearchInput, "Filter the detail list by keyword; matches the English original or the Chinese explanation; the prompt itself never changes");
+  const tableSearchCount = element("span", "bpi-table-search-count");
+  const tableSearchClear = element("button", "bpi-table-search-clear", "×");
+  tableSearchClear.type = "button";
+  setTitle(tableSearchClear, "Clear search");
+  tableSearch.append(tableSearchIcon, tableSearchInput, tableSearchCount, tableSearchClear);
   const head = element("div", "bpi-head");
   head.append(element("div", "", "English original (actual output)"), element("div", "", "Chinese explanation (read-only)"));
   // 表头分界处的抓手：拖动改左右两栏比例。比例写在表格的 --bpi-split 变量上，
@@ -278,6 +293,8 @@ function createPanel(node, textWidget) {
     editing: null,
     preferences: loadPreferences(),
     tableFilter: "all",
+    // 明细表查找词：只筛视图，不进任何持久化数据
+    tableQuery: "",
     filterButtons: new Map(),
     // 表格里勾选待入库的机器翻译词条，只存 token.key
     batchSelected: new Set(),
@@ -2755,6 +2772,28 @@ function createPanel(node, textWidget) {
 
   // 快捷添加区要等面板搭完才存在，这里先占位，render 里用可选链调用就不会撞 TDZ
   let updateQuickTarget = null;
+  // 命中的片段包一层 mark。全程用文本节点拼，不碰 innerHTML —— 提示词是用户输入，
+  // 走字符串拼接等于给自己开个注入口子。
+  const highlightFragment = (text, needle) => {
+    const source = String(text ?? "");
+    const fragment = document.createDocumentFragment();
+    if (!needle) {
+      fragment.appendChild(document.createTextNode(source));
+      return fragment;
+    }
+    const haystack = source.toLowerCase();
+    let cursor = 0;
+    for (let at = haystack.indexOf(needle); at !== -1; at = haystack.indexOf(needle, cursor)) {
+      if (at > cursor) fragment.appendChild(document.createTextNode(source.slice(cursor, at)));
+      const hit = document.createElement("mark");
+      hit.className = "bpi-hit";
+      hit.textContent = source.slice(at, at + needle.length);
+      fragment.appendChild(hit);
+      cursor = at + needle.length;
+    }
+    fragment.appendChild(document.createTextNode(source.slice(cursor)));
+    return fragment;
+  };
   const render = () => {
     renderSourceBar();
     // 输出管道跟着视图一起刷：任何文本/隐藏列表变化最后都会走到 render，
@@ -2808,7 +2847,14 @@ function createPanel(node, textWidget) {
       if (state.tableFilter === "favorites") return isFavorite(token.term);
       return true;
     });
-    renderMachineBatchBar(visibleTokens.filter((token) => token.status === "machine"));
+    // 查找和上面的筛选是叠加关系：先按来源筛，再按关键词筛，清空关键词回到筛选结果
+    const query = state.tableQuery.trim().toLowerCase();
+    const searchedTokens = query
+      ? visibleTokens.filter((token) => token.raw.toLowerCase().includes(query) || token.chinese.toLowerCase().includes(query))
+      : visibleTokens;
+    tableSearchCount.textContent = query ? `${searchedTokens.length} / ${visibleTokens.length}` : "";
+    tableSearchClear.classList.toggle("bpi-visible", Boolean(query));
+    renderMachineBatchBar(searchedTokens.filter((token) => token.status === "machine"));
     const errorsByKey = new Map();
     for (const item of state.issues) {
       for (const key of item.tokenKeys ?? []) {
@@ -2835,8 +2881,10 @@ function createPanel(node, textWidget) {
       table.appendChild(element("div", "bpi-empty", "Enter a prompt in the English text box above; per-tag bilingual mapping will appear here."));
     } else if (!visibleTokens.length) {
       table.appendChild(element("div", "bpi-empty", "No matching items under the current filter."));
+    } else if (!searchedTokens.length) {
+      table.appendChild(element("div", "bpi-empty", `No tag matches “${state.tableQuery.trim()}”`));
     } else {
-      visibleTokens.forEach((token, visibleIndex) => {
+      searchedTokens.forEach((token, visibleIndex) => {
         const row = element("div", `bpi-row bpi-${token.status}`);
         if (token.suspectedNatural) row.classList.add("bpi-suspected-natural");
         const tokenHidden = isTokenHidden(token);
@@ -2852,14 +2900,16 @@ function createPanel(node, textWidget) {
         if (state.selected.size > 1 && state.selected.has(token.id)) row.classList.add("bpi-row-multi");
         const englishCell = element("div", "bpi-cell bpi-en");
         if (token.status === "machine") englishCell.appendChild(buildRowCheckButton(token));
-        if (state.tableFilter === "all" && canReorderTokens()) {
+        // 查找状态下不给拖拽手柄：落点是按可见行算的，藏着行会把标签挪到错误的位置
+        if (state.tableFilter === "all" && !query && canReorderTokens()) {
           englishCell.appendChild(buildRowDragHandle(row, token));
         }
         if (canHideTokens()) {
           englishCell.appendChild(buildRowHideButton(token));
         }
         const chineseCell = element("div", "bpi-cell bpi-zh");
-        const englishText = element("span", tokenHidden || tokenSuppressed ? "bpi-hidden-term" : "", token.raw);
+        const englishText = element("span", tokenHidden || tokenSuppressed ? "bpi-hidden-term" : "");
+        englishText.appendChild(highlightFragment(token.raw, query));
         setTitle(englishText, tokenSuppressed
           ? `Query: “${token.term}” | “Unique” is on: only the first occurrence reaches the actual output`
           : `Query: “${token.term}”${token.weight === null ? "" : ` | weight: ${token.weight}`}`);
@@ -2902,7 +2952,8 @@ function createPanel(node, textWidget) {
           setTimeout(() => { editor.focus(); editor.select(); }, 0);
           return; // forEach 里不能用 continue；这里跳过本条剩余的渲染逻辑
         }
-        const chineseText = element("span", "", token.chinese);
+        const chineseText = element("span", "");
+        chineseText.appendChild(highlightFragment(token.chinese, query));
         setTitle(chineseText, "Double-click to edit Chinese explanation");
         chineseText.addEventListener("dblclick", (event) => {
           event.stopPropagation();
@@ -3295,7 +3346,7 @@ function createPanel(node, textWidget) {
   toolbar.append(leftTools, rightTools);
   searchLine.append(modeSelect, searchLabel, search);
   summary.append(counts, modeInfo, status);
-  detailsBody.append(toolbar, searchLine, results, summary, filtersBar, colorPanel, machineBatchBar, issuesPanel, table, detailsHiddenBar);
+  detailsBody.append(toolbar, searchLine, results, summary, filtersBar, colorPanel, machineBatchBar, issuesPanel, tableSearch, table, detailsHiddenBar);
   // 底部快捷输入：中文先翻译再追加，英文直接追加。只挂在节点面板上，
   // 明细表（detailsBody）才会被侧边栏「标签管理」复用，这个输入框不会跟着过去。
   const quickSection = element("section", "bpi-quick-section");
@@ -3485,6 +3536,26 @@ function createPanel(node, textWidget) {
   });
   search.addEventListener("input", renderSearch);
   search.addEventListener("focus", renderSearch);
+  const clearTableSearch = () => {
+    tableSearchInput.value = "";
+    state.tableQuery = "";
+    render();
+  };
+  tableSearchInput.addEventListener("input", () => {
+    state.tableQuery = tableSearchInput.value;
+    render();
+  });
+  tableSearchInput.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !tableSearchInput.value) return;
+    // 节点里按 Esc 会被画布当成取消，这里自己吃掉
+    event.preventDefault();
+    event.stopPropagation();
+    clearTableSearch();
+  });
+  tableSearchClear.addEventListener("click", () => {
+    clearTableSearch();
+    tableSearchInput.focus({ preventScroll: true });
+  });
   modeSelect.addEventListener("change", () => {
     state.modePreference = modeSelect.value;
     state.editing = null;
