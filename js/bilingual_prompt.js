@@ -305,6 +305,9 @@ function createPanel(node, textWidget) {
     searchVisibleLimit: 40,
     lastRenderedSearchQuery: "",
     categoryView: false,
+    // 「按 Anima 顺序排序」写入后留一份快照 { before, after }，按钮据此变成「取消排序」；
+    // 用户又手动改了文本就作废（见 render），避免回退把他后来的改动一起吞掉
+    animaSortSnapshot: null,
     // 节点标签卡颜色模式：default（不着色）| status（按收录：未收录淡橙、机器翻译淡紫、已收录不变）
     // | random（从 token_colors.json 摇色）| by_pack（按标签所在词库取 pack_colors）
     colorMode: localStorage.getItem("bpi.colorMode") || "default",
@@ -606,6 +609,7 @@ function createPanel(node, textWidget) {
     }
     if (before === after) {
       if (label === "Anima official sort") {
+        state.animaSortSnapshot = { before, after };
         state.categoryView = true;
         render();
         setText(englishHint, "Category table view | click tags to link; category names are not written to the prompt");
@@ -639,6 +643,8 @@ function createPanel(node, textWidget) {
     setText(editEnglishButton, "Edit text");
     setText(englishHint, "");
     updateText(after);
+    // 排序落盘后记住排序前那一版，按钮才好变成「取消 Anima 顺序排序」
+    if (label === "Anima official sort") state.animaSortSnapshot = { before, after };
     setStatus(`applied “${label}”; press Ctrl+Z to undo`, "ok");
     return true;
   };
@@ -706,7 +712,7 @@ function createPanel(node, textWidget) {
     if (detailNode) modal.appendChild(detailNode);
     const actions = element("div", "bpi-modal-actions");
     const close = () => shade.remove();
-    actions.append(button("Cancel", close), button("Confirm write English", () => {
+    actions.append(button("Cancel", close), button("Confirm write new prompt", () => {
       if (applyFullText(after.value, label)) close();
     }, "bpi-primary"));
     modal.appendChild(actions);
@@ -2099,6 +2105,33 @@ function createPanel(node, textWidget) {
     rebuildDictionaryIndex();
   };
 
+  // 排序写入之后按钮就变成「取消」：点一下把提示词和分类视图一起还原到排序前。
+  const updateSortButton = () => {
+    const sorted = Boolean(state.animaSortSnapshot);
+    setText(sortPromptButton, sorted ? "Cancel Anima order sort" : "Sort by Anima order");
+    setTitle(sortPromptButton, sorted
+      ? "Restore the prompt as it was before the Anima sort"
+      : "press Anima stable sort by recommended categories, one row per non-empty category; natural language and BREAK/AND kept intact");
+  };
+
+  const cancelAnimaSort = () => {
+    const snapshot = state.animaSortSnapshot;
+    if (!snapshot) return;
+    state.animaSortSnapshot = null;
+    if (snapshot.before !== snapshot.after) {
+      if (applyFullText(snapshot.before, "Cancel Anima sort")) {
+        setStatus("Restored the prompt from before the Anima sort", "ok");
+      }
+    } else {
+      // 排序没改动文本（本来就是 Anima 顺序），只切了分类视图：退出视图就回到原样
+      state.categoryView = false;
+      setText(englishHint, "");
+      render();
+      setStatus("Exited the Anima category view", "ok");
+    }
+    updateSortButton();
+  };
+
   const sortByAnimaOrder = async () => {
     if (state.assistantBusy) return;
     const source = String(textWidget.value ?? "").trim();
@@ -2114,6 +2147,8 @@ function createPanel(node, textWidget) {
       tokens = parsePrompt(source, state.index, state.machine, { mode: "auto" });
       const result = sortAnimaPrompt(tokens, { groupLines: true });
       if (result.text === source) {
+        // 本来就是 Anima 顺序，只是切成分类视图：前后文本相同，取消时退出视图即可
+        state.animaSortSnapshot = { before: source, after: source };
         state.categoryView = true;
         render();
         setText(englishHint, "Category table view | click tags to link; category names are not written to the prompt");
@@ -2727,6 +2762,9 @@ function createPanel(node, textWidget) {
     syncEffectiveOutput();
     const text = String(textWidget.value ?? "");
     state.lastText = text;
+    // 排序完又手动改了文本，「回到排序前」会把这些改动一起吞掉，取消入口随之失效
+    if (state.animaSortSnapshot && text.trim() !== state.animaSortSnapshot.after) state.animaSortSnapshot = null;
+    updateSortButton();
     state.modeInfo = detectInputMode(text, state.modePreference);
     state.tokens = parseTokens(text);
     queueLargeLookup(state.tokens);
@@ -3388,9 +3426,12 @@ function createPanel(node, textWidget) {
     action();
   });
   setTitle(optimizeChineseButton, "Only optimizes existing English; does not translate");
-  setTitle(sortPromptButton, "press Anima stable sort by recommended categories, one row per non-empty category; natural language and BREAK/AND kept intact");
   bindMirrorAction(optimizeChineseButton, runAnimaOptimize);
-  bindMirrorAction(sortPromptButton, sortByAnimaOrder);
+  bindMirrorAction(sortPromptButton, () => {
+    if (state.animaSortSnapshot) cancelAnimaSort();
+    else sortByAnimaOrder();
+  });
+  updateSortButton();
   // bindMirrorAction(tagManagerButton, () => openManagerPanel("tag-manager", node.id));
   // setTitle(tagManagerButton, "在侧边栏管理面板中打开本节点的标签翻译与词库搜索");
   setTitle(editEnglishButton, "Switch between the English text editor and the linked tag view");
