@@ -136,6 +136,9 @@ function rebuildSourceOptions() {
     ["all", "All Packs"],
     ["builtin", "Built-in pack enabled"],
     ["personal", "Personal"],
+    // 保存时选了「自然语言词库」的条目：和个人词库共用文件，只靠 natural 标记区分，
+    // 与分类叫「自然语言」的标签是两回事（后者是 Anima 分类名）。
+    ["natural", "Natural Language Dictionary"],
     ...(manager.data.large_dictionary?.available ? [["large", "Danbooru Large Dict"]] : []),
     ["machine", "Pending Machine"],
     ["favorites", "Favorites"],
@@ -149,6 +152,13 @@ function rebuildSourceOptions() {
   refs.source.value = options.some(([value]) => value === current) ? current : "all";
 }
 
+// 自然语言跟普通标签分类不是一个层级，按拼音排会掉到很后面；
+// 词库里这个分类名中英两种写法都有（Anima 分类是英文，手填的多是中文），都认。
+function isNaturalCategory(name) {
+  const value = String(name ?? "").trim().toLowerCase();
+  return value === "自然语言" || value === "natural language";
+}
+
 function rebuildCategoryOptions() {
   const current = refs.category.value;
   refs.category.replaceChildren();
@@ -156,7 +166,7 @@ function rebuildCategoryOptions() {
   all.value = "all";
   refs.category.appendChild(all);
   const categories = [...new Set(managerRows().map((row) => row.tag.category).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-CN"));
-  for (const category of categories) {
+  for (const category of [...categories.filter(isNaturalCategory), ...categories.filter((name) => !isNaturalCategory(name))]) {
     const option = element("option", "", category);
     option.value = category;
     refs.category.appendChild(option);
@@ -218,9 +228,10 @@ function renderRows() {
   const category = refs.category.value;
   const source = refs.source.value;
   const rows = managerRows().filter((row) => {
+    if (source === "natural" && !row.tag.natural) return false;
     if (source === "favorites" && !isFavorite(row.tag.english)) return false;
     if (source.startsWith("pack:") && row.tag.pack_id !== source.slice(5)) return false;
-    if (!["all", "favorites"].includes(source) && !source.startsWith("pack:") && row.kind !== source) return false;
+    if (!["all", "favorites", "natural"].includes(source) && !source.startsWith("pack:") && row.kind !== source) return false;
     if (category !== "all" && row.tag.category !== category) return false;
     if (query) {
       const haystack = [row.tag.english, row.tag.chinese, row.tag.category, ...(row.tag.aliases ?? [])].join("\n").toLowerCase();
