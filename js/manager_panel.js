@@ -1109,8 +1109,21 @@ function inspectorNodes() {
   return (app.graph?._nodes ?? []).filter((node) => node._bilingualPromptInspector?.detailsBody);
 }
 
+// 用户在画布上双击节点顶部改名后，列表里显示他自己起的名字；
+// 名字后面保留节点号，免得两个节点改成同一个名字时认不出来。
+function customNodeTitle(node) {
+  const current = String(node.title ?? "").trim();
+  // defaultNodeTitle 是节点创建时记下的出厂标题；拿不到就退回节点类型的默认标题，
+  // 两者都拿不到时不做判断，免得把出厂标题当成用户改过的名字。
+  const factory = String(node._bilingualPromptInspector?.defaultNodeTitle ?? node.constructor?.title ?? "").trim();
+  if (!current || !factory || current === factory) return null;
+  return current;
+}
+
 function tagNodeLabel(node) {
   const text = String(node.widgets?.find((widget) => widget.name === "text")?.value ?? "").trim();
+  const custom = customNodeTitle(node);
+  if (custom) return `${custom} · ${t(`Node #${node.id}`)}`;
   return `${t(`Node #${node.id}`)}: ${text ? text.slice(0, 30) : t("(empty prompt)")}`;
 }
 

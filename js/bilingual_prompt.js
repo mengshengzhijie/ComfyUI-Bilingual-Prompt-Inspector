@@ -3679,6 +3679,9 @@ app.registerExtension({
       bindUpstreamListener();
       const inspector = createPanel(this, textWidget);
       this._bilingualPromptInspector = inspector;
+      // 记下出厂标题。用户在画布上双击节点标题改名后 node.title 会跟着变，
+      // 侧边栏拿这个当基准，才能判断「这是用户自己起的名字」。
+      inspector.defaultNodeTitle = this.constructor?.title ?? this.title;
       inspectorRegistry.set(String(this.id ?? ""), inspector);
       try {
         this.addDOMWidget("bilingual_inspector", "bilingual-inspector", inspector.panel, {
