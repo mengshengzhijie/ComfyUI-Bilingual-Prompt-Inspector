@@ -3287,8 +3287,9 @@ function createPanel(node, textWidget) {
       render();
     }),
   );
+  // 侧边栏「标签管理」复用的就是这份 detailsBody，而它自己就在侧边栏里，
+  // 再放一个跳去词库的按钮和点顶部「词库」页签是同一件事，故不保留。
   rightTools.append(
-    button("Manager panel", () => openManagerPanel("tags"), "bpi-primary"),
     button("Refresh dictionary", refreshDictionary),
   );
   toolbar.append(leftTools, rightTools);
@@ -3432,8 +3433,6 @@ function createPanel(node, textWidget) {
     else sortByAnimaOrder();
   });
   updateSortButton();
-  // bindMirrorAction(tagManagerButton, () => openManagerPanel("tag-manager", node.id));
-  // setTitle(tagManagerButton, "在侧边栏管理面板中打开本节点的标签翻译与词库搜索");
   setTitle(editEnglishButton, "Switch between the English text editor and the linked tag view");
   setTitle(clearEnglishButton, "Requires a second click to clear the actual English output; after clearing, click the same button or press Ctrl+Z to undo");
   editEnglishButton.addEventListener("mousedown", (event) => {

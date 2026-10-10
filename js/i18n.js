@@ -348,7 +348,6 @@ const ZH = {
   Packs: "词包",
   Favorites: "收藏",
   "Assistant Settings": "助手设置",
-  "Manager panel": "管理面板",
   "Add or select a BilingualPromptInspector node to see its tag manager here.":
     "添加或选中画布上的 BilingualPromptInspector 节点，即可在此看到它的标签管理。",
   "Tag translation, dictionary search and per-tag operations edit the selected node below.":
