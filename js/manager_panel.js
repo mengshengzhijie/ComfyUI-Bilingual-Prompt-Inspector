@@ -48,7 +48,6 @@ const SECTIONS = [
   ["tag-manager", "Tag Manager"],
   ["tags", "Dictionary"],
   ["packs", "Packs"],
-  ["assistant", "Assistant Settings"],
   ["favorites", "Favorites"],
 ];
 
@@ -58,7 +57,6 @@ const manager = {
   selected: new Set(),
   section: "tags",
   loaded: false,
-  assistantLoaded: false,
   favoritesLoaded: false,
   favorites: [],
   favoritesChangeHandler: null,
@@ -586,10 +584,21 @@ function openImportPreview(payload) {
   modal.addEventListener("mousedown", (event) => event.stopPropagation());
 }
 
-async function buildAssistantSection(section) {
-  section.replaceChildren();
+// 外观 / 语言从助手设置里拆出来，和它并列挂在「设置」面板的插件分类下。
+// 改动立刻生效并单独保存，不需要去点助手设置的保存按钮。
+let appearanceSettingsNode = null;
+
+function appearanceControl() {
+  if (appearanceSettingsNode) return appearanceSettingsNode;
+  appearanceSettingsNode = element("div", "bpi-settings-form");
+  appearanceSettingsNode.appendChild(element("h3", "", "Appearance & Language"));
   const loading = element("div", "bpm-loading", "Loading settings...");
-  section.appendChild(loading);
+  appearanceSettingsNode.appendChild(loading);
+  buildAppearanceForm(appearanceSettingsNode, loading);
+  return appearanceSettingsNode;
+}
+
+async function buildAppearanceForm(host, loading) {
   let config;
   try {
     config = await getAssistantConfig();
@@ -598,110 +607,11 @@ async function buildAssistantSection(section) {
     loading.classList.add("bpi-danger-text");
     return;
   }
-  manager.assistantLoaded = true;
-  applyBpiAppearance(config.appearance);
-  section.replaceChildren();
+  loading.remove();
   const form = element("form", "bpi-form");
-  form.addEventListener("submit", (event) => event.preventDefault());
-  const error = element("div", "bpi-status");
-  error.style.gridColumn = "1 / -1";
+  const status = element("div", "bpi-status");
+  status.style.gridColumn = "1 / -1";
 
-  // 翻译服务：翻译/解释按此选择；“翻译并优化”“优化为 Anima”恒走 AI
-  const serviceLabel = element("label", "", "Translation Service");
-  const service = element("select");
-  for (const [value, label] of [
-    ["dictionary", "Dictionary only (no API)"],
-    ["baidu", "Baidu Translate"],
-    ["ai", "AI (OpenAI-compatible / Ollama)"],
-  ]) {
-    const option = element("option", "", label);
-    option.value = value;
-    service.appendChild(option);
-  }
-  service.value = config.translate_service;
-  form.append(serviceLabel, service);
-  const serviceNote = element("div", "bpi-config-note", 'Translation/explanation uses this choice. "Translate & Optimize" and "Optimize to Anima" always use AI, unrelated here. To test AI connection, temporarily set translation service to AI then click test (key preserved).');
-  serviceNote.style.gridColumn = "1 / -1";
-  form.append(serviceNote);
-
-  // 百度翻译（独立留存，切翻译服务不清）
-  const baiduHead = element("div", "bpm-toolbar");
-  baiduHead.style.gridColumn = "1 / -1";
-  baiduHead.append(element("strong", "", "Baidu Translate"));
-  form.append(baiduHead);
-  const baiduAppId = field(form, "APP ID", "assistant-baidu-appid", config.baidu_appid, 'Baidu Cloud "General Text Translation" APP ID');
-  const baiduSecretKey = field(form, "Secret Key", "assistant-baidu-secret", "", config.baidu_secret_key_configured ? "Saved; leave empty to keep" : 'Baidu Cloud "General Text Translation" Secret Key');
-  baiduSecretKey.type = "password";
-  const clearBaiduLine = element("label", "bpm-toolbar");
-  const clearBaiduSecretKey = element("input");
-  clearBaiduSecretKey.type = "checkbox";
-  clearBaiduLine.append(clearBaiduSecretKey, element("span", "", "Clear saved Baidu secret"));
-  const baiduSpacer = element("span");
-  form.append(baiduSpacer, clearBaiduLine);
-  const baiduQps = field(form, "QPS (requests/second)", "assistant-baidu-qps", config.baidu_qps ?? 1, "1");
-  baiduQps.type = "number";
-  baiduQps.min = "0.1";
-  baiduQps.max = "50";
-  baiduQps.step = "0.5";
-  const baiduQpsHelp = [
-    "Baidu rate-limits General Text Translation by account tier. Enter your tier's number and the plugin queues requests to match:",
-    "· Unverified / Standard: 1",
-    "· Personal verified: 10",
-    "· Enterprise verified: higher, see the Baidu AI Cloud console",
-    "Find your tier under Baidu AI Cloud → Machine Translation → General Text Translation.",
-    "Too high and Baidu still returns 54003 (too many requests); too low is only slower, never an error.",
-    "If unsure, use 1.",
-  ].join("\n");
-  form.querySelector('label[for="bpi-field-assistant-baidu-qps"]')?.appendChild(helpMark(baiduQpsHelp));
-  const baiduQpsNote = element("div", "bpi-config-note", "How many requests per second Baidu may receive at most. Batch translation queues by this value and never exceeds it.");
-  baiduQpsNote.style.gridColumn = "1 / -1";
-  form.append(baiduQpsNote);
-
-  // AI 服务（优化恒走它；翻译在选 AI 时也走它）
-  const aiHead = element("div", "bpm-toolbar");
-  aiHead.style.gridColumn = "1 / -1";
-  aiHead.append(element("strong", "", "AI Service (Translate & Optimize / Optimize / AI Translate)"));
-  form.append(aiHead);
-  const aiProviderLabel = element("label", "", "AI Backend");
-  const aiProvider = element("select");
-  for (const [value, label] of [["openai_compatible", "OpenAI-compatible API"], ["ollama", "Ollama (local)"]]) {
-    const option = element("option", "", label);
-    option.value = value;
-    aiProvider.appendChild(option);
-  }
-  aiProvider.value = config.ai_provider;
-  form.append(aiProviderLabel, aiProvider);
-  const baseUrl = field(form, "API URL", "assistant-base-url", config.ai_base_url, "Optional for Ollama; e.g.: https://host/v1");
-  const model = field(form, "Model Name", "assistant-model", config.ai_model, "e.g.: qwen3:8b or provider model ID");
-  const presetLine = element("div", "bpm-toolbar");
-  presetLine.style.gridColumn = "1 / -1";
-  const lmStudioPreset = button("Use LM Studio Local Preset", () => {
-    aiProvider.value = "openai_compatible";
-    baseUrl.value = "http://127.0.0.1:1234/v1";
-    setText(error, "LM Studio default URL filled; select a loaded model ID, then Save & Test");
-    error.dataset.kind = "ok";
-  });
-  presetLine.append(lmStudioPreset, element("span", "bpi-config-note", "Connects to localhost:1234 by default; no external API required."));
-  form.append(presetLine);
-  const apiKey = field(form, "API Key", "assistant-api-key", "", config.ai_api_key_configured ? "Saved; leave empty to keep" : "Optional for local Ollama / LM Studio");
-  apiKey.type = "password";
-  const clearLine = element("label", "bpm-toolbar");
-  const clearApiKey = element("input");
-  clearApiKey.type = "checkbox";
-  clearLine.append(clearApiKey, element("span", "", "Clear saved API Key"));
-  const apiKeySpacer = element("span");
-  form.append(apiKeySpacer, clearLine);
-  const temperature = field(form, "Temperature", "assistant-temperature", config.ai_temperature, "0–2");
-  temperature.type = "number";
-  temperature.min = "0";
-  temperature.max = "2";
-  temperature.step = "0.05";
-  const timeout = field(form, "Timeout (s)", "assistant-timeout", config.ai_timeout_seconds, "5–600");
-  timeout.type = "number";
-  timeout.min = "5";
-  timeout.max = "600";
-
-  // 外观模式
   const appearanceLabel = element("label", "", "Appearance");
   const appearanceSelect = element("select");
   for (const [value, label] of [
@@ -729,31 +639,276 @@ async function buildAssistantSection(section) {
     languageSelect.appendChild(option);
   }
   languageSelect.value = config.language || "auto";
-  form.append(languageLabel, languageSelect);
   const languageNote = element("div", "bpi-config-note", "Choose the language for this plugin's own panels. \"Follow ComfyUI\" reads the ComfyUI language setting; \"Chinese\" and \"English\" force one. Applied to open panels right away; reload the page if anything still shows the old language.");
   languageNote.style.gridColumn = "1 / -1";
-  form.append(languageNote);
+  form.append(languageLabel, languageSelect, languageNote, status);
+  host.appendChild(form);
 
-  // 规则
-  const addRule = (labelText, value) => {
+  // 只提交这两项：后端 update 对没给的字段一律保留原值，不会动翻译服务和密钥
+  const save = async () => {
+    try {
+      const saved = await saveAssistantConfig({ appearance: appearanceSelect.value, language: languageSelect.value });
+      applyBpiAppearance(saved.appearance);
+      setLanguageMode(saved.language);
+      setText(status, "Appearance and language saved");
+      status.dataset.kind = "ok";
+    } catch (saveError) {
+      setText(status, saveError.message);
+      status.dataset.kind = "error";
+    }
+  };
+  appearanceSelect.addEventListener("change", save);
+  languageSelect.addEventListener("change", save);
+}
+
+// 助手设置直接长在 ComfyUI「设置」面板里（入口见下方 registerExtension 的 settings），
+// 这一个函数返回的就是设置项右侧那块控件。
+// 面板每次渲染都会重建控件容器，所以整块 DOM 只建一次后复用，输入到一半的内容不会丢。
+let assistantSettingsNode = null;
+
+function assistantSettingsControl() {
+  if (assistantSettingsNode) return assistantSettingsNode;
+  assistantSettingsNode = element("div", "bpi-settings-form");
+  assistantSettingsNode.appendChild(element("h3", "", "Assistant Settings"));
+  const loading = element("div", "bpm-loading", "Loading settings...");
+  assistantSettingsNode.appendChild(loading);
+  buildAssistantForm(assistantSettingsNode, loading);
+  return assistantSettingsNode;
+}
+
+async function buildAssistantForm(host, loading) {
+  let config;
+  try {
+    config = await getAssistantConfig();
+  } catch (error) {
+    setText(loading, error.message);
+    loading.classList.add("bpi-danger-text");
+    return;
+  }
+  applyBpiAppearance(config.appearance);
+  loading.remove();
+  const form = element("form", "bpi-form");
+  form.addEventListener("submit", (event) => event.preventDefault());
+  const error = element("div", "bpi-status");
+  error.style.gridColumn = "1 / -1";
+
+  // 翻译服务：翻译/解释按此选择；“翻译并优化”“优化为 Anima”恒走 AI
+  const serviceLabel = element("label", "", "Translation Service");
+  const service = element("select");
+  for (const [value, label] of [
+    ["dictionary", "Dictionary only (no API)"],
+    ["baidu", "Baidu Translate"],
+    ["openai_compatible", "OpenAI-compatible API"],
+    ["ollama", "Ollama (local)"],
+  ]) {
+    const option = element("option", "", label);
+    option.value = value;
+    service.appendChild(option);
+  }
+  // 后端已把旧的 "ai" 拆成两个具体服务；这里再兜一次，避免下拉落空
+  service.value = config.translate_service === "ai" ? config.ai_provider || "openai_compatible" : config.translate_service;
+  form.append(serviceLabel, service);
+  const serviceNote = element("div", "bpi-config-note", 'Only this service\'s settings are shown below. "Translate & Optimize" and "Optimize to Anima" always use AI: choose OpenAI-compatible API or Ollama above to configure or test them. Switching service never clears saved keys.');
+  serviceNote.style.gridColumn = "1 / -1";
+  form.append(serviceNote);
+
+  // 按翻译服务分组显示：隐藏的字段不提交也不清空，切换前后值都在
+  const baiduOnly = [];
+  // AI 两个后端各一组：地址规则不同（Ollama 只认本机，OpenAI 远端必须 https），
+  // 规则也各一套 —— 本地小模型和云端大模型要写的提示词不一样
+  const openaiOnly = [];
+  const ollamaOnly = [];
+  // AI 整段（标题 + 后端下拉 + 两套具体配置 + 规则）只在翻译服务就是 AI 时出现；
+  // 选词库 / 百度时一段都不显示，但优化仍会走上次选过的那个后端
+  const aiOnly = [];
+  // 翻译服务里属于 AI 的两个值：选了它们，翻译服务自己就是 AI 后端
+  const AI_SERVICES = new Set(["openai_compatible", "ollama"]);
+  const currentBackend = () => (AI_SERVICES.has(service.value) ? service.value : aiProvider.value);
+  const addField = (list, ...args) => {
+    const input = field(form, ...args);
+    list.push(form.querySelector(`label[for="${input.id}"]`), input);
+    return input;
+  };
+  // 清除已保存的密钥：开关样式，打开后要保存才生效。返回的 input 上挂了整行（`.row`）
+  const clearSwitch = (labelText) => {
+    const row = element("label", "bpi-switch-row");
+    const input = element("input");
+    input.type = "checkbox";
+    const track = element("span", "bpi-switch-track");
+    track.appendChild(element("span", "bpi-switch-thumb"));
+    row.append(input, track, element("span", "bpi-switch-text", labelText), element("span", "bpi-switch-hint", "Takes effect after saving"));
+    input.row = row;
+    return input;
+  };
+
+  // 百度翻译（独立留存，切翻译服务不清）
+  const baiduHead = element("div", "bpm-toolbar");
+  baiduHead.style.gridColumn = "1 / -1";
+  baiduHead.append(element("strong", "", "Baidu Translate"));
+  form.append(baiduHead);
+  baiduOnly.push(baiduHead);
+  const baiduAppId = addField(baiduOnly, "APP ID", "assistant-baidu-appid", config.baidu_appid, 'Baidu Cloud "General Text Translation" APP ID');
+  const baiduSecretKey = addField(baiduOnly, "Secret Key", "assistant-baidu-secret", "", config.baidu_secret_key_configured ? "Saved; leave empty to keep" : 'Baidu Cloud "General Text Translation" Secret Key');
+  baiduSecretKey.type = "password";
+  const clearBaiduSecretKey = clearSwitch("Clear saved Baidu secret");
+  const baiduSpacer = element("span");
+  form.append(baiduSpacer, clearBaiduSecretKey.row);
+  baiduOnly.push(baiduSpacer, clearBaiduSecretKey.row);
+  const baiduQps = addField(baiduOnly, "QPS (requests/second)", "assistant-baidu-qps", config.baidu_qps ?? 1, "1");
+  baiduQps.type = "number";
+  baiduQps.min = "0.1";
+  baiduQps.max = "50";
+  baiduQps.step = "0.5";
+  const baiduQpsHelp = [
+    "Baidu rate-limits General Text Translation by account tier. Enter your tier's number and the plugin queues requests to match:",
+    "· Unverified / Standard: 1",
+    "· Personal verified: 10",
+    "· Enterprise verified: higher, see the Baidu AI Cloud console",
+    "Find your tier under Baidu AI Cloud → Machine Translation → General Text Translation.",
+    "Too high and Baidu still returns 54003 (too many requests); too low is only slower, never an error.",
+    "If unsure, use 1.",
+  ].join("\n");
+  form.querySelector('label[for="bpi-field-assistant-baidu-qps"]')?.appendChild(helpMark(baiduQpsHelp));
+  const baiduQpsNote = element("div", "bpi-config-note", "How many requests per second Baidu may receive at most. Batch translation queues by this value and never exceeds it.");
+  baiduQpsNote.style.gridColumn = "1 / -1";
+  form.append(baiduQpsNote);
+  baiduOnly.push(baiduQpsNote);
+
+  // AI 服务（优化恒走它；翻译在选 AI 时也走它）
+  const aiHead = element("div", "bpm-toolbar");
+  aiHead.style.gridColumn = "1 / -1";
+  aiHead.append(element("strong", "", "AI Service (Translate & Optimize / Optimize / AI Translate)"));
+  form.append(aiHead);
+  aiOnly.push(aiHead);
+  const aiProviderLabel = element("label", "", "AI Backend");
+  const aiProvider = element("select");
+  for (const [value, label] of [["openai_compatible", "OpenAI-compatible API"], ["ollama", "Ollama (local)"]]) {
+    const option = element("option", "", label);
+    option.value = value;
+    aiProvider.appendChild(option);
+  }
+  aiProvider.value = config.ai_provider;
+  form.append(aiProviderLabel, aiProvider);
+  aiOnly.push(aiProviderLabel, aiProvider);
+
+  // OpenAI 兼容：远端必须 https，本机回环才允许 http
+  const openaiHead = element("div", "bpm-toolbar");
+  openaiHead.style.gridColumn = "1 / -1";
+  openaiHead.append(element("strong", "", "OpenAI-compatible API"));
+  form.append(openaiHead);
+  openaiOnly.push(openaiHead);
+  const openaiBaseUrl = addField(openaiOnly, "API URL", "assistant-openai-base-url", config.openai_base_url, "https://host/v1");
+  const openaiModel = addField(openaiOnly, "Model Name", "assistant-openai-model", config.openai_model, "provider model ID");
+  const presetLine = element("div", "bpm-toolbar");
+  presetLine.style.gridColumn = "1 / -1";
+  const lmStudioPreset = button("Use LM Studio Local Preset", () => {
+    aiProvider.value = "openai_compatible";
+    openaiBaseUrl.value = "http://127.0.0.1:1234/v1";
+    setText(error, "LM Studio default URL filled; select a loaded model ID, then Save & Test");
+    error.dataset.kind = "ok";
+  });
+  presetLine.append(lmStudioPreset, element("span", "bpi-config-note", "Connects to localhost:1234 by default; no external API required."));
+  form.append(presetLine);
+  openaiOnly.push(presetLine);
+  const openaiApiKey = addField(openaiOnly, "API Key", "assistant-openai-api-key", "", config.openai_api_key_configured ? "Saved; leave empty to keep" : "Optional for local LM Studio");
+  openaiApiKey.type = "password";
+  const clearApiKey = clearSwitch("Clear saved API Key");
+  const apiKeySpacer = element("span");
+  form.append(apiKeySpacer, clearApiKey.row);
+  openaiOnly.push(apiKeySpacer, clearApiKey.row);
+  const openaiTemperature = addField(openaiOnly, "Temperature", "assistant-openai-temperature", config.openai_temperature, "0–2");
+  openaiTemperature.type = "number";
+  openaiTemperature.min = "0";
+  openaiTemperature.max = "2";
+  openaiTemperature.step = "0.05";
+  const openaiTimeout = addField(openaiOnly, "Timeout (s)", "assistant-openai-timeout", config.openai_timeout_seconds, "5–600");
+  openaiTimeout.type = "number";
+  openaiTimeout.min = "5";
+  openaiTimeout.max = "600";
+  const openaiUrlNote = element("div", "bpi-config-note", "Remote addresses must use https; http is only accepted for this machine. Private, reserved and link-local addresses are rejected. Keys are never sent in clear text over the network.");
+  openaiUrlNote.style.gridColumn = "1 / -1";
+  form.append(openaiUrlNote);
+  openaiOnly.push(openaiUrlNote);
+
+  // Ollama：只允许本机回环，没有密钥
+  const ollamaHead = element("div", "bpm-toolbar");
+  ollamaHead.style.gridColumn = "1 / -1";
+  ollamaHead.append(element("strong", "", "Ollama (local)"));
+  form.append(ollamaHead);
+  ollamaOnly.push(ollamaHead);
+  const ollamaBaseUrl = addField(ollamaOnly, "API URL", "assistant-ollama-base-url", config.ollama_base_url, "http://127.0.0.1:11434");
+  const ollamaModel = addField(ollamaOnly, "Model Name", "assistant-ollama-model", config.ollama_model, "e.g.: qwen3:8b");
+  const ollamaPresetLine = element("div", "bpm-toolbar");
+  ollamaPresetLine.style.gridColumn = "1 / -1";
+  const ollamaPreset = button("Use Ollama Local Preset", () => {
+    aiProvider.value = "ollama";
+    ollamaBaseUrl.value = "http://127.0.0.1:11434";
+    setText(error, "Ollama default URL filled; select a pulled model ID, then Save & Test");
+    error.dataset.kind = "ok";
+  });
+  ollamaPresetLine.append(ollamaPreset, element("span", "bpi-config-note", "Connects to localhost:11434 by default; no external API required."));
+  form.append(ollamaPresetLine);
+  ollamaOnly.push(ollamaPresetLine);
+  const ollamaTemperature = addField(ollamaOnly, "Temperature", "assistant-ollama-temperature", config.ollama_temperature, "0–2");
+  ollamaTemperature.type = "number";
+  ollamaTemperature.min = "0";
+  ollamaTemperature.max = "2";
+  ollamaTemperature.step = "0.05";
+  const ollamaTimeout = addField(ollamaOnly, "Timeout (s)", "assistant-ollama-timeout", config.ollama_timeout_seconds, "5–600");
+  ollamaTimeout.type = "number";
+  ollamaTimeout.min = "5";
+  ollamaTimeout.max = "600";
+  const ollamaUrlNote = element("div", "bpi-config-note", "Ollama only accepts a loopback address on this machine; anything else is rejected before a request is sent.");
+  ollamaUrlNote.style.gridColumn = "1 / -1";
+  form.append(ollamaUrlNote);
+  ollamaOnly.push(ollamaUrlNote);
+
+  // 规则：只有 AI 会读，两个后端各一套（server.py 按当前后端取对应的那套）
+  const addRule = (list, labelText, value) => {
     const labelElement = element("label", "", labelText);
     const textarea = element("textarea");
     textarea.value = value;
     form.append(labelElement, textarea);
-    return { labelElement, textarea };
+    list.push(labelElement, textarea);
+    return textarea;
   };
-  const translationRule = addRule("Translation Rule", config.translation_rule);
-  const translateOptimizeRule = addRule("Translate & Optimize Rule", config.translate_optimize_rule);
-  const optimizationRule = addRule("Optimize Rule", config.optimization_rule);
+  const rules = {
+    openai_compatible: {
+      translation: addRule(openaiOnly, "Translation Rule", config.openai_translation_rule),
+      translateOptimize: addRule(openaiOnly, "Translate & Optimize Rule", config.openai_translate_optimize_rule),
+      optimization: addRule(openaiOnly, "Optimize Rule", config.openai_optimization_rule),
+    },
+    ollama: {
+      translation: addRule(ollamaOnly, "Translation Rule", config.ollama_translation_rule),
+      translateOptimize: addRule(ollamaOnly, "Translate & Optimize Rule", config.ollama_translate_optimize_rule),
+      optimization: addRule(ollamaOnly, "Optimize Rule", config.ollama_optimization_rule),
+    },
+  };
   form.appendChild(error);
 
-  section.appendChild(form);
-  section.appendChild(element("div", "bpi-config-note", "Settings are stored in the ComfyUI user directory. AI key and Baidu secret are retained independently; switching service never clears either. AI key is only cleared when AI backend/URL changes or on a different machine. Neither is written to workflows or returned to the browser."));
-  const actions = element("div", "bpm-assistant-actions");
+  const applyServiceVisibility = () => {
+    const value = service.value;
+    // 只有翻译服务本身就是 AI 时才展开 AI 整段；选词库 / 百度时一段都不显示
+    for (const node of baiduOnly) node.hidden = value !== "baidu";
+    for (const node of aiOnly) node.hidden = !AI_SERVICES.has(value);
+    for (const node of openaiOnly) node.hidden = value !== "openai_compatible";
+    for (const node of ollamaOnly) node.hidden = value !== "ollama";
+  };
+  service.addEventListener("change", applyServiceVisibility);
+  aiProvider.addEventListener("change", applyServiceVisibility);
+  applyServiceVisibility();
+
+  host.appendChild(form);
+  host.appendChild(element("div", "bpi-config-note", "Settings are stored in the ComfyUI user directory. AI key and Baidu secret are retained independently; switching service never clears either. AI key is only cleared when AI backend/URL changes or on a different machine. Neither is written to workflows or returned to the browser."));
+  const actions = element("div", "bpi-form-actions");
+  // 只恢复当前所选后端那套规则，另一套不动
   const resetButton = button("Reset to Default Rules", () => {
-    translationRule.textarea.value = config.default_translation_rule;
-    translateOptimizeRule.textarea.value = config.default_translate_optimize_rule;
-    optimizationRule.textarea.value = config.default_optimization_rule;
+    const backend = currentBackend();
+    const prefix = backend === "ollama" ? "ollama" : "openai";
+    const active = rules[backend] ?? rules.openai_compatible;
+    active.translation.value = config[`default_${prefix}_translation_rule`];
+    active.translateOptimize.value = config[`default_${prefix}_translate_optimize_rule`];
+    active.optimization.value = config[`default_${prefix}_optimization_rule`];
     setText(error, "Defaults restored in editor; click Save to apply");
     error.dataset.kind = "ok";
   });
@@ -763,7 +918,6 @@ async function buildAssistantSection(section) {
     error.dataset.kind = "busy";
     try {
       config = await saveAssistantConfig(payload());
-      setLanguageMode(config.language);
       const result = await testAssistantConnection();
       setText(error, `Connection OK: “${result.message}”`);
       error.dataset.kind = "ok";
@@ -778,8 +932,6 @@ async function buildAssistantSection(section) {
     saveButton.disabled = true;
     try {
       config = await saveAssistantConfig(payload());
-      applyBpiAppearance(config.appearance);
-      setLanguageMode(config.language);
       setText(error, "Assistant settings saved");
       error.dataset.kind = "ok";
     } catch (saveError) {
@@ -790,25 +942,32 @@ async function buildAssistantSection(section) {
     }
   }, "bpi-primary");
   actions.append(resetButton, testButton, saveButton);
-  section.appendChild(actions);
+  host.appendChild(actions);
+  // 两套 AI 配置和两套规则都提交（后端对没给的字段才保留原值，这里给全最省心）；
+  // 外观 / 语言已在「设置」面板里独立成项（appearanceControl），这里既不提交也不应用
   const payload = () => ({
     translate_service: service.value,
-    ai_provider: aiProvider.value,
-    ai_base_url: baseUrl.value.trim(),
-    ai_model: model.value.trim(),
-    ai_api_key: apiKey.value.trim(),
-    clear_ai_api_key: clearApiKey.checked,
+    ai_provider: currentBackend(),
+    openai_base_url: openaiBaseUrl.value.trim(),
+    openai_model: openaiModel.value.trim(),
+    openai_api_key: openaiApiKey.value.trim(),
+    clear_openai_api_key: clearApiKey.checked,
+    openai_temperature: openaiTemperature.value,
+    openai_timeout_seconds: openaiTimeout.value,
+    ollama_base_url: ollamaBaseUrl.value.trim(),
+    ollama_model: ollamaModel.value.trim(),
+    ollama_temperature: ollamaTemperature.value,
+    ollama_timeout_seconds: ollamaTimeout.value,
     baidu_appid: baiduAppId.value.trim(),
     baidu_secret_key: baiduSecretKey.value.trim(),
     clear_baidu_secret_key: clearBaiduSecretKey.checked,
     baidu_qps: baiduQps.value.trim(),
-    ai_temperature: temperature.value,
-    ai_timeout_seconds: timeout.value,
-    appearance: appearanceSelect.value,
-    language: languageSelect.value,
-    translation_rule: translationRule.textarea.value,
-    translate_optimize_rule: translateOptimizeRule.textarea.value,
-    optimization_rule: optimizationRule.textarea.value,
+    openai_translation_rule: rules.openai_compatible.translation.value,
+    openai_translate_optimize_rule: rules.openai_compatible.translateOptimize.value,
+    openai_optimization_rule: rules.openai_compatible.optimization.value,
+    ollama_translation_rule: rules.ollama.translation.value,
+    ollama_translate_optimize_rule: rules.ollama.translateOptimize.value,
+    ollama_optimization_rule: rules.ollama.optimization.value,
   });
 }
 
@@ -820,7 +979,6 @@ function setSection(section) {
     refs.sections?.querySelector(`.bpm-section[data-section="${id}"]`)?.toggleAttribute("hidden", id !== section);
   }
   if (section === "tag-manager") rebuildTagManagerSection();
-  if (section === "assistant" && !manager.assistantLoaded) buildAssistantSection(refs.assistantSection);
   if (section === "favorites" && !manager.favoritesLoaded) {
     manager.favoritesLoaded = true;
     refs.sections.appendChild(buildFavoritesSection());
@@ -1210,8 +1368,6 @@ function build() {
   refs.sections.appendChild(refs.tagManagerSection);
   refs.sections.appendChild(buildTagsSection());
   refs.sections.appendChild(buildPacksSection());
-  refs.assistantSection = buildAssistantPlaceholder();
-  refs.sections.appendChild(refs.assistantSection);
   root.append(head, refs.tabs, refs.sections);
   root.addEventListener("mousedown", (event) => event.stopPropagation());
   root.addEventListener("wheel", (event) => event.stopPropagation(), { passive: true });
@@ -1327,14 +1483,6 @@ function buildPacksSection() {
   return section;
 }
 
-function buildAssistantPlaceholder() {
-  const section = element("div", "bpm-section");
-  section.dataset.section = "assistant";
-  section.hidden = true;
-  section.appendChild(element("div", "bpm-loading", "Settings load on first visit..."));
-  return section;
-}
-
 function renderTab(container) {
   if (!root) build();
   container.replaceChildren(root);
@@ -1365,6 +1513,24 @@ getAssistantConfig()
 
 app.registerExtension({
   name: "ComfyUI.BilingualPromptInspector.ManagerPanel",
+  // 助手设置整体挂在 ComfyUI 的「设置」面板里：项名和分类由前端原生渲染，
+  // 不走插件的 t()，直接写中文；控件本体是 assistantSettingsControl() 返回的那块 DOM。
+  settings: [
+    {
+      id: "BilingualPromptInspector.Appearance",
+      name: "语言与外观",
+      type: appearanceControl,
+      defaultValue: "",
+      category: ["双语提示词检查器", "语言与外观"],
+    },
+    {
+      id: "BilingualPromptInspector.AssistantSettings",
+      name: "助手设置",
+      type: assistantSettingsControl,
+      defaultValue: "",
+      category: ["双语提示词检查器", "助手设置"],
+    },
+  ],
   async setup() {
     if (!app.extensionManager?.registerSidebarTab) {
       console.warn("[BilingualPromptInspector] Current frontend does not support sidebar; panel unavailable");
@@ -1376,7 +1542,7 @@ app.registerExtension({
       // 侧边栏标签显示的就是插件名，直接写中文：注册发生在启动时，
       // 语言设置要等后端配置返回才落地，走 t() 会先渲染成英文且不会再刷新。
       title: "提示词翻译与管理",
-      tooltip: "提示词翻译与管理：标签管理、词库、词包与助手设置",
+      tooltip: "提示词翻译与管理：标签管理、词库、词包与收藏",
       type: "custom",
       render: renderTab,
       destroy: destroyTab,

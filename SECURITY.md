@@ -31,3 +31,24 @@ unauthenticated ComfyUI instance directly to the public internet.
 External translation and optimization requests are sent only to the provider configured
 by the user. Review that provider's privacy policy, logging behavior, content policy,
 and cost before use.
+
+## Outbound request targets
+
+AI requests are sent only to the address stored in the local configuration file, and that
+address is validated before a request is sent:
+
+- OpenAI-compatible endpoints must use HTTPS. Plain HTTP is accepted only for loopback
+  addresses on the same machine (127.0.0.0/8, ::1, localhost), so a local runtime such as
+  LM Studio keeps working without sending the API key in clear text across the network.
+- Remote OpenAI-compatible endpoints must be public. An address written directly as a
+  private, reserved or link-local IP (192.168.x.x, 10.x.x.x, 172.16.x.x, 169.254.169.254,
+  ...) is rejected even over HTTPS. Domain names are accepted; they are not resolved during
+  validation.
+- Ollama endpoints must be a loopback address on the same machine.
+
+Credentials embedded in the URL (`user:pass@`) and query strings are rejected as well, and
+only the `http` and `https` schemes are allowed. The address is re-validated immediately
+before each request, so editing the configuration file by hand cannot bypass these rules.
+
+The large Danbooru dictionary is a local read-only SQLite file under the extension's data
+directory. Despite the `connect(` call, it opens a file on disk and opens no socket.

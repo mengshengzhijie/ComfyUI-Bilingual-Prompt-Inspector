@@ -398,18 +398,17 @@ const ZH = {
   "Recognizing tag categories…": "正在识别标签分类…",
   "Loading dictionary…": "正在加载词库…",
   "Loading settings...": "正在加载设置…",
-  "Settings load on first visit...": "首次进入时加载设置…",
 
-  // ── 助手设置 ────────────────────────────────────────────────────────
+  // ── 助手设置（ComfyUI「设置」面板里内嵌的那一项）─────────────────────
   "Translation Service": "翻译服务",
   "Dictionary only (no API)": "仅词库（不需要接口）",
   "Baidu Translate": "百度翻译",
-  "AI (OpenAI-compatible / Ollama)": "AI（OpenAI 兼容 / Ollama）",
-  "Translation/explanation uses this choice. \"Translate & Optimize\" and \"Optimize to Anima\" always use AI, unrelated here. To test AI connection, temporarily set translation service to AI then click test (key preserved).":
-    "翻译／解释按这里的选择走。「翻译并优化」和「优化为 Anima」始终走 AI，与此无关。要测试 AI 连接，请临时把翻译服务切到 AI 再点测试（密钥会保留）。",
+  "Only this service's settings are shown below. \"Translate & Optimize\" and \"Optimize to Anima\" always use AI: choose OpenAI-compatible API or Ollama above to configure or test them. Switching service never clears saved keys.":
+    "下面只显示当前所选服务的设置。「翻译并优化」和「优化为 Anima」始终走 AI：要配置或测试它们，请在上方选择「OpenAI 兼容接口」或「Ollama」。切换服务不会清掉已保存的密钥。",
   "APP ID": "APP ID",
   "Secret Key": "密钥",
   "Clear saved Baidu secret": "清除已保存的百度密钥",
+  "Takes effect after saving": "保存后生效",
   "Baidu Cloud \"General Text Translation\" APP ID": "百度智能云「通用文本翻译」的 APP ID",
   "Baidu Cloud \"General Text Translation\" Secret Key": "百度智能云「通用文本翻译」的密钥",
   "QPS (requests/second)": "QPS（每秒请求数）",
@@ -421,14 +420,21 @@ const ZH = {
   "OpenAI-compatible API": "OpenAI 兼容接口",
   "Ollama (local)": "Ollama（本地）",
   "API URL": "API 地址",
-  "Optional for Ollama; e.g.: https://host/v1": "Ollama 可选；例如 https://host/v1",
+  "provider model ID": "服务商的模型 ID",
+  "e.g.: qwen3:8b": "例如：qwen3:8b",
+  "Optional for local LM Studio": "本地 LM Studio 可选",
+  "Remote addresses must use https; http is only accepted for this machine. Private, reserved and link-local addresses are rejected. Keys are never sent in clear text over the network.":
+    "远端地址必须使用 https；只有本机地址可以用 http。内网、保留和链路本地地址一律拒绝。密钥绝不会明文发到网络上。",
+  "Ollama only accepts a loopback address on this machine; anything else is rejected before a request is sent.":
+    "Ollama 只能填本机回环地址；其它地址在发出请求前就会被拒绝。",
   "Model Name": "模型名称",
-  "e.g.: qwen3:8b or provider model ID": "例如：qwen3:8b 或服务商的模型 ID",
   "Use LM Studio Local Preset": "使用 LM Studio 本地预设",
   "Connects to localhost:1234 by default; no external API required.": "默认连接 localhost:1234，不需要外部接口。",
   "LM Studio default URL filled; select a loaded model ID, then Save & Test": "已填入 LM Studio 默认地址；选择已加载的模型 ID 后保存并测试",
+  "Use Ollama Local Preset": "使用 Ollama 本地预设",
+  "Connects to localhost:11434 by default; no external API required.": "默认连接 localhost:11434，不需要外部接口。",
+  "Ollama default URL filled; select a pulled model ID, then Save & Test": "已填入 Ollama 默认地址；选择已拉取的模型 ID 后保存并测试",
   "API Key": "API 密钥",
-  "Optional for local Ollama / LM Studio": "本地 Ollama / LM Studio 可选",
   "Clear saved API Key": "清除已保存的 API 密钥",
   "Saved; leave empty to keep": "已保存；留空则保持不变",
   Temperature: "温度",
@@ -449,11 +455,13 @@ const ZH = {
   // ── 语言设置（本功能新增） ────────────────────────────────────────────
   Language: "语言",
   Chinese: "中文",
+  English: "英文",
   "Chinese (Simplified)": "简体中文",
   "Follow ComfyUI language setting": "跟随 ComfyUI 语言设置",
   "Choose the language for this plugin's own panels. \"Follow ComfyUI\" reads the ComfyUI language setting; \"Chinese\" and \"English\" force one. Applied to open panels right away; reload the page if anything still shows the old language.":
     "选择本插件面板的语言。「跟随 ComfyUI 语言设置」会随 ComfyUI 的语言切换；「中文」「英文」为强制指定。已打开的面板会立即更新；若个别位置仍是旧语言，刷新页面即可。",
-  "Language saved": "语言设置已保存",
+  "Appearance & Language": "语言与外观",
+  "Appearance and language saved": "外观与语言已保存",
 
   // ── 标签来源 / 分类 / 模式 ──────────────────────────────────────────
   "Inspector assistant": "检查器助手",
@@ -626,8 +634,6 @@ const ZH = {
   "Delete {}? Reference image will be deleted too.": "删除「{}」？参考图也会一并删除。",
   "Node #{}": "节点 #{}",
   "Node #{}: {}": "节点 #{}：{}",
-  "Bilingual Prompt Inspector: Tag Manager, Dictionary, Packs & Assistant Settings":
-    "提示词翻译与管理：标签管理、词库、词包与助手设置",
 
   // ── 语法诊断（parser.js）────────────────────────────────────────────
   "Manual override": "手动覆盖",

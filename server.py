@@ -14,13 +14,17 @@ from comfy import model_management
 from server import PromptServer
 
 from .assistant_store import (
+    AI_PROVIDER_PREFIXES,
+    AI_SERVICES,
     BAIDU_ERROR_MESSAGES,
     BAIDU_QPS_DEFAULT,
+    BAIDU_TIMEOUT_SECONDS,
     BAIDU_TRANSLATE_ENDPOINT,
     AssistantStore,
     baidu_split_query,
     baidu_translate_params,
     dictionary_translate,
+    normalize_ai_base_url,
     openai_chat_endpoint,
     sanitize_anima_prompt,
     translation_direction,
@@ -170,7 +174,7 @@ async def _baidu_translate(text, to_lang):
     if not chunks:
         raise ValueError("待翻译文本为空")
     qps = config.get("baidu_qps") or BAIDU_QPS_DEFAULT
-    timeout = ClientTimeout(total=config["ai_timeout_seconds"])
+    timeout = ClientTimeout(total=BAIDU_TIMEOUT_SECONDS)
     results = []
     async with ClientSession(timeout=timeout) as session:
         for chunk in chunks:
@@ -194,15 +198,19 @@ async def _baidu_translate(text, to_lang):
 
 
 async def _call_ai_assistant(action, text, instruction, config, connection_test=False):
-    """翻译/优化都走这里。优化类恒走 AI；翻译类在 translate_service=ai 时也走 AI。"""
-    if not config.get("ai_model"):
+    """翻译/优化都走这里。优化类恒走 AI；翻译类在翻译服务就是某个 AI 后端时也走 AI。"""
+    # 两个后端各一套配置和规则。选 OpenAI / Ollama 当翻译服务时它就是后端；
+    # 选词库 / 百度时翻译不走 AI，优化仍走，这时用 ai_provider 决定读哪一套
+    prefix = AI_PROVIDER_PREFIXES.get(config.get("translate_service")) or AI_PROVIDER_PREFIXES.get(
+        config.get("ai_provider", "openai_compatible"), "openai"
+    )
+    if not config.get(f"{prefix}_model"):
         raise ValueError("尚未填写 AI 模型名称（“翻译并优化”“优化为 Anima”以及 AI 翻译都需要）")
-    ai_provider = config["ai_provider"]
     rule = {
-        "translate": config["translation_rule"],
-        "explain": config["translation_rule"],
-        "translate_optimize": config["translate_optimize_rule"],
-        "optimize": config["optimization_rule"],
+        "translate": config[f"{prefix}_translation_rule"],
+        "explain": config[f"{prefix}_translation_rule"],
+        "translate_optimize": config[f"{prefix}_translate_optimize_rule"],
+        "optimize": config[f"{prefix}_optimization_rule"],
     }[action]
     if connection_test:
         rule = "你是连接测试助手。"
@@ -220,17 +228,18 @@ async def _call_ai_assistant(action, text, instruction, config, connection_test=
         rule = f"{rule}\n\n本次任务：整理现有英文内容，不承担翻译。"
     if instruction:
         rule = f"{rule}\n\n用户本次附加要求优先遵循：{instruction.strip()}"
-    timeout = ClientTimeout(total=config["ai_timeout_seconds"])
-    if ai_provider == "ollama":
-        base = (config.get("ai_base_url") or "http://127.0.0.1:11434").rstrip("/")
+    timeout = ClientTimeout(total=config[f"{prefix}_timeout_seconds"])
+    if prefix == "ollama":
+        # Ollama 只允许本机回环地址：这里再校验一次，挡住手改配置文件的情况
+        base = normalize_ai_base_url(config["ollama_base_url"])
         if base.endswith("/v1"):
             base = base[:-3].rstrip("/")
         endpoint = base if base.endswith("/api/chat") else f"{base}/api/chat"
         payload = {
-            "model": config["ai_model"],
+            "model": config["ollama_model"],
             "stream": False,
             "messages": [{"role": "system", "content": rule}, {"role": "user", "content": text}],
-            "options": {"temperature": config["ai_temperature"]},
+            "options": {"temperature": config["ollama_temperature"]},
         }
         async with ClientSession(timeout=timeout) as session:
             async with session.post(endpoint, json=payload) as response:
@@ -239,18 +248,20 @@ async def _call_ai_assistant(action, text, instruction, config, connection_test=
                     raise ValueError(data.get("error") or f"Ollama 请求失败：HTTP {response.status}")
         result = data.get("message", {}).get("content")
     else:
-        if not config.get("ai_base_url"):
+        # OpenAI 兼容：远端必须 https，本机回环才允许 http
+        base = normalize_ai_base_url(config["openai_base_url"], allow_remote=True)
+        if not base:
             raise ValueError("尚未填写 OpenAI 兼容 API 地址")
         headers = {"Content-Type": "application/json"}
-        if config.get("ai_api_key"):
-            headers["Authorization"] = f"Bearer {config['ai_api_key']}"
+        if config.get("openai_api_key"):
+            headers["Authorization"] = f"Bearer {config['openai_api_key']}"
         payload = {
-            "model": config["ai_model"],
-            "temperature": config["ai_temperature"],
+            "model": config["openai_model"],
+            "temperature": config["openai_temperature"],
             "messages": [{"role": "system", "content": rule}, {"role": "user", "content": text}],
         }
         async with ClientSession(timeout=timeout) as session:
-            async with session.post(openai_chat_endpoint(config["ai_base_url"]), headers=headers, json=payload) as response:
+            async with session.post(openai_chat_endpoint(base), headers=headers, json=payload) as response:
                 data = await response.json(content_type=None)
                 if response.status >= 400:
                     detail = data.get("error") if isinstance(data, dict) else None
@@ -272,13 +283,13 @@ async def _call_ai_assistant(action, text, instruction, config, connection_test=
 async def _call_configured_assistant(action, text, instruction="", connection_test=False):
     config = assistant_store.config()
     translate_service = config["translate_service"]
-    # “翻译并优化”“优化为 Anima”恒走 AI；翻译/解释在 translate_service=ai 时也走 AI
+    # “翻译并优化”“优化为 Anima”恒走 AI；翻译/解释在翻译服务就是某个 AI 后端时也走 AI
     needs_ai = action in {"translate_optimize", "optimize"} or (
-        action in {"translate", "explain"} and translate_service == "ai"
+        action in {"translate", "explain"} and translate_service in AI_SERVICES
     )
     if needs_ai:
         return await _call_ai_assistant(action, text, instruction, config, connection_test)
-    # 以下只处理 translate/explain 且 translate_service != "ai"
+    # 以下只处理 translate/explain 且翻译服务不是 AI
     if translate_service == "dictionary":
         if connection_test:
             return "纯词库模式可用"
@@ -291,7 +302,7 @@ async def _call_configured_assistant(action, text, instruction="", connection_te
             return "百度翻译连接成功"
         to_lang = "zh" if action == "explain" or translation_direction(text) == "to_chinese" else "en"
         return await _baidu_translate(text, to_lang)
-    raise ValueError("翻译服务配置异常：请在助手设置里选择词库、百度或 AI")
+    raise ValueError("翻译服务配置异常：请在助手设置里选择词库、百度翻译、OpenAI 兼容接口或 Ollama")
 
 
 @PromptServer.instance.routes.get("/bpi/session")
@@ -318,12 +329,6 @@ async def save_assistant_config(request):
         return error_response(error)
 
 
-@protected_route("post", "/bpi/assistant/reset-rules")
-async def reset_assistant_rules(_request):
-    try:
-        return web.json_response({"success": True, "data": assistant_store.reset_rules()})
-    except OSError as error:
-        return error_response(error, 500)
 
 
 @protected_route("post", "/bpi/assistant/test")

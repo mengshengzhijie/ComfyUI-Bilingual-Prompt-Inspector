@@ -36,8 +36,9 @@
   - 只在用户主动调用时访问配置的百度翻译或 AI（OpenAI 兼容 / Ollama）服务；"翻译并优化"与"优化为 Anima"恒走 AI，翻译/解释按 `translate_service` 选择。
   - `UpstreamGate` 负责上游输入的挂起：按节点 id 保存一个 future，只能被 `/bpi/upstream/{ack,resume,cancel}` 唤醒。等待循环每 0.5 秒检查一次 ComfyUI 中断，无人接管时到点自动透传。唤醒一律走 `loop.call_soon_threadsafe`——future 属于执行线程的 loop，而路由跑在主线程。
 - `assistant_store.py`
-  - 保存翻译服务类型（schema v3：`translate_service` = dictionary / baidu / ai）、AI 后端与地址模型、百度 APP ID 与密钥、三套规则和独立留存的 AI Key 与百度密钥。
-  - AI Key 与百度密钥互不干扰：切换翻译服务不清任一密钥；AI Key 只在 AI 后端/地址变更或换机器时清，百度密钥只在显式清除时清。
+  - 保存翻译服务类型（schema v4：`translate_service` = dictionary / baidu / openai_compatible / ollama；后两个同时是 AI 后端，选前两个时由 `ai_provider` 决定优化走哪一套）、两套 AI 配置（OpenAI 兼容 / Ollama 各一套地址、模型、温度、超时与三条规则）、百度 APP ID 与密钥，以及独立留存的 AI Key 与百度密钥。
+  - 读到旧值 `translate_service = "ai"` 时按当时的 `ai_provider` 拆成 `openai_compatible` / `ollama` 并回写。
+  - AI Key 与百度密钥互不干扰：切换翻译服务或 AI 后端不清任一密钥；AI Key 只在地址变更或换机器时清，百度密钥只在显式清除时清。
   - 旧 v2 配置（单一 `provider`）自动迁移至 v3，密钥与绑定原样搬入 `ai_*` 槽。
   - API Key 不通过读取接口返回前端；公开配置只返回 `ai_api_key_configured` 与 `baidu_secret_key_configured` 布尔值。
   - 负责翻译方向判断、纯词库翻译和 Anima 输出标点清理。
@@ -58,8 +59,11 @@
   - `openSavePromptDialog` 用 multipart 一次提交名称、备注与图片文件，正文只读展示，保存成功后回调刷新侧边栏。
   - `openManagerPanel` 通过 ComfyUI 侧边栏 API 打开管理面板，可指定定位分页与目标节点。
 - `js/manager_panel.js`
-  - 在 ComfyUI 侧边栏注册「双语提示词管理」面板，包含标签管理、词库、词库包、助手设置、收藏五个分页。
-  - 承担原节点内管理弹窗的全部职责：词条增删改、批量操作、个人词库导入导出、社区包与大型词库管理、助手服务与 API Key 配置。
+  - 在 ComfyUI 侧边栏注册「双语提示词管理」面板，包含标签管理、词库、词库包、收藏四个分页。
+  - 承担原节点内管理弹窗的全部职责：词条增删改、批量操作、个人词库导入导出、社区包与大型词库管理。
+  - 助手设置不在侧边栏：同一文件的 `registerExtension` 用 `settings` 在 ComfyUI「设置」面板的「双语提示词检查器」分类下注册两项 ——「语言与外观」（`appearanceControl()`）与「助手设置」（`assistantSettingsControl()`），表单都直接内嵌在设置面板右侧，配置仍写入 `assistant_store.py`。面板反复渲染会重建控件容器，所以每项的整块 DOM 只建一次后复用，避免输入到一半被清空。
+  - 语言与外观只提交 `appearance` / `language` 两个字段：`assistant_store.update()` 对 payload 里没给的字段一律取当前值，所以不会动翻译服务与密钥；助手设置的 payload 反过来已经不含这两项。
+  - AI 两个后端各一整套配置（地址 / 模型 / 温度 / 超时 / 三条规则），键名前缀 `openai_` 与 `ollama_`，`ai_provider` 只决定当前读哪一套；切换后端不清空任何一套。地址白名单在 `assistant_store.normalize_ai_base_url()`：OpenAI 远端必须 https、http 仅限本机回环，Ollama 只认本机回环，且 `server.py` 发请求前会再校验一次（防手改配置文件）。
   - “标签管理”分页通过节点下拉列表挂载指定节点的标签翻译与词库搜索界面（DOM 直接移植，逻辑仍归属各节点闭包），节点删除时自动摘下。
   - 修改后通过 `panelSyncHub` 通知当前页面所有节点刷新。
   - “收藏”分页按需挂载并监听 `bpi:saved-prompts-changed`：卡片支持搜索、复制、删除、导出导入；「新建」没有选中节点时弹出节点选择器；「载入节点」先确认再调目标节点的 `_bilingualPromptInspector.setText`，覆盖不进 undo 栈。
@@ -68,7 +72,7 @@
   - 标签排序是结构化编辑：英文标签区支持指针拖拽（4px 阈值区分点击与拖动，拖动后吞掉 click/dblclick），明细表行首提供 `⠿` 手柄（带插入指示线与边缘自动滚动），`Alt+↑/↓` 键盘微调；三个入口都汇入同一个 `moveTokenTo` → `movePromptToken` → undo 栈管线。
   - 标签隐藏（临时排除出实际输出）只是“打标记”：标签留在文本里，卡片与明细行加删除线并灰化褪色，拖动/双击改权重/改色照常；剔除发生在输出时——`syncEffectiveOutput` 把去掉隐藏标签的文本同步进隐藏 widget `effective_text`（并置 `use_effective`），`nodes.py` 按它输出，旧工作流没有这两个 widget 时默认直通。明细表行内眼睛图标、英文标签 hover 浮出的眼睛角标在隐藏后变为眼睛斜线（取消隐藏）；明细表下方与英文标签区下方的“已隐藏”条负责逐个/全部恢复；清单存在 `node.properties.bpiHiddenTags`（随工作流保存），每次编辑把清单快照写进 undo 条目，撤销时文本与清单一起回滚。旧版工作流里当时被物理删除的隐藏标签，恢复时仍按旧锚点插回文本。
   - 标签翻译与词库搜索（标签管理）不再渲染进节点，其 DOM 由侧边栏“标签管理”分页挂载，节点高度恒为折叠尺寸。
-  - 管理功能收敛为「标签管理」「助手设置」等入口按钮，打开侧边栏面板对应分页并定位到本节点。
+  - 管理功能收敛为「标签管理」等入口按钮，打开侧边栏面板对应分页并定位到本节点。
   - 上游输入条（`.bpi-source-bar`）只在 `prompt` 端口真的连上时才渲染，未连线时零高度、界面与旧版一致。条内含接管开关、导入策略下拉和状态文案，等待确认时额外出现「继续运行」「放弃」。开关与策略存在 `node.properties.bpiUpstream`（随工作流保存）；放行时把节点当前文本 POST 回后端，因此输出始终等于放行那一刻节点上的内容。
 - `js/parser.js`
   - 非破坏性切分标签，保留原始字符位置。

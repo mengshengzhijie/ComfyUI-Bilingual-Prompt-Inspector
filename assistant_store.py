@@ -47,16 +47,22 @@ DEFAULT_OPTIMIZATION_RULE = """你是 Anima 模型英文提示词优化器。输
 标签使用英文逗号分隔；自然语言只放在末尾并使用英文句点分隔。仅使用 Anima 支持的英文标点和语法：逗号、句点、圆括号与冒号权重、@ 画师前缀、下划线、连字符、撇号、百分号，以及尖括号 LoRA 语法。"""
 
 DEFAULT_CONFIG = {
-    "schema_version": 3,
-    # 翻译/解释走哪个服务；优化永远走 AI，与此无关
-    "translate_service": "dictionary",  # dictionary | baidu | ai
-    # AI 后端独立配置，不随翻译服务切换而清空
+    "schema_version": 4,
+    # 翻译/解释走哪个服务；OpenAI 兼容与 Ollama 本身就是两个平级选项
+    "translate_service": "dictionary",  # dictionary | baidu | openai_compatible | ollama
+    # 选词库/百度时翻译不走 AI，但「翻译并优化」「优化为 Anima」恒走 AI —— 这时用它决定读哪一套
     "ai_provider": "openai_compatible",  # openai_compatible | ollama
-    "ai_base_url": "",
-    "ai_model": "",
-    "ai_api_key": "",
-    "ai_temperature": 0.2,
-    "ai_timeout_seconds": 90,
+    # OpenAI 兼容：远端必须 https，本机回环 http 也放行（本地 LM Studio 之类）
+    "openai_base_url": "",
+    "openai_model": "",
+    "openai_api_key": "",
+    "openai_temperature": 0.2,
+    "openai_timeout_seconds": 90,
+    # Ollama：只允许本机回环地址，没有密钥
+    "ollama_base_url": "http://127.0.0.1:11434",
+    "ollama_model": "",
+    "ollama_temperature": 0.2,
+    "ollama_timeout_seconds": 90,
     # 百度翻译独立配置，不随翻译服务切换而清空
     "baidu_appid": "",
     "baidu_secret_key": "",
@@ -66,10 +72,21 @@ DEFAULT_CONFIG = {
     "appearance": "auto",  # auto | dark | light
     # 插件面板自己的界面语言：auto 跟随 ComfyUI 的 Comfy.Locale，zh / en 强制指定
     "language": "auto",  # auto | zh | en
-    "translation_rule": DEFAULT_TRANSLATION_RULE,
-    "translate_optimize_rule": DEFAULT_TRANSLATE_OPTIMIZE_RULE,
-    "optimization_rule": DEFAULT_OPTIMIZATION_RULE,
+    # 每个后端一套规则：本地小模型和云端大模型要写的提示词不一样
+    "openai_translation_rule": DEFAULT_TRANSLATION_RULE,
+    "openai_translate_optimize_rule": DEFAULT_TRANSLATE_OPTIMIZE_RULE,
+    "openai_optimization_rule": DEFAULT_OPTIMIZATION_RULE,
+    "ollama_translation_rule": DEFAULT_TRANSLATION_RULE,
+    "ollama_translate_optimize_rule": DEFAULT_TRANSLATE_OPTIMIZE_RULE,
+    "ollama_optimization_rule": DEFAULT_OPTIMIZATION_RULE,
 }
+
+# 规则按后端分成两套，遍历时统一用这两个前缀
+AI_PROVIDER_PREFIXES = {"openai_compatible": "openai", "ollama": "ollama"}
+# translate_service 里属于 AI 的两个值，与 ai_provider 共用同一套前缀
+AI_SERVICES = frozenset(AI_PROVIDER_PREFIXES)
+TRANSLATE_SERVICES = frozenset({"dictionary", "baidu"}) | AI_SERVICES
+RULE_KEYS = ("translation_rule", "translate_optimize_rule", "optimization_rule")
 
 BAIDU_TRANSLATE_ENDPOINT = "https://fanyi-api.baidu.com/api/trans/vip/translate"
 
@@ -78,6 +95,8 @@ BAIDU_TRANSLATE_ENDPOINT = "https://fanyi-api.baidu.com/api/trans/vip/translate"
 BAIDU_QPS_DEFAULT = 1.0
 BAIDU_QPS_MIN = 0.1
 BAIDU_QPS_MAX = 50.0
+# 百度单块最多 600 字，90 秒与原默认值一致（AI 拆成两套后不再借用它的超时）
+BAIDU_TIMEOUT_SECONDS = 90
 
 
 def normalize_baidu_qps(value):
@@ -108,6 +127,59 @@ BAIDU_ERROR_MESSAGES = {
 
 def translation_direction(text):
     return "to_english" if re.search(r"[\u3400-\u9fff]", str(text or "")) else "to_chinese"
+
+
+def is_loopback_host(hostname):
+    """只允许真正的回环地址：127.0.0.0/8、::1、localhost。
+
+    比「私有网段」窄得多 —— 私有网段里还有路由器、NAS、同事的机器，
+    SSRF 正是靠它们横向探测，所以这里一律不放行。
+    """
+    host = str(hostname or "").strip().lower().rstrip(".")
+    if host in {"localhost", "127.0.0.1", "::1"}:
+        return True
+    try:
+        return ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def is_public_address(hostname):
+    """主机名直接写成 IP 时，只放行公网地址；域名不做解析，一律放行。
+
+    挡的是 https://192.168.x.x、https://10.x.x.x、https://169.254.169.254（云元数据）这类
+    「虽然是 https、但仍然指向内网」的直连写法。
+    """
+    try:
+        return ip_address(hostname).is_global
+    except ValueError:
+        return True
+
+
+def normalize_ai_base_url(value, *, allow_remote=False):
+    """校验 AI 地址，返回去掉尾斜杠的原文；不合规直接抛错，不发请求。
+
+    allow_remote=False（Ollama）：只能是本机回环地址。
+    allow_remote=True（OpenAI 兼容）：https 一律放行，http 只放行本机回环。
+    """
+    base = str(value or "").strip().rstrip("/")
+    if not base:
+        return ""
+    parsed = urlparse(base)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("API 地址必须是完整的 http:// 或 https:// 地址")
+    if parsed.username or parsed.password:
+        raise ValueError("API 地址中不能包含用户名或密码")
+    if parsed.query or parsed.fragment:
+        raise ValueError("API 地址中不能包含查询参数或片段")
+    loopback = is_loopback_host(parsed.hostname)
+    if not allow_remote and not loopback:
+        raise ValueError("Ollama 地址只能是本机地址（127.0.0.1 / localhost / ::1）")
+    if parsed.scheme == "http" and not loopback:
+        raise ValueError("非本机 API 地址必须使用 HTTPS，避免密钥明文传输")
+    if allow_remote and not loopback and not is_public_address(parsed.hostname):
+        raise ValueError("远端 API 地址不能是内网、保留或链路本地地址")
+    return base
 
 
 def openai_chat_endpoint(base_url):
@@ -283,17 +355,6 @@ class AssistantStore:
     def _normalize_base_url(value):
         return str(value or "").strip().rstrip("/")
 
-    @staticmethod
-    def _is_local_hostname(hostname):
-        host = str(hostname or "").strip().lower().rstrip(".")
-        if host in {"localhost", "host.docker.internal"} or host.endswith(".local") or "." not in host:
-            return True
-        try:
-            address = ip_address(host)
-            return address.is_private or address.is_loopback or address.is_link_local
-        except ValueError:
-            return False
-
     @classmethod
     def _credential_binding(cls, provider, base_url):
         identity = f"{str(provider or '').strip().lower()}\0{cls._normalize_base_url(base_url)}"
@@ -303,7 +364,7 @@ class AssistantStore:
         return {
             **DEFAULT_CONFIG,
             "installation_id": self.installation_id,
-            "ai_credential_binding": "",
+            "openai_credential_binding": "",
             "baidu_credential_binding": "",
         }
 
@@ -334,6 +395,40 @@ class AssistantStore:
         value["schema_version"] = 3
         return value
 
+    @classmethod
+    def _migrate_v3(cls, value):
+        """v3（AI 单槽）→ v4（OpenAI / Ollama 两套独立配置）。
+
+        旧的单槽值整份搬到「当前所选后端」那套，另一套留默认；
+        规则原本不分后端，两套都继承，之后可以各自改。
+        """
+        if value.get("schema_version", 0) >= 4:
+            return value
+        provider = str(value.get("ai_provider", "openai_compatible")).strip().lower()
+        prefix = AI_PROVIDER_PREFIXES.get(provider, "openai")
+        for source, target in (
+            ("ai_base_url", "base_url"),
+            ("ai_model", "model"),
+            ("ai_temperature", "temperature"),
+            ("ai_timeout_seconds", "timeout_seconds"),
+        ):
+            if str(value.get(source) or "").strip() != "":
+                value[f"{prefix}_{target}"] = value[source]
+        if prefix == "openai" and str(value.get("ai_api_key") or "").strip():
+            value["openai_api_key"] = value["ai_api_key"]
+            # 绑定的 provider 标记从 openai_compatible 变成 openai，旧值必然对不上；
+            # 直接按新前缀重算，否则密钥会被当成「换了地址」清掉
+            value["openai_credential_binding"] = cls._credential_binding("openai", value.get("openai_base_url", ""))
+        for rule in RULE_KEYS:
+            existing = str(value.get(rule) or "").strip()
+            if existing:
+                for target in ("openai", "ollama"):
+                    value.setdefault(f"{target}_{rule}", existing)
+        for key in ("ai_base_url", "ai_model", "ai_temperature", "ai_timeout_seconds", "ai_api_key", "ai_credential_binding"):
+            value.pop(key, None)
+        value["schema_version"] = 4
+        return value
+
     def config(self):
         value = {}
         should_rewrite = False
@@ -350,20 +445,27 @@ class AssistantStore:
         if value and value.get("schema_version", 0) < 3:
             value = self._migrate_v2(value)
             should_rewrite = True
-        if value.get("translation_rule") in {LEGACY_DEFAULT_TRANSLATION_RULE, V17_DEFAULT_TRANSLATION_RULE}:
-            value["translation_rule"] = DEFAULT_TRANSLATION_RULE
+        if value and value.get("schema_version", 0) < 4:
+            value = self._migrate_v3(value)
             should_rewrite = True
-        if value.get("optimization_rule") == LEGACY_DEFAULT_OPTIMIZATION_RULE:
-            value["optimization_rule"] = DEFAULT_OPTIMIZATION_RULE
+        # 旧值 "ai" 已拆成两个平级服务：按当时的后端落到 openai_compatible / ollama
+        if value and value.get("translate_service") == "ai":
+            provider = str(value.get("ai_provider") or "openai_compatible").strip().lower()
+            value["translate_service"] = provider if provider in AI_SERVICES else "openai_compatible"
             should_rewrite = True
-        if "translate_optimize_rule" not in value:
-            value["translate_optimize_rule"] = DEFAULT_TRANSLATE_OPTIMIZE_RULE
-            should_rewrite = True
+        # 旧版默认规则已废弃：两套各查一次，命中就换成现在的默认
+        for prefix in ("openai", "ollama"):
+            if value.get(f"{prefix}_translation_rule") in {LEGACY_DEFAULT_TRANSLATION_RULE, V17_DEFAULT_TRANSLATION_RULE}:
+                value[f"{prefix}_translation_rule"] = DEFAULT_TRANSLATION_RULE
+                should_rewrite = True
+            if value.get(f"{prefix}_optimization_rule") == LEGACY_DEFAULT_OPTIMIZATION_RULE:
+                value[f"{prefix}_optimization_rule"] = DEFAULT_OPTIMIZATION_RULE
+                should_rewrite = True
         result = {**self._default_persisted_config(), **value, "installation_id": self.installation_id}
-        # 密钥只在「绑定的后端/地址变了」或「换机器」时清，切翻译服务绝不清
-        if result.get("ai_api_key") and result.get("ai_credential_binding") != self._credential_binding(result["ai_provider"], result["ai_base_url"]):
-            result["ai_api_key"] = ""
-            result["ai_credential_binding"] = ""
+        # 密钥只在「地址变了」或「换机器」时清，切翻译服务 / 切后端绝不清
+        if result.get("openai_api_key") and result.get("openai_credential_binding") != self._credential_binding("openai", result["openai_base_url"]):
+            result["openai_api_key"] = ""
+            result["openai_credential_binding"] = ""
             should_rewrite = True
         if result.get("baidu_secret_key") and result.get("baidu_credential_binding") != self._credential_binding("baidu", ""):
             result["baidu_secret_key"] = ""
@@ -381,15 +483,17 @@ class AssistantStore:
 
     def public_config(self):
         config = self.config()
+        defaults = {}
+        for prefix in ("openai", "ollama"):
+            defaults[f"default_{prefix}_translation_rule"] = DEFAULT_TRANSLATION_RULE
+            defaults[f"default_{prefix}_translate_optimize_rule"] = DEFAULT_TRANSLATE_OPTIMIZE_RULE
+            defaults[f"default_{prefix}_optimization_rule"] = DEFAULT_OPTIMIZATION_RULE
         return {
-            key: config[key] for key in DEFAULT_CONFIG if key not in ("ai_api_key", "baidu_secret_key")
+            key: config[key] for key in DEFAULT_CONFIG if key not in ("openai_api_key", "baidu_secret_key")
         } | {
-            "ai_api_key_configured": bool(config.get("ai_api_key")),
+            "openai_api_key_configured": bool(config.get("openai_api_key")),
             "baidu_secret_key_configured": bool(config.get("baidu_secret_key")),
-            "default_translation_rule": DEFAULT_TRANSLATION_RULE,
-            "default_translate_optimize_rule": DEFAULT_TRANSLATE_OPTIMIZE_RULE,
-            "default_optimization_rule": DEFAULT_OPTIMIZATION_RULE,
-        }
+        } | defaults
 
     @staticmethod
     def _clean_rule(value, fallback):
@@ -405,45 +509,46 @@ class AssistantStore:
             raise ValueError("设置必须是对象")
         current = self.config()
         translate_service = str(payload.get("translate_service", current["translate_service"])).strip().lower()
-        if translate_service not in {"dictionary", "baidu", "ai"}:
-            raise ValueError("翻译服务仅支持词库、百度翻译或 AI")
+        if translate_service not in TRANSLATE_SERVICES:
+            raise ValueError("翻译服务仅支持词库、百度翻译、OpenAI 兼容接口或 Ollama")
         ai_provider = str(payload.get("ai_provider", current["ai_provider"])).strip().lower()
         if ai_provider not in {"openai_compatible", "ollama"}:
             raise ValueError("AI 后端仅支持 OpenAI 兼容接口或 Ollama")
-        ai_base_url = self._normalize_base_url(payload.get("ai_base_url", current["ai_base_url"]))
-        if ai_base_url:
-            parsed = urlparse(ai_base_url)
-            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-                raise ValueError("API 地址必须是完整的 http:// 或 https:// 地址")
-            if parsed.username or parsed.password:
-                raise ValueError("API 地址中不能包含用户名或密码")
-            if parsed.query or parsed.fragment:
-                raise ValueError("API 地址中不能包含查询参数或片段")
-            if parsed.scheme == "http" and not self._is_local_hostname(parsed.hostname):
-                raise ValueError("非本机 API 地址必须使用 HTTPS，避免 API Key 明文传输")
-        ai_model = str(payload.get("ai_model", current["ai_model"])).strip()
-        if len(ai_model) > 300:
-            raise ValueError("模型名称过长")
-        try:
-            ai_temperature = float(payload.get("ai_temperature", current["ai_temperature"]))
-            ai_timeout_seconds = int(payload.get("ai_timeout_seconds", current["ai_timeout_seconds"]))
-        except (TypeError, ValueError) as error:
-            raise ValueError("温度和超时时间必须是数字") from error
-        if not 0 <= ai_temperature <= 2:
-            raise ValueError("温度必须在 0 到 2 之间")
-        if not 5 <= ai_timeout_seconds <= 600:
-            raise ValueError("超时时间必须在 5 到 600 秒之间")
-        # AI key：只在「AI 后端/地址变了」或显式清除时清，切翻译服务绝不清
-        ai_endpoint_changed = ai_provider != current["ai_provider"] or ai_base_url != self._normalize_base_url(current["ai_base_url"])
-        ai_api_key = "" if ai_endpoint_changed else current.get("ai_api_key", "")
-        if payload.get("clear_ai_api_key"):
-            ai_api_key = ""
-        elif "ai_api_key" in payload:
-            incoming_key = str(payload.get("ai_api_key") or "").strip()
+        # 选了 OpenAI / Ollama 当翻译服务时，它就是 AI 后端，两者不允许脱节
+        if translate_service in AI_SERVICES:
+            ai_provider = translate_service
+        # 两个后端各一套：地址规则不同（Ollama 只认本机，OpenAI 远端必须 https）
+        openai_base_url = normalize_ai_base_url(payload.get("openai_base_url", current["openai_base_url"]), allow_remote=True)
+        ollama_base_url = normalize_ai_base_url(payload.get("ollama_base_url", current["ollama_base_url"]))
+        if not ollama_base_url:
+            ollama_base_url = DEFAULT_CONFIG["ollama_base_url"]
+        models = {}
+        numbers = {}
+        for prefix in ("openai", "ollama"):
+            models[prefix] = str(payload.get(f"{prefix}_model", current[f"{prefix}_model"])).strip()
+            if len(models[prefix]) > 300:
+                raise ValueError("模型名称过长")
+            try:
+                numbers[prefix] = (
+                    float(payload.get(f"{prefix}_temperature", current[f"{prefix}_temperature"])),
+                    int(payload.get(f"{prefix}_timeout_seconds", current[f"{prefix}_timeout_seconds"])),
+                )
+            except (TypeError, ValueError) as error:
+                raise ValueError("温度和超时时间必须是数字") from error
+            if not 0 <= numbers[prefix][0] <= 2:
+                raise ValueError("温度必须在 0 到 2 之间")
+            if not 5 <= numbers[prefix][1] <= 600:
+                raise ValueError("超时时间必须在 5 到 600 秒之间")
+        # OpenAI key：只在「地址变了」或显式清除时清，切翻译服务 / 切后端绝不清
+        openai_api_key = "" if openai_base_url != self._normalize_base_url(current["openai_base_url"]) else current.get("openai_api_key", "")
+        if payload.get("clear_openai_api_key"):
+            openai_api_key = ""
+        elif "openai_api_key" in payload:
+            incoming_key = str(payload.get("openai_api_key") or "").strip()
             if incoming_key and incoming_key != "••••••••":
                 if len(incoming_key) > 4096:
                     raise ValueError("API Key 过长")
-                ai_api_key = incoming_key
+                openai_api_key = incoming_key
         baidu_appid = str(payload.get("baidu_appid", current.get("baidu_appid", ""))).strip()
         if len(baidu_appid) > 128:
             raise ValueError("百度 APP ID 过长")
@@ -458,7 +563,7 @@ class AssistantStore:
                     raise ValueError("百度密钥过长")
                 baidu_secret = incoming_secret
         baidu_qps = normalize_baidu_qps(payload.get("baidu_qps", current.get("baidu_qps", BAIDU_QPS_DEFAULT)))
-        ai_credential_binding = self._credential_binding(ai_provider, ai_base_url) if ai_api_key else ""
+        openai_credential_binding = self._credential_binding("openai", openai_base_url) if openai_api_key else ""
         baidu_credential_binding = self._credential_binding("baidu", "") if baidu_secret else ""
         appearance = str(payload.get("appearance", current.get("appearance", "auto"))).strip().lower()
         if appearance not in {"auto", "dark", "light"}:
@@ -467,35 +572,32 @@ class AssistantStore:
         if language not in {"auto", "zh", "en"}:
             raise ValueError("界面语言仅支持 auto / zh / en")
         result = {
-            "schema_version": 3,
+            "schema_version": 4,
             "translate_service": translate_service,
             "ai_provider": ai_provider,
-            "ai_base_url": ai_base_url,
-            "ai_model": ai_model,
-            "ai_api_key": ai_api_key,
-            "ai_temperature": ai_temperature,
-            "ai_timeout_seconds": ai_timeout_seconds,
+            "openai_base_url": openai_base_url,
+            "openai_model": models["openai"],
+            "openai_api_key": openai_api_key,
+            "openai_temperature": numbers["openai"][0],
+            "openai_timeout_seconds": numbers["openai"][1],
+            "ollama_base_url": ollama_base_url,
+            "ollama_model": models["ollama"],
+            "ollama_temperature": numbers["ollama"][0],
+            "ollama_timeout_seconds": numbers["ollama"][1],
             "baidu_appid": baidu_appid,
             "baidu_secret_key": baidu_secret,
             "baidu_qps": baidu_qps,
             "appearance": appearance,
             "language": language,
-            "translation_rule": self._clean_rule(payload.get("translation_rule"), current["translation_rule"]),
-            "translate_optimize_rule": self._clean_rule(payload.get("translate_optimize_rule"), current["translate_optimize_rule"]),
-            "optimization_rule": self._clean_rule(payload.get("optimization_rule"), current["optimization_rule"]),
-            "installation_id": self.installation_id,
-            "ai_credential_binding": ai_credential_binding,
             "baidu_credential_binding": baidu_credential_binding,
+            "openai_credential_binding": openai_credential_binding,
+            "installation_id": self.installation_id,
         }
+        # 规则两套，各取各自的当前值兜底
+        for prefix in ("openai", "ollama"):
+            for rule in RULE_KEYS:
+                result[f"{prefix}_{rule}"] = self._clean_rule(payload.get(f"{prefix}_{rule}"), current[f"{prefix}_{rule}"])
         self._write_json_atomic(self.config_path, result)
-        return self.public_config()
-
-    def reset_rules(self):
-        config = self.config()
-        config["translation_rule"] = DEFAULT_TRANSLATION_RULE
-        config["translate_optimize_rule"] = DEFAULT_TRANSLATE_OPTIMIZE_RULE
-        config["optimization_rule"] = DEFAULT_OPTIMIZATION_RULE
-        self._write_json_atomic(self.config_path, config)
         return self.public_config()
 
 

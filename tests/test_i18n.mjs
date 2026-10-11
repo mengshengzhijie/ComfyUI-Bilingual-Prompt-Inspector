@@ -144,15 +144,19 @@ assert.equal(t("(weight 1.5)"), "（权重 1.5）");
 // 插件名：侧边栏标签写死中文，面板/关于框走译表，三处必须同一个名字
 assert.equal(t("Bilingual Prompt Manager"), "提示词翻译与管理");
 assert.equal(t("Bilingual Prompt Inspector"), "提示词翻译与管理");
+// 设置面板里「语言与外观」那一项
+assert.equal(t("Appearance & Language"), "语言与外观");
+assert.equal(t("Appearance and language saved"), "外观与语言已保存");
+// 两个本地预设按钮各有一套文案，别混
+assert.equal(t("Use LM Studio Local Preset"), "使用 LM Studio 本地预设");
+assert.equal(t("Use Ollama Local Preset"), "使用 Ollama 本地预设");
+assert.equal(t("Takes effect after saving"), "保存后生效");
+assert.equal(t("Ollama default URL filled; select a pulled model ID, then Save & Test"), "已填入 Ollama 默认地址；选择已拉取的模型 ID 后保存并测试");
 // 确认对话框：默认确认按钮是 "OK"，必须译为「确认」而不是「正常」
 assert.equal(t("OK"), "确认");
 assert.equal(t("Cancel"), "取消");
 assert.equal(t("This will overwrite node #3 prompt. Cannot be undone with Ctrl+Z."), "这会覆盖节点 #3 的提示词，Ctrl+Z 无法撤销。");
 assert.equal(t("Delete “Fluffy”? Reference image will be deleted too."), "删除「Fluffy」？参考图也会一并删除。");
-assert.equal(
-  t("Bilingual Prompt Inspector: Tag Manager, Dictionary, Packs & Assistant Settings"),
-  "提示词翻译与管理：标签管理、词库、词包与助手设置",
-);
 assert.equal(t("restored 3 hidden tags; press Ctrl+Z to undo"), "已恢复 3 个隐藏标签；按 Ctrl+Z 可撤销");
 assert.equal(t("Node #3"), "节点 #3");
 

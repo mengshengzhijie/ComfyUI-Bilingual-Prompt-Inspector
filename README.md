@@ -1,4 +1,4 @@
-# ComfyUI 双语提示词管理器 v2.0.6
+# ComfyUI 双语提示词管理器 v2.1.0
 
 > ComfyUI 双语提示词节点：把英文提示词拆成可点击的标签，边写边看中文解释、调顺序、试效果。
 
@@ -85,7 +85,7 @@
 | **多来源词库** | 内置词库 + 个人词库 + 社区词库包，每条解释都会标注来源 |
 | **概念搜索** | 搜「丝袜」能返回连裤袜、长筒袜、过膝袜等相关标签，支持滚动分页加载 |
 | **大型 Danbooru 词库（可选）** | 按需安装，覆盖面更广，不装也不影响其它功能 |
-| **翻译服务可切换** | 纯词库（离线、免费）/ 百度翻译 / AI（OpenAI 兼容 API 或 Ollama）。翻译与解释可选任意一种；「翻译并优化」「优化为 Anima」恒定走 AI |
+| **翻译服务可切换** | 纯词库（离线、免费）／ 百度翻译 ／ OpenAI 兼容 API ／ Ollama。翻译与解释可选任意一种；「翻译并优化」「优化为 Anima」恒定走 AI |
 | **密钥互不干扰** | AI 与百度密钥独立留存，切换翻译服务不会清空；均不写入工作流、不返回浏览器 |
 
 ### 上游提示词接管
@@ -122,7 +122,9 @@
 
 ### 侧边栏管理面板
 
-标签管理、词库维护、词库包、助手设置、收藏五个分页都收在侧边栏的「双语提示词管理」面板里，节点本身保持简洁。面板里的改动会实时同步到页面上所有同类节点，不需要刷新页面。
+标签管理、词库维护、词库包、收藏四个分页收在侧边栏的「双语提示词管理」面板里，节点本身保持简洁。面板里的改动会实时同步到页面上所有同类节点，不需要刷新页面。
+
+助手设置不在这个面板里：它在 ComfyUI 的「设置」面板中，「设置 → 双语提示词检查器」下有两项 ——「语言与外观」和「助手设置」，表单都直接铺在设置面板右侧。
 
 ---
 
@@ -141,14 +143,23 @@
 
 ## 安装
 
-**用 ComfyUI-Manager（推荐）**：在 Manager 的节点列表里搜索 `Bilingual Prompt Inspector` 安装；也可以走 Manager 的「Install via Git URL」，填入下面的仓库地址。
+**用 ComfyUI-Manager**：在 Manager 的节点列表里搜索 `Bilingual Prompt Inspector` 安装；也可以走 Manager 的「Install via Git URL」，填入仓库的仓库地址。
 
-**手动安装**：
+**使用comfy-cli安装**：
+
+```bash
+cd ComfyUI/
+comfy node install prompt-translator-manager
+```
+
+**手动安装（推荐）**：
 
 ```bash
 cd ComfyUI/custom_nodes/
-git clone https://github.com/mengshengzhijie/ComfyUI-Bilingual-Prompt-Inspector.git
+git clone --depth 1 https://github.com/mengshengzhijie/ComfyUI-Bilingual-Prompt-Inspector.git
 ```
+
+为什么推荐使用git安转，因为现在就我和我的朋友在使用，有时候修复bug和制作新功能我是总结下来然后一步一步的修复。直到把这次收录的bug和建议给完成之后才bump版本。
 
 重启 ComfyUI，在节点菜单的 **text/prompt** 分类里找到 **提示词翻译与管理（英文输出）**（英文界面下显示为 Prompt Translator & Manager），也可以直接搜索「提示词」。
 
@@ -176,13 +187,17 @@ git clone https://github.com/mengshengzhijie/ComfyUI-Bilingual-Prompt-Inspector.
 
 ### 翻译服务配置
 
-默认走纯词库，不联网也能用。需要机器翻译或 AI 优化时，打开侧边栏「双语提示词管理」面板的「助手设置」分页。面板分三段：
+默认走纯词库，不联网也能用。需要机器翻译或 AI 优化时，打开「设置 → 双语提示词检查器 → 助手设置」。这一项分三段：
 
 | 分段 | 内容 |
 |---|---|
-| **翻译服务** | 翻译 / 解释按此选择：纯词库（离线、免费）／ 百度翻译（需自行申请开放平台的 APP ID 与密钥）／ AI（走下面的 AI 配置） |
+| **翻译服务** | 翻译 / 解释按此选择：纯词库（离线、免费）／ 百度翻译（需自行申请开放平台的 APP ID 与密钥）／ OpenAI 兼容接口 ／ Ollama（本地）。选后面两个时，它们本身就是下面的 AI 服务 |
 | **百度翻译** | 独立配置 APP ID 与密钥，切换翻译服务不会清空 |
-| **AI 服务** | 后端（OpenAI 兼容 / Ollama）、API 地址与模型、可选 API Key、温度、超时。「翻译并优化」「优化为 Anima」恒定走这里 |
+| **AI 服务** | 「翻译并优化」「优化为 Anima」恒定走这里。翻译服务选了 OpenAI 兼容 / Ollama 时，下面直接就是那个后端的配置；选纯词库 / 百度翻译时，这里多出一个「AI 后端」下拉，决定优化用哪一套。两个后端各存一套配置，切换不清空： |
+| ↳ OpenAI 兼容 | API 地址、模型、可选 API Key、温度、超时，另有「使用 LM Studio 本地预设」一键填入 `1234/v1`。远端地址必须 https，本机回环（127.0.0.1 / localhost）才允许 http；内网、保留、链路本地地址一律拒绝 |
+| ↳ Ollama | API 地址、模型、温度、超时，没有密钥，另有「使用 Ollama 本地预设」一键填入 `11434`。地址只能是本机回环地址，其它一律拒绝 |
+
+两个后端还各有一套规则（翻译 / 翻译并优化 / 优化）：本地小模型与云端大模型要写的提示词往往不一样，分开存可以随时切换后端而不用重改规则。地址不合规时会在发出请求前直接报错。
 
 ### 大型词库（可选）
 
@@ -190,7 +205,7 @@ git clone https://github.com/mengshengzhijie/ComfyUI-Bilingual-Prompt-Inspector.
 
 ### 界面语言与外观
 
-界面文案跟随 ComfyUI 的语言设置，也可以在侧边栏面板的「助手设置」分页里固定为中文或英文。外观同样可在「跟随 ComfyUI / 暗色 / 亮色」之间切换。
+界面文案跟随 ComfyUI 的语言设置，也可以在「设置 → 双语提示词检查器 → 语言与外观」里固定为中文或英文。外观同样可在「跟随 ComfyUI / 暗色 / 亮色」之间切换，两项改完立即生效并单独保存。
 
 ---
 
@@ -204,7 +219,7 @@ git clone https://github.com/mengshengzhijie/ComfyUI-Bilingual-Prompt-Inspector.
 <details>
 <summary><b>点翻译提示要先配置翻译服务</b></summary>
 
-纯词库模式下只能查词库，不会翻译。想翻译请在侧边栏面板的「助手设置」分页里选一个翻译服务（百度或 AI）。
+纯词库模式下只能查词库，不会翻译。想翻译请在「设置 → 双语提示词检查器 → 助手设置」里选一个翻译服务（百度翻译、OpenAI 兼容接口或 Ollama）。
 </details>
 
 <details>
