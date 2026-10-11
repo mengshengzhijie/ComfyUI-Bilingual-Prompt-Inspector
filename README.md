@@ -143,7 +143,7 @@
 
 ## 安装
 
-**用 ComfyUI-Manager**：在 Manager 的节点列表里搜索 `Bilingual Prompt Inspector` 安装；也可以走 Manager 的「Install via Git URL」，填入仓库的仓库地址。
+**用 ComfyUI-Manager（推荐）**：在 Manager 的节点列表里搜索 `Bilingual Prompt Inspector` 安装；也可以走 Manager 的「Install via Git URL」，填入仓库的仓库地址。
 
 **使用comfy-cli安装**：
 
@@ -152,14 +152,14 @@ cd ComfyUI/
 comfy node install prompt-translator-manager
 ```
 
-**手动安装（推荐）**：
+**手动安装**：
 
 ```bash
 cd ComfyUI/custom_nodes/
 git clone --depth 1 https://github.com/mengshengzhijie/ComfyUI-Bilingual-Prompt-Inspector.git
 ```
 
-为什么推荐使用git安转，因为现在就我和我的朋友在使用，有时候修复bug和制作新功能我是总结下来然后一步一步的修复。直到把这次收录的bug和建议给完成之后才bump版本。
+不过这里如果有动手能力的话推荐使用git安转，因为现在就我和我的朋友在使用，有时候修复bug和制作新功能我是总结下来然后一步一步的修复。直到把这次收录的bug和建议给完成之后才bump版本。
 
 重启 ComfyUI，在节点菜单的 **text/prompt** 分类里找到 **提示词翻译与管理（英文输出）**（英文界面下显示为 Prompt Translator & Manager），也可以直接搜索「提示词」。
 
