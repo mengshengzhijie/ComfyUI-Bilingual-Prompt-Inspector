@@ -1424,30 +1424,38 @@ function createPanel(node, textWidget) {
   };
 
   const openWeightEditor = (token) => {
-    if (!token || token.syntax !== "tag" || token.segmentKind === "natural" ||
-        !["tags", "mixed"].includes(state.modeInfo.mode)) {
-      setStatus("Only tags support individual weights; use text editing for natural language", "error");
-      return;
-    }
+    if (!token) return;
+    // 自然语言片段（以及 BREAK、<lora:…> 这类特殊语法）没有独立权重、也没有词条，
+    // 所以这两个页签按 token 形态收起来，但弹窗照开：配色和整段编辑对它们一样有用
+    const isPlainTag = token.syntax === "tag" && token.segmentKind !== "natural";
+    const canWeight = isPlainTag && ["tags", "mixed"].includes(state.modeInfo.mode);
     const shade = element("div", "bpi-modal-shade");
     const modal = element("div", "bpi-modal");
-    // 这两句直接写中文：带变量 + 固定术语，走翻译层反而匹配不上，界面必须中文
-    modal.appendChild(element("h3", "", `编辑标签：${token.term}`));
+    // 这句直接写中文：带变量 + 固定术语，走翻译层反而匹配不上，界面必须中文
+    // 自然语言片段 / BREAK 这类不叫「标签」，标题换个说法免得看着别扭
+    modal.appendChild(element("h3", "", isPlainTag ? `编辑标签：${token.term}` : `编辑片段：${token.term}`));
 
-    // 多选着进来就直接停在编辑页：权重只对单个标签有意义
-    const multiOpen = state.selected.size > 1;
+    // 多选着进来、或者双击的不是普通标签（自然语言片段）→ 直接停在编辑页：
+    // 权重只对单个标签有意义，而自然语言片段本来就是整段改的
+    const startOnRaw = state.selected.size > 1 || !isPlainTag;
     // Tab 切换：权重与颜色（一页管两样）/ 编辑（改这行原文）/ 词条信息（改的是整条词条）
+    // 自然语言片段没有权重也没有词条，顺序改成 编辑 → 颜色
     const tabs = element("div", "bpi-editor-tabs");
-    const tabWeight = element("button", `bpi-editor-tab${multiOpen ? "" : " bpi-editor-tab-active"}`, t("Weight / color"));
-    const tabRaw = element("button", `bpi-editor-tab${multiOpen ? " bpi-editor-tab-active" : ""}`, t("Edit"));
+    // 没有权重可改时这页只剩配色，标签也就只写「颜色」
+    const tabWeight = element("button", `bpi-editor-tab${startOnRaw ? "" : " bpi-editor-tab-active"}`, canWeight ? t("Weight / color") : t("Colors"));
+    const tabRaw = element("button", `bpi-editor-tab${startOnRaw ? " bpi-editor-tab-active" : ""}`, t("Edit"));
     const tabEdit = element("button", "bpi-editor-tab", t("Entry info"));
     tabWeight.type = tabRaw.type = tabEdit.type = "button";
-    tabs.append(tabWeight, tabRaw, tabEdit);
+    if (isPlainTag) tabs.append(tabWeight, tabRaw, tabEdit);
+    else tabs.append(tabRaw, tabWeight);
     modal.appendChild(tabs);
 
-    const weightPanel = element("div", `bpi-editor-panel${multiOpen ? " bpi-hidden" : ""}`);
+    const weightPanel = element("div", `bpi-editor-panel${startOnRaw ? " bpi-hidden" : ""}`);
+    // 权重那三块（说明 / 输入框 / 预设）单独装一个盒子，不能改权重时整盒收起，
+    // 下半部分的配色照旧留着 —— 自然语言片段也要能上色
+    const weightBlock = element("div");
     // 这句直接写中文：固定术语，走翻译层反而匹配不上
-    weightPanel.appendChild(element("div", "bpi-config-note", "Anima 格式：(标签:权重)"));
+    weightBlock.appendChild(element("div", "bpi-config-note", "Anima 格式：(标签:权重)"));
     const form = element("div", "bpi-form");
     const input = element("input", "");
     input.type = "number";
@@ -1456,7 +1464,7 @@ function createPanel(node, textWidget) {
     input.step = "0.05";
     input.value = token.weight === null ? "1" : String(token.weight);
     form.append(element("label", "", "Weight"), input);
-    weightPanel.appendChild(form);
+    weightBlock.appendChild(form);
 
     const presets = element("div", "bpi-weight-presets");
     for (const value of [0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.5]) {
@@ -1465,11 +1473,15 @@ function createPanel(node, textWidget) {
         input.focus();
       }, "bpi-mini"));
     }
-    weightPanel.appendChild(presets);
+    weightBlock.appendChild(presets);
+    weightPanel.appendChild(weightBlock);
 
     // 同一页下半部分是配色：预设色块 + 自定义输入框；只在 default 模式下才看得见效果
     // 说明跟上方的「Anima 格式」一样放在控件上面
-    weightPanel.appendChild(element("div", "bpi-editor-divider"));
+    const colorDivider = element("div", "bpi-editor-divider");
+    weightPanel.appendChild(colorDivider);
+    weightBlock.hidden = !canWeight;
+    colorDivider.hidden = !canWeight;
     // 双击设的自定义色优先级最低：只有「默认」模式才轮到它显示，其它模式会盖住
     weightPanel.appendChild(element("div", "bpi-color-note", t("This color has the lowest priority: it only shows in Default mode; other color modes override it.")));
     const presetsRow = element("div", "bpi-color-presets");
@@ -1516,13 +1528,13 @@ function createPanel(node, textWidget) {
     weightPanel.appendChild(customRow);
 
     // 编辑 Tab：把选中那段原文原样搬进输入框，怎么改都行，应用时整段写回提示词
-    const rawPanel = element("div", `bpi-editor-panel${multiOpen ? "" : " bpi-hidden"}`);
+    const rawPanel = element("div", `bpi-editor-panel${startOnRaw ? "" : " bpi-hidden"}`);
     const rawSpan = spanForEdit(token);
     const originalSlice = String(textWidget.value ?? "").slice(rawSpan.start, rawSpan.end).trim();
     // 这三句直接写中文：本页专属说明，走翻译层反而匹配不上，界面必须中文
     rawPanel.appendChild(element("div", "bpi-config-note", rawSpan.tokens.length > 1
       ? `已选中 ${rawSpan.tokens.length} 个标签，下面是它们在原文里的整段（含中间的标签）`
-      : "下面是这个标签在原文里的那段文字"));
+      : isPlainTag ? "下面是这个标签在原文里的那段文字" : "下面是这段文字在原文里的整段"));
     const rawEditor = element("textarea", "bpi-raw-editor");
     rawEditor.value = originalSlice;
     rawPanel.appendChild(rawEditor);
@@ -1607,6 +1619,14 @@ function createPanel(node, textWidget) {
       return value !== previous;
     };
     const apply = () => {
+      // 不能改权重时这一页只剩配色，直接存色走人
+      if (!canWeight) {
+        const colorOnly = saveColor();
+        if (colorOnly === null) return;
+        if (colorOnly) render();
+        close();
+        return;
+      }
       const raw = String(input.value ?? "").trim();
       const numeric = Number(raw);
       if (!raw || !Number.isFinite(numeric) || numeric < 0 || numeric > 3) {
@@ -1675,17 +1695,17 @@ function createPanel(node, textWidget) {
     const actions = element("div", "bpi-modal-actions");
     // 「清除权重」只对权重页有意义，切到别的页就收起来；先存配色再清，别丢改动
     let clearWeightButton = null;
-    if (token.weight !== null) {
+    if (canWeight && token.weight !== null) {
       clearWeightButton = button("Clear weight", () => {
         if (saveColor() === null) return;
         if (applyTokenWeight(token, null)) close();
       }, "bpi-danger");
-      clearWeightButton.hidden = multiOpen;
+      clearWeightButton.hidden = startOnRaw;
       actions.appendChild(clearWeightButton);
     }
     actions.append(button("Cancel", close));
     // 先声明再让 applyButton 引用它：let 有 TDZ，声明放在闭包之后会有隐患
-    let activeTab = multiOpen ? "raw" : "weight";
+    let activeTab = startOnRaw ? "raw" : "weight";
     const applyButton = button(t("Apply"), () => {
       if (activeTab === "edit") applyEdit();
       else if (activeTab === "raw") applyRawEdit();
@@ -1731,7 +1751,11 @@ function createPanel(node, textWidget) {
     tabWeight.addEventListener("click", () => {
       activeTab = "weight";
       showPanel("weight");
-      setTimeout(() => { input.focus(); input.select(); }, 0);
+      // 不能改权重时这一页只有配色，光标落到颜色输入框
+      setTimeout(() => {
+        if (canWeight) { input.focus(); input.select(); }
+        else { customInput.focus(); customInput.select(); }
+      }, 0);
     });
     tabRaw.addEventListener("click", () => {
       activeTab = "raw";
@@ -1743,8 +1767,9 @@ function createPanel(node, textWidget) {
       showPanel("edit");
       setTimeout(() => editFields.focus(), 0);
     });
-    if (multiOpen) setTimeout(() => { rawEditor.focus(); rawEditor.select(); }, 0);
-    else setTimeout(() => { input.focus(); input.select(); }, 0);
+    if (startOnRaw) setTimeout(() => { rawEditor.focus(); rawEditor.select(); }, 0);
+    else if (canWeight) setTimeout(() => { input.focus(); input.select(); }, 0);
+    else setTimeout(() => { customInput.focus(); customInput.select(); }, 0);
   };
 
   const undoStructuredEdit = () => {

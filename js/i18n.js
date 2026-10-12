@@ -177,8 +177,6 @@ const ZH = {
   "No content change": "内容没有变化",
   "Natural-language segments only support whole-segment editing; tags can still be deleted individually":
     "自然语言片段只支持整段编辑；标签仍可单独删除",
-  "Only tags support individual weights; use text editing for natural language":
-    "只有标签支持单独权重；自然语言请用文本编辑",
   "Weight must be between 0 and 3": "权重必须在 0 到 3 之间",
   "Use “Edit text” to process it": "请用「编辑文本」处理",
   "Click “Edit text”, then use the inspector's own “Translate” or “Translate & optimize”":
