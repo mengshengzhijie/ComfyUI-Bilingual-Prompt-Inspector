@@ -1844,7 +1844,8 @@ function createPanel(node, textWidget) {
       source: override.source,
       status: "session",
       confidence: "medium",
-      confidenceLabel: "Medium · session-only",
+      confidenceLabel: "Medium",
+      confidenceReason: "Changed for this session only; not saved to the dictionary",
     };
   });
 
@@ -3070,9 +3071,7 @@ function createPanel(node, textWidget) {
           chineseCell.appendChild(sourceBadge);
         }
         const confidenceBadge = element("span", `bpi-badge bpi-confidence-${token.confidence}`, token.confidenceLabel);
-        setTitle(confidenceBadge, token.status === "machine"
-          ? "Machine translation not yet human-verified"
-          : token.status === "unknown" ? "Dictionary cannot determine" : "Estimated from dictionary source and verification status");
+        setTitle(confidenceBadge, token.confidenceReason);
         chineseCell.appendChild(confidenceBadge);
 
         const actions = element("span", "bpi-inline-actions");

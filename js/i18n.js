@@ -758,9 +758,15 @@ const ZH = {
 
   // ── 第三批：自由文本变量包裹后的组合形态与遗漏项 ──────────────────────
   "Low": "低",
-  "Low · pending": "低 · 待确认",
-  "Medium · pending": "中 · 待确认",
-  "Medium · session-only": "中 · 仅本次会话",
+  "Medium": "中",
+  "High": "高",
+  "Not in any dictionary, so it cannot be judged": "词库里查不到，没法判断",
+  "Machine translation, not saved to the dictionary or confirmed yet": "机器翻译，还没存进词库，也没人工确认",
+  "Syntax kept as-is; nothing to translate": "语法保留项，本来就不用翻译",
+  "In the dictionary, but not marked as verified": "词库里有，但还没标成已校验",
+  "In the dictionary, verified, category {}": "已在词库里，已校验，分类「{}」",
+  "In the dictionary, but no category set": "词库里有，但还没填分类",
+  "Changed for this session only; not saved to the dictionary": "只改了本次会话，没存进词库",
   "★ Unfavorite": "★ 取消收藏",
   "☆ Favorite": "☆ 收藏",
   "Paused, waiting for confirmation…": "已暂停，等待确认…",

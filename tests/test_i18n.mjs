@@ -124,11 +124,19 @@ for (const [source, expected] of [
   assert.equal(t(source), expected, `未命中：${source}`);
 }
 
-// 置信度徽章：这几个是 parser.js 直接产出的界面文本
-assert.equal(t("Low · pending"), "低 · 待确认");
-assert.equal(t("Medium · pending"), "中 · 待确认");
-assert.equal(t("Medium · session-only"), "中 · 仅本次会话");
+// 置信度：徽章只显示档位，细分原因放在 tooltip，两边都是 parser.js 直接产出的
+assert.equal(t("Not judged"), "未判定");
 assert.equal(t("Low"), "低");
+assert.equal(t("Medium"), "中");
+assert.equal(t("High"), "高");
+assert.equal(t("Not in any dictionary, so it cannot be judged"), "词库里查不到，没法判断");
+assert.equal(t("Machine translation, not saved to the dictionary or confirmed yet"), "机器翻译，还没存进词库，也没人工确认");
+assert.equal(t("Syntax kept as-is; nothing to translate"), "语法保留项，本来就不用翻译");
+assert.equal(t("In the dictionary, but not marked as verified"), "词库里有，但还没标成已校验");
+assert.equal(t("In the dictionary, but no category set"), "词库里有，但还没填分类");
+assert.equal(t("Changed for this session only; not saved to the dictionary"), "只改了本次会话，没存进词库");
+// 带分类名的那条：变量被 normalizeKey 折成 {}，键里也是 {}
+assert.equal(t("In the dictionary, verified, category “发型”"), "已在词库里，已校验，分类「发型」");
 
 // 收藏星标按钮（带符号的整串）
 assert.equal(t("★ Unfavorite"), "★ 取消收藏");

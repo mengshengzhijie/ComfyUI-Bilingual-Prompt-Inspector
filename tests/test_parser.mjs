@@ -21,7 +21,7 @@ import {
 
 const source = "masterpiece, (looking at viewer:1.2), <lora:test:0.8>\nBREAK, hand_on_hip";
 const dictionary = buildDictionaryIndex([
-  { english: "masterpiece", chinese: "杰作", verified: true },
+  { english: "masterpiece", chinese: "杰作", verified: true, category: "画质" },
   { english: "looking at viewer", chinese: "看向镜头", verified: true },
   { english: "hand on hip", chinese: "叉腰", verified: true },
 ]);
@@ -210,6 +210,13 @@ assert.ok(diagnostics.some((item) => item.code === "conflict"));
 
 const knownToken = parsePrompt("masterpiece", dictionary)[0];
 assert.equal(knownToken.confidence, "high");
+// 可信度看词条整理得怎么样：填了分类才高，没填分类（含默认的「未分类」）只是中
+const plain = buildDictionaryIndex([{ english: "masterpiece", chinese: "杰作", verified: true }]);
+assert.equal(parsePrompt("masterpiece", plain)[0].confidence, "medium");
+const uncategorized = buildDictionaryIndex([{ english: "masterpiece", chinese: "杰作", verified: true, category: "Uncategorized" }]);
+assert.equal(parsePrompt("masterpiece", uncategorized)[0].confidence, "medium");
+const unverified = buildDictionaryIndex([{ english: "masterpiece", chinese: "杰作", verified: false, category: "画质" }]);
+assert.equal(parsePrompt("masterpiece", unverified)[0].confidence, "medium");
 const machineToken = parsePrompt("cinematic", dictionary, new Map([["cinematic", { text: "电影感", source: "prompt-assistant" }]]))[0];
 assert.equal(machineToken.confidence, "low");
 

@@ -621,13 +621,30 @@ export function validateTranslationResult(source, translated, options = {}) {
   return { ok: true, text: result };
 }
 
+// 插件写死的默认分类：分到它等于还没分类。parser 是纯逻辑模块，不引 UI 那层，
+// 所以这个常量和 bpi_shared.js 里的那份各存一份，改要一起改。
+const UNCATEGORIZED_CATEGORY = "Uncategorized";
+
+// 可信度：徽章只显示「未判定 / 低 / 中 / 高」四档，为什么是这一档写在 tooltip 里。
+// 判据从粗到细：查不到 → 还没入库 → 没校验 → 没分类 → 有分类。
 function confidenceFor(status, entry) {
-  if (status === "machine") return { confidence: "low", confidenceLabel: "Low · pending" };
-  if (status === "unverified") return { confidence: "medium", confidenceLabel: "Medium · pending" };
-  if (status === "unknown") return { confidence: "none", confidenceLabel: "Not judged" };
-  if (status === "special") return { confidence: "high", confidenceLabel: "High" };
-  if (entry?.source === "user" || entry?.verified !== false) return { confidence: "high", confidenceLabel: "High" };
-  return { confidence: "medium", confidenceLabel: "Medium" };
+  if (status === "unknown") {
+    return { confidence: "none", confidenceLabel: "Not judged", confidenceReason: "Not in any dictionary, so it cannot be judged" };
+  }
+  if (status === "machine") {
+    return { confidence: "low", confidenceLabel: "Low", confidenceReason: "Machine translation, not saved to the dictionary or confirmed yet" };
+  }
+  if (status === "special") {
+    return { confidence: "high", confidenceLabel: "High", confidenceReason: "Syntax kept as-is; nothing to translate" };
+  }
+  if (entry?.verified === false) {
+    return { confidence: "medium", confidenceLabel: "Medium", confidenceReason: "In the dictionary, but not marked as verified" };
+  }
+  const category = String(entry?.category ?? "").trim();
+  if (category && category !== UNCATEGORIZED_CATEGORY) {
+    return { confidence: "high", confidenceLabel: "High", confidenceReason: `In the dictionary, verified, category “${category}”` };
+  }
+  return { confidence: "medium", confidenceLabel: "Medium", confidenceReason: "In the dictionary, but no category set" };
 }
 
 export function parsePrompt(text, dictionaryIndex, machineTranslations = new Map(), options = {}) {
