@@ -13,7 +13,9 @@ function injectStyles() {
   const style = document.createElement("style");
   style.id = STYLE_ID;
   style.textContent = [
-    ".bpi-dup-pill{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:12px;line-height:1.5;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}",
+    // holder 才是交给画布的 widget 元素：节点拖大时它被拉伸，胶囊自己锁死高度不跟着变
+    `.bpi-dup-holder{display:flex;align-items:center;justify-content:flex-start;width:100%;min-height:${PILL_HEIGHT}px;overflow:hidden}`,
+    `.bpi-dup-pill{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:12px;line-height:1.5;height:${PILL_HEIGHT}px;box-sizing:border-box;flex:none;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}`,
     ".bpi-dup-pill .bpi-dup-dot{width:7px;height:7px;border-radius:50%;flex:none}",
     ".bpi-dup-pill .bpi-dup-text{overflow:hidden;text-overflow:ellipsis}",
     ".bpi-dup-pill.bpi-dup-warn{background:rgba(214,158,46,.18);color:#8a5a00}",
@@ -117,6 +119,8 @@ app.registerExtension({
       const toggle = this.widgets?.find((widget) => widget.name === "keep_first");
       if (toggle) toggle.label = "只保留第一个";
       if (this.inputs?.[0]) this.inputs[0].label = "提示词";
+      const holder = document.createElement("div");
+      holder.className = "bpi-dup-holder";
       const pill = document.createElement("div");
       pill.className = "bpi-dup-pill bpi-dup-idle";
       const dot = document.createElement("span");
@@ -124,9 +128,10 @@ app.registerExtension({
       const textNode = document.createElement("span");
       textNode.className = "bpi-dup-text";
       pill.append(dot, textNode);
+      holder.append(pill);
       this._duplicateCheck = { pill, dot, textNode, count: 0, connected: false };
       try {
-        this.addDOMWidget("bpi_duplicate_status", "bpi-duplicate-status", pill, {
+        this.addDOMWidget("bpi_duplicate_status", "bpi-duplicate-status", holder, {
           getMinHeight: () => PILL_HEIGHT,
           getMaxHeight: () => PILL_HEIGHT,
           hideOnZoom: false,
