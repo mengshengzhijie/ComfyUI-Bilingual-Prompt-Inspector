@@ -737,6 +737,12 @@ function tagCategoryCounts(data) {
     .sort((left, right) => right.count - left.count || left.name.localeCompare(right.name, "zh-CN"));
 }
 
+// 插件自己写死的默认分类：词库里存的其实是英文，显示时才翻成中文，存回去再还原，
+// 免得同一个「未分类」在词库里分成两条。别的分类都是词库数据，不进翻译层。
+const UNCATEGORIZED = "Uncategorized";
+const categoryName = (value) => (value === UNCATEGORIZED ? t("Uncategorized") : value);
+const isUncategorized = (value) => value === UNCATEGORIZED || value === t("Uncategorized");
+
 // 「分类」输入框：下拉列出已有分类，边打字边收窄，第一项恒为「自定义」。
 // 青绿色的「自定义」标识只表示「这个值不是词库里的现成分类」—— 选了自定义才会挂上，
 // 手打的值一旦命中某个候选就自动摘掉；编辑历史标签时带进来的陌生值也当场算自定义。
@@ -747,7 +753,7 @@ function buildCategoryPicker({ initial = "", categories = [] } = {}) {
   input.id = "bpi-field-category";
   input.name = "category";
   input.autocomplete = "off";
-  input.value = initial ?? "";
+  input.value = categoryName(initial ?? "");
   setPlaceholder(input, "Type to filter; ↑↓ to choose");
   const badge = element("span", "bpi-custom-badge", "Custom");
   badge.hidden = true;
@@ -777,9 +783,9 @@ function buildCategoryPicker({ initial = "", categories = [] } = {}) {
     }
     rows.forEach((row, index) => {
       const item = element("div", `bpi-ac-item${index === active ? " bpi-ac-active" : ""}${row.custom ? " bpi-ac-custom" : ""}`);
-      // 分类名是词库数据，不进翻译层
+      // 分类名是词库数据，不进翻译层；只有插件自己的默认分类翻成中文
       const name = element("span", "bpi-ac-name");
-      name.textContent = row.custom ? t("Custom") : row.name;
+      name.textContent = row.custom ? t("Custom") : categoryName(row.name);
       const hint = element("span", "bpi-ac-kind");
       hint.textContent = row.custom ? (input.value.trim() || t("Manual input")) : t(`${row.count} items`);
       item.append(name, hint);
@@ -794,14 +800,14 @@ function buildCategoryPicker({ initial = "", categories = [] } = {}) {
   };
   const update = ({ reveal = true } = {}) => {
     const needle = input.value.trim().toLowerCase();
-    const matches = catalog.filter((entry) => !needle || entry.name.toLowerCase().includes(needle));
+    const matches = catalog.filter((entry) => !needle || categoryName(entry.name).toLowerCase().includes(needle));
     rows = [{ custom: true }, ...matches];
     if (!reveal) {
       menu.hidden = true;
       return;
     }
     // 打出来的字正好等于某个候选时，默认就落在它身上，省一次↓
-    const exact = rows.findIndex((row) => !row.custom && row.name === input.value.trim());
+    const exact = rows.findIndex((row) => !row.custom && categoryName(row.name) === input.value.trim());
     active = exact > 0 ? exact : 0;
     renderMenu();
   };
@@ -810,7 +816,7 @@ function buildCategoryPicker({ initial = "", categories = [] } = {}) {
     if (row.custom) {
       setCustom(true);
     } else {
-      input.value = row.name;
+      input.value = categoryName(row.name);
       setCustom(false);
     }
     closeMenu();
@@ -818,7 +824,7 @@ function buildCategoryPicker({ initial = "", categories = [] } = {}) {
   };
 
   input.addEventListener("input", () => {
-    if (custom && catalog.some((entry) => entry.name === input.value.trim())) setCustom(false);
+    if (custom && catalog.some((entry) => categoryName(entry.name) === input.value.trim())) setCustom(false);
     update();
   });
   input.addEventListener("focus", () => update());
@@ -860,12 +866,13 @@ function buildCategoryPicker({ initial = "", categories = [] } = {}) {
   return {
     root,
     destroy: () => document.removeEventListener("mousedown", onOutside, true),
-    value: () => input.value.trim(),
+    // 存回词库的是英文原值：显示用的「未分类」要还原，不然会多出一个中文分类
+    value: () => (isUncategorized(input.value.trim()) ? UNCATEGORIZED : input.value.trim()),
     // 候选是异步取来的，取到之后不能把用户的菜单硬弹开
     setCategories: (list) => {
       catalog = list;
       const current = input.value.trim();
-      if (current && !catalog.some((entry) => entry.name === current)) setCustom(true);
+      if (current && !catalog.some((entry) => categoryName(entry.name) === current)) setCustom(true);
       // 菜单本来开着就重画，没开就别突然弹出来打断用户
       update({ reveal: !menu.hidden });
     },
@@ -1333,8 +1340,14 @@ function injectBpiStyles() {
 .bpi-form .bpi-field-static{box-sizing:border-box;padding:6px 0;color:var(--bpi-text);font-family:Consolas,monospace;word-break:break-all}
 .bpi-raw-editor{box-sizing:border-box;width:100%;min-height:72px;max-height:220px;resize:vertical;border:1px solid var(--bpi-border-2);border-radius:5px;background:var(--bpi-input-bg);color:var(--bpi-input-text);padding:5px 7px;outline:none;font:12px/1.55 Consolas,monospace}
 .bpi-raw-editor:focus{border-color:#4ca7e8}
-.bpi-token-card.bpi-card-multi{outline:1px dashed var(--bpi-link-text);outline-offset:1px}
-.bpi-row.bpi-row-multi{outline:1px dashed var(--bpi-link-text);outline-offset:-1px}
+.bpi-token-card.bpi-card-multi{position:relative}
+.bpi-row.bpi-row-multi{position:relative}
+/* 多选的虚线框做成会流动的「蚂蚁线」：四边各一条虚线渐变，靠 background-position 走一个周期，
+   看着就是虚线绕着选中的提示词转。用伪元素画，不占元素自己的 background-image（行选中态要用它） */
+.bpi-card-multi::after,.bpi-row-multi::after{content:"";position:absolute;border-radius:inherit;pointer-events:none;background-image:repeating-linear-gradient(90deg,var(--bpi-link-text) 0 4px,transparent 4px 8px),repeating-linear-gradient(90deg,var(--bpi-link-text) 0 4px,transparent 4px 8px),repeating-linear-gradient(180deg,var(--bpi-link-text) 0 4px,transparent 4px 8px),repeating-linear-gradient(180deg,var(--bpi-link-text) 0 4px,transparent 4px 8px);background-size:100% 1px,100% 1px,1px 100%,1px 100%;background-position:0 0,0 100%,0 0,100% 0;background-repeat:repeat-x,repeat-x,repeat-y,repeat-y;animation:bpi-ants .6s linear infinite}
+.bpi-card-multi::after{inset:-2px}
+.bpi-row-multi::after{inset:0}
+@keyframes bpi-ants{to{background-position:8px 0,-8px 100%,0 -8px,100% 8px}}
 .bpi-color-presets{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
 .bpi-color-swatch{width:26px;height:26px;border-radius:4px;border:1px solid var(--bpi-border);cursor:pointer;display:inline-block}
 .bpi-color-swatch:hover{border-color:var(--bpi-border-2)}

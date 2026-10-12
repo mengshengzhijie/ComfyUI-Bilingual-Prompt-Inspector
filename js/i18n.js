@@ -115,7 +115,6 @@ const ZH = {
   "Save to Personal Dictionary": "保存到个人词库",
   "Add tag": "添加标签",
   "New Tag": "新建标签",
-  "Search candidates": "搜索候选",
   "Dictionary search": "词库搜索",
   "Enter Chinese, English, alias, or concept; click a result to insert the English tag":
     "输入中文、英文、别名或概念；点击结果即可插入英文标签",

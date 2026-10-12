@@ -41,7 +41,6 @@ import {
   loadTokenColors,
   buildColorPanel,
   lookupLargeDictionary,
-  openManagerPanel,
   openSavePromptDialog,
   openTagDialog,
   postUpstreamAction,
@@ -770,6 +769,17 @@ function createPanel(node, textWidget) {
 
   // 多选名单（按原文顺序）；单选时就是 pinned 那一个
   const selectedTokenList = () => state.tokens.filter((token) => state.selected.has(token.id));
+
+  // 多选看着选中的范围 = 最前与最后之间的整段，和双击编辑的范围一致。
+  // ctrl 点第 1、第 3 个时第 2 个虽然没被点到，但也在编辑范围里，要一起显示成选中
+  const inSelectionSpan = (token) => {
+    if (state.selected.size <= 1) return false;
+    const list = selectedTokenList();
+    if (!list.length) return false;
+    const start = Math.min(...list.map((item) => item.start));
+    const end = Math.max(...list.map((item) => item.end));
+    return token.start >= start && token.end <= end;
+  };
 
   // 双击编辑的范围：选中那几个 token 在原文里的整段，中间的标签一并进来
   const spanForEdit = (token) => {
@@ -2357,8 +2367,8 @@ function createPanel(node, textWidget) {
     if (state.dupFocusId === token.id) card.classList.add("bpi-dup-hit");
     // 选中反馈给整张卡片，而不是只有英文那一行
     if (state.pinned === token.id) card.classList.add("bpi-card-linked");
-    // 多选的虚线框只在真的多选时出现，单选保持原样不打扰
-    if (state.selected.size > 1 && state.selected.has(token.id)) card.classList.add("bpi-card-multi");
+    // 多选的虚线框只在真的多选时出现，单选保持原样不打扰；中间没点到的也框上
+    if (inSelectionSpan(token)) card.classList.add("bpi-card-multi");
     const cardColor = tokenCardColor(token);
     if (cardColor && !card.classList.contains("bpi-card-linked") && !card.classList.contains("bpi-dup-hit")) card.style.background = cardColor;
     card.append(chip, chinese);
@@ -2969,7 +2979,7 @@ function createPanel(node, textWidget) {
         else if (rowSeverity === "warning") row.classList.add("bpi-has-warning");
         row.dataset.tokenId = String(token.id);
         if (state.pinned === token.id) row.classList.add("bpi-pinned");
-        if (state.selected.size > 1 && state.selected.has(token.id)) row.classList.add("bpi-row-multi");
+        if (inSelectionSpan(token)) row.classList.add("bpi-row-multi");
         const englishCell = element("div", "bpi-cell bpi-en");
         if (token.status === "machine") englishCell.appendChild(buildRowCheckButton(token));
         // 查找状态下不给拖拽手柄：落点是按可见行算的，藏着行会把标签挪到错误的位置
@@ -2987,6 +2997,14 @@ function createPanel(node, textWidget) {
           : `Query: “${token.term}”${token.weight === null ? "" : ` | weight: ${token.weight}`}`);
         englishText.addEventListener("dblclick", (event) => {
           event.stopPropagation();
+          // 词库里已经有这条（内置 / 词库包 / 个人，都算）：双击直接开「新增或编辑个人标签」，
+          // 跟侧边栏词库里点「编辑」是同一个弹窗，别名、分类、模型这些都能一起改。
+          // 还没入库的（未收录、待确认的机器翻译、特殊语法）走原来的定位到提示词。
+          if (token.entry) {
+            // 中文以列表里现在显示的为准：可能只是本次会话临时改过、还没存进词库
+            openTagDialog({ ...token.entry, chinese: token.chinese }, refreshDictionary);
+            return;
+          }
           setEnglishEditing(true);
           requestAnimationFrame(() => {
             englishEditor.focus({ preventScroll: true });
@@ -3059,15 +3077,6 @@ function createPanel(node, textWidget) {
 
         const actions = element("span", "bpi-inline-actions");
         if (token.status === "unknown" && !/[\u3400-\u9fff]/.test(token.term)) {
-          const searchButton = element("button", "bpi-mini", "Search candidates");
-          searchButton.addEventListener("click", (event) => {
-            event.stopPropagation();
-            openManagerPanel("tag-manager", node.id);
-            search.value = token.term;
-            renderSearch();
-            search.focus({ preventScroll: true });
-            results.scrollIntoView?.({ block: "nearest" });
-          });
           const addButton = element("button", "bpi-mini", "Add manually");
           addButton.addEventListener("click", (event) => {
             event.stopPropagation();
@@ -3087,7 +3096,7 @@ function createPanel(node, textWidget) {
             event.stopPropagation();
             translateToken(token);
           });
-          actions.append(searchButton, addButton, translateButton);
+          actions.append(addButton, translateButton);
         } else if (token.status === "unknown" && /[\u3400-\u9fff]/.test(token.term)) {
           const hint = element("span", "bpi-badge", "Use “Edit text” to process it");
           setTitle(hint, "Click “Edit text”, then use the inspector's own “Translate” or “Translate & optimize”");
