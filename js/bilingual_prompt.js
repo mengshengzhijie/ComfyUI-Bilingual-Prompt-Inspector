@@ -11,6 +11,7 @@ import {
   replacePromptSpan,
   replacePromptTokenWeight,
   restorePromptToken,
+  UNKNOWN_CHINESE,
   validateTranslationResult,
 } from "./parser.js";
 import {
@@ -1530,13 +1531,22 @@ function createPanel(node, textWidget) {
     // 编辑 Tab：整套词条字段（含分类下拉），跟「新增／编辑个人标签」弹窗同一份构件。
     // 命中词库就整条带过来改；没命中就按这条标签卡起个头，存进去即新建。
     const editPanel = element("div", "bpi-editor-panel bpi-hidden");
-    editPanel.appendChild(element("div", "bpi-config-note", t("Edits go to the personal dictionary and override same-name entries.")));
-    // 这句直接写中文：本页专属说明，走翻译层反而匹配不上，界面必须中文
-    editPanel.appendChild(element("div", "bpi-config-note", "英文标签在这里只读；要改提示词里的文字，请用「编辑」页。"));
+    // 两句说明收进同一个盒子：应用时若发现还是「未收录」，整盒换成红色警告，
+    // 并先把盒子按当前高度钉住，换文案就不会把下面的表单顶上去
+    const editNotes = element("div", "bpi-editor-notes");
+    // 这两句是原文（英文的走翻译层，中文那句本页专属、不进译表），来回切换时都按原文重新渲染
+    const noteSavedSource = "Edits go to the personal dictionary and override same-name entries.";
+    const noteReadonlySource = "英文标签在这里只读；要改提示词里的文字，请用「编辑」页。";
+    const noteSaved = element("div", "bpi-config-note", noteSavedSource);
+    const noteReadonly = element("div", "bpi-config-note", noteReadonlySource);
+    editNotes.append(noteSaved, noteReadonly);
+    editPanel.appendChild(editNotes);
     const editForm = element("div", "bpi-form");
     const editFields = buildTagFields(editForm, state.index.get(token.key) ?? {
       english: token.term,
-      chinese: token.chinese ?? "",
+      // 未收录的中文名只是占位，这里预填成空：想存就得自己写一个，
+      // 下面的「还是未收录就拦掉」只是兜底（防手动敲回这三个字）
+      chinese: token.chinese === UNKNOWN_CHINESE ? "" : token.chinese ?? "",
       models: ["general", "anima"],
       source: "user",
       verified: true,
@@ -1544,9 +1554,36 @@ function createPanel(node, textWidget) {
     }, { withTarget: false, readonlyEnglish: true });
     editPanel.appendChild(editForm);
 
+    // 保护性占位：未收录标签的中文名只是提示文案，原样存进个人词库会得到
+    // 一条中文名是「未收录」的残词条，标签从此显示成已收录却看不出是什么。
+    // 所以「词条信息」页点应用时先比对中文名，还是占位就不保存、只把说明换成红色警告。
+    let warnTimer = 0;
+    const restoreEditNotes = () => {
+      clearTimeout(warnTimer);
+      editNotes.style.minHeight = "";
+      setText(noteSaved, noteSavedSource);
+      setText(noteReadonly, noteReadonlySource);
+      noteSaved.classList.remove("bpi-config-note-warn");
+      noteReadonly.classList.remove("bpi-config-note-warn");
+    };
+    const warnUnknownChinese = () => {
+      // 先按现在的高度钉住：警告比原文短也不会缩，下面的表单一动不动
+      const height = editNotes.getBoundingClientRect().height;
+      if (height > 0) editNotes.style.minHeight = `${height}px`;
+      setText(noteSaved, "Nothing was saved: the Chinese name is still the unknown placeholder.");
+      setText(noteReadonly, "Enter a real Chinese name, then apply again.");
+      noteSaved.classList.add("bpi-config-note-warn");
+      noteReadonly.classList.add("bpi-config-note-warn");
+      clearTimeout(warnTimer);
+      warnTimer = setTimeout(restoreEditNotes, 2000);
+      // 光标直接落到中文名那一格，省得再去找
+      editFields.focus();
+    };
+
     modal.append(weightPanel, rawPanel, editPanel);
 
     const close = () => {
+      clearTimeout(warnTimer);
       editFields.destroy();
       shade.remove();
     };
@@ -1620,8 +1657,14 @@ function createPanel(node, textWidget) {
     };
     // 词条页：只改词条，不动当前这行提示词文本，所以不进撤销栈
     const applyEdit = async () => {
+      const payload = editFields.collect();
+      // 中文名还是「未收录」占位：存下去只会得到一条残词条，直接拦掉不保存
+      if (String(payload.chinese ?? "").trim() === UNKNOWN_CHINESE) {
+        warnUnknownChinese();
+        return;
+      }
       try {
-        await saveTag(editFields.collect());
+        await saveTag(payload);
         await refreshDictionary();
         close();
         setStatus(t("Tag saved"), "ok");
@@ -1681,6 +1724,8 @@ function createPanel(node, textWidget) {
       weightPanel.classList.toggle("bpi-hidden", tab !== "weight");
       rawPanel.classList.toggle("bpi-hidden", tab !== "raw");
       editPanel.classList.toggle("bpi-hidden", tab !== "edit");
+      // 离开词条页就把红色警告收回去，别等 2 秒后回来还挂着
+      if (tab !== "edit") restoreEditNotes();
       if (clearWeightButton) clearWeightButton.hidden = tab !== "weight";
     };
     tabWeight.addEventListener("click", () => {
@@ -1969,7 +2014,9 @@ function createPanel(node, textWidget) {
     state.editing = {
       id: token.id,
       key: token.key,
-      value: ["Not indexed", "Natural-language segment (pending translation or confirmation)"].includes(token.chinese) ? "" : token.chinese,
+      // 「未收录」「自然语言片段」都只是占位说明，不是译文：改中文时不带出来，
+      // 免得一个字没动就原样存回个人词库，得到一条中文名叫「未收录」的残词条
+      value: [UNKNOWN_CHINESE, "自然语言片段（待翻译或确认）"].includes(token.chinese) ? "" : token.chinese,
     };
     render();
   };

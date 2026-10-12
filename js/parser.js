@@ -20,6 +20,10 @@ function stripEmphasis(value) {
   return current;
 }
 
+// 没命中任何词库时中文列填的占位文案。它只是「还没翻译」的提示，不是一条真正的译文，
+// 所以任何往词库回写的地方都要先拿它比对，别把占位当成中文名存进去。
+export const UNKNOWN_CHINESE = "未收录";
+
 export function analyzeSegment(raw) {
   const display = raw.trim();
   if (!display) return null;
@@ -648,7 +652,7 @@ export function parsePrompt(text, dictionaryIndex, machineTranslations = new Map
     const dictionaryEntry = dictionaryIndex.get(key);
     const machine = machineTranslations.get(key);
     let status = "unknown";
-    let chinese = "未收录";
+    let chinese = UNKNOWN_CHINESE;
     if (dictionaryEntry) {
       status = dictionaryEntry.verified === false ? "unverified" : "verified";
       chinese = dictionaryEntry.chinese;

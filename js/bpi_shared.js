@@ -890,7 +890,8 @@ function buildTagFields(parent, initial = {}, { withTarget = true, readonlyEngli
   } else {
     english = field(parent, "English Tag", "english", initial?.english, "e.g.: looking at viewer");
   }
-  const chinese = field(parent, "Chinese Name", "chinese", initial?.chinese, "e.g.: looking at viewer");
+  // 中文名称的示例要给中文：这格本来就是填中文的，示例还写英文会让人以为该填英文
+  const chinese = field(parent, "Chinese Name", "chinese", initial?.chinese, "e.g.: apple");
   const aliases = field(parent, "Chinese Aliases", "aliases", initial?.aliases?.join("，"), "Comma-separated");
   const categoryLabel = element("label", "", "Category");
   categoryLabel.htmlFor = "bpi-field-category";
@@ -1369,6 +1370,8 @@ function injectBpiStyles() {
 .bpi-dropdown-trigger:hover{border-color:var(--bpi-text-faint)}
 .bpi-dropdown-caret{font-size:9px;color:var(--bpi-text-muted);transition:transform .12s}
 .bpi-about-modal{width:min(460px,calc(100vw - 32px))}.bpi-about-name{margin-bottom:7px;color:var(--bpi-text);font-weight:700}.bpi-config-note{color:var(--bpi-text-muted);font-size:10px;word-break:break-all}
+/* 同一句说明变成警告时用：只换颜色，不动字号字重，免得换行数变了把下面的表单顶走 */
+.bpi-config-note-warn{color:var(--bpi-status-error)}
 .bpi-help{position:relative;display:inline-flex;align-items:center;justify-content:center;width:13px;height:13px;margin-left:5px;border:1px solid var(--bpi-border);border-radius:50%;color:var(--bpi-text-muted);font:10px/1 Arial,sans-serif;vertical-align:middle;cursor:help;user-select:none}
 .bpi-help:hover,.bpi-help:focus{color:var(--bpi-text);border-color:var(--bpi-border-2)}
 .bpi-help-pop{position:absolute;left:50%;bottom:calc(100% + 6px);transform:translateX(-50%);z-index:80;display:none;box-sizing:border-box;width:290px;max-width:70vw;padding:7px 9px;border:1px solid var(--bpi-border-2);border-radius:6px;background:var(--bpi-surface-modal);color:var(--bpi-text-muted);font:11px/1.65 Arial,sans-serif;white-space:pre-line;text-align:left;cursor:default}

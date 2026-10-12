@@ -319,6 +319,7 @@ const ZH = {
   Models: "适用模型",
   "Recommended Weight": "推荐权重",
   "e.g.: looking at viewer": "例如：looking at viewer",
+  "e.g.: apple": "例如：苹果",
   "e.g.: pose, camera, style": "例如：pose、camera、style",
 
   // ── 弹窗：保存 / 编辑收藏 ────────────────────────────────────────────
@@ -333,6 +334,8 @@ const ZH = {
   "Tag saved": "词条已保存",
   "Entry info": "词条信息",
   "Edits go to the personal dictionary and override same-name entries.": "改动存入个人词库，会覆盖同名词条的显示。",
+  "Nothing was saved: the Chinese name is still the unknown placeholder.": "没有保存：中文名称还是「未收录」，这样存进去只会得到一条残词条。",
+  "Enter a real Chinese name, then apply again.": "先填一个真正的中文名称，再点应用。",
   "Edit Favorite": "编辑收藏",
   "Keep the current image, or pick a new one to replace it": "不换图就保持原样，选一张新的会替换掉原来的",
 
