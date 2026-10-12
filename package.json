@@ -1,6 +1,6 @@
 {
   "name": "comfyui-bilingual-prompt-inspector",
-  "version": "2.1.0",
+  "version": "2.1.5",
   "description": "ComfyUI bilingual prompt inspection, translation, Anima sorting, and on-demand Danbooru dictionary extension.",
   "private": true,
   "type": "module",
