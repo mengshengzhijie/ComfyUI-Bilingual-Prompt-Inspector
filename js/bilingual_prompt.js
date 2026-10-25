@@ -57,7 +57,7 @@ import {
 } from "./bpi_shared.js";
 
 const NODE_NAME = "BilingualPromptInspector";
-const EXTENSION_VERSION = "v2.1.5";
+const EXTENSION_VERSION = "v2.1.8";
 const PROJECT_URL = "https://github.com/mengshengzhijie/ComfyUI-Bilingual-Prompt-Inspector";
 const COLLAPSED_WIDGET_FALLBACK_HEIGHT = 390;
 // 「适应高度」打开后面板能长到的上限。ComfyUI 按 min/max 分配空间，max 必须明显高于 min，
