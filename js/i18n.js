@@ -103,7 +103,7 @@ const ZH = {
   "Highest": "最高",
   Translate: "翻译",
   "Translate & optimize": "翻译并优化",
-  "Optimize to Anima": "优化为 Anima",
+  Optimize: "优化",
   "Re-translate": "重新翻译",
   "Translate all unknown": "翻译全部未收录",
   "Sort by Anima order": "按 Anima 顺序排序",
@@ -403,8 +403,8 @@ const ZH = {
   "Translation Service": "翻译服务",
   "Dictionary only (no API)": "仅词库（不需要接口）",
   "Baidu Translate": "百度翻译",
-  "Only this service's settings are shown below. \"Translate & Optimize\" and \"Optimize to Anima\" always use AI: choose OpenAI-compatible API or Ollama above to configure or test them. Switching service never clears saved keys.":
-    "下面只显示当前所选服务的设置。「翻译并优化」和「优化为 Anima」始终走 AI：要配置或测试它们，请在上方选择「OpenAI 兼容接口」或「Ollama」。切换服务不会清掉已保存的密钥。",
+  "Only this service's settings are shown below. \"Translate & Optimize\" and \"Optimize\" always use AI: choose OpenAI-compatible API or Ollama above to configure or test them. Switching service never clears saved keys.":
+    "下面只显示当前所选服务的设置。「翻译并优化」和「优化」始终走 AI：要配置或测试它们，请在上方选择「OpenAI 兼容接口」或「Ollama」。切换服务不会清掉已保存的密钥。",
   "APP ID": "APP ID",
   "Secret Key": "密钥",
   "Clear saved Baidu secret": "清除已保存的百度密钥",
@@ -621,6 +621,9 @@ const ZH = {
   "Translation Rule": "翻译规则",
   "Translate & Optimize Rule": "翻译并优化规则",
   "Optimize Rule": "优化规则",
+  "Natural Language Rule": "自然语言规则",
+  "Optimize with the rule for the current mode: tag mode tidies the tag flow, natural language mode rewrites it as English sentences":
+    "按当前模式对应的规则优化：标签模式整理标签流，自然语言模式改写为英文自然语句",
   "Connection OK: {}": "连接正常：{}",
   // 确认对话框的默认确认按钮（confirmDialog 的 confirmLabel 缺省值），
   // 不是「连接正常」的 OK——那个是整句键 "Connection OK: {}"。
@@ -795,7 +798,8 @@ const ZH = {
 
   "Click a tag to link it with the detail table below; select then press Delete": "点击标签可与下方明细表联动；选中后按 Delete 删除",
   "English prompt is empty; nothing to optimize": "英文提示词是空的，没有可优化的内容",
-  "“Optimize to Anima” only processes English; translate Chinese in the sidebar first": "「优化为 Anima」只处理英文；中文请先在侧边栏翻译",
+  "“Optimize” only processes English in tag mode; translate Chinese in the sidebar first": "「优化」在标签模式下只处理英文；中文请先在侧边栏翻译，或把模式切到「自然语言」",
+  "(Chinese detected; translating to English first)": "（检测到中文，会先译成英文）",
   "{} done; please confirm in the preview window": "「{}」完成；请在预览窗口确认",
   "{}; please fix it in the preview before confirming": "「{}」；请在预览里改好再确认",
 };

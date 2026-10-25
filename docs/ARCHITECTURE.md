@@ -33,10 +33,11 @@
 - `server.py`
   - 注册助手、个人词库、词库包和大型词库的本地接口。
   - 执行同源检查、临时会话令牌校验、请求体限制、助手频率限制和并发限制。
-  - 只在用户主动调用时访问配置的百度翻译或 AI（OpenAI 兼容 / Ollama）服务；"翻译并优化"与"优化为 Anima"恒走 AI，翻译/解释按 `translate_service` 选择。
+  - 只在用户主动调用时访问配置的百度翻译或 AI（OpenAI 兼容 / Ollama）服务；"翻译并优化"与"优化"恒走 AI，翻译/解释按 `translate_service` 选择。
   - `UpstreamGate` 负责上游输入的挂起：按节点 id 保存一个 future，只能被 `/bpi/upstream/{ack,resume,cancel}` 唤醒。等待循环每 0.5 秒检查一次 ComfyUI 中断，无人接管时到点自动透传。唤醒一律走 `loop.call_soon_threadsafe`——future 属于执行线程的 loop，而路由跑在主线程。
 - `assistant_store.py`
-  - 保存翻译服务类型（schema v4：`translate_service` = dictionary / baidu / openai_compatible / ollama；后两个同时是 AI 后端，选前两个时由 `ai_provider` 决定优化走哪一套）、两套 AI 配置（OpenAI 兼容 / Ollama 各一套地址、模型、温度、超时与三条规则）、百度 APP ID 与密钥，以及独立留存的 AI Key 与百度密钥。
+  - 保存翻译服务类型（schema v4：`translate_service` = dictionary / baidu / openai_compatible / ollama；后两个同时是 AI 后端，选前两个时由 `ai_provider` 决定优化走哪一套）、两套 AI 配置（OpenAI 兼容 / Ollama 各一套地址、模型、温度、超时与四条规则）、百度 APP ID 与密钥，以及独立留存的 AI Key 与百度密钥。
+  - 四条规则是翻译 / 翻译并优化 / 优化 / 自然语言。前三条产出 Anima 标签流，走 `sanitize_anima_prompt`（句点收成逗号、标点只放行白名单）；自然语言那条产出完整英文句子，走 `sanitize_natural_prompt`，两者不能混用。
   - 读到旧值 `translate_service = "ai"` 时按当时的 `ai_provider` 拆成 `openai_compatible` / `ollama` 并回写。
   - AI Key 与百度密钥互不干扰：切换翻译服务或 AI 后端不清任一密钥；AI Key 只在地址变更或换机器时清，百度密钥只在显式清除时清。
   - 旧 v2 配置（单一 `provider`）自动迁移至 v3，密钥与绑定原样搬入 `ai_*` 槽。
@@ -117,7 +118,8 @@ ComfyUI 原生 text 控件（工作流真值）
 
 ```text
 绿色草稿框
-  → 用户点击仅翻译 / 翻译并优化 / 优化为 Anima
+  → 用户点击仅翻译 / 翻译并优化 / 优化
+  → 自然语言模式下「优化」改用 optimize_natural，走自然语言规则
   → /bpi/assistant/run
   → 纯词库、百度翻译或 AI（OpenAI 兼容 / Ollama）
   → 结果写回绿色暂存区

@@ -692,7 +692,7 @@ async function buildAssistantForm(host, loading) {
   const error = element("div", "bpi-status");
   error.style.gridColumn = "1 / -1";
 
-  // 翻译服务：翻译/解释按此选择；“翻译并优化”“优化为 Anima”恒走 AI
+  // 翻译服务：翻译/解释按此选择；“翻译并优化”“优化”恒走 AI
   const serviceLabel = element("label", "", "Translation Service");
   const service = element("select");
   for (const [value, label] of [
@@ -708,7 +708,7 @@ async function buildAssistantForm(host, loading) {
   // 后端已把旧的 "ai" 拆成两个具体服务；这里再兜一次，避免下拉落空
   service.value = config.translate_service === "ai" ? config.ai_provider || "openai_compatible" : config.translate_service;
   form.append(serviceLabel, service);
-  const serviceNote = element("div", "bpi-config-note", 'Only this service\'s settings are shown below. "Translate & Optimize" and "Optimize to Anima" always use AI: choose OpenAI-compatible API or Ollama above to configure or test them. Switching service never clears saved keys.');
+  const serviceNote = element("div", "bpi-config-note", 'Only this service\'s settings are shown below. "Translate & Optimize" and "Optimize" always use AI: choose OpenAI-compatible API or Ollama above to configure or test them. Switching service never clears saved keys.');
   serviceNote.style.gridColumn = "1 / -1";
   form.append(serviceNote);
 
@@ -877,11 +877,13 @@ async function buildAssistantForm(host, loading) {
       translation: addRule(openaiOnly, "Translation Rule", config.openai_translation_rule),
       translateOptimize: addRule(openaiOnly, "Translate & Optimize Rule", config.openai_translate_optimize_rule),
       optimization: addRule(openaiOnly, "Optimize Rule", config.openai_optimization_rule),
+      natural: addRule(openaiOnly, "Natural Language Rule", config.openai_natural_rule),
     },
     ollama: {
       translation: addRule(ollamaOnly, "Translation Rule", config.ollama_translation_rule),
       translateOptimize: addRule(ollamaOnly, "Translate & Optimize Rule", config.ollama_translate_optimize_rule),
       optimization: addRule(ollamaOnly, "Optimize Rule", config.ollama_optimization_rule),
+      natural: addRule(ollamaOnly, "Natural Language Rule", config.ollama_natural_rule),
     },
   };
   form.appendChild(error);
@@ -909,6 +911,7 @@ async function buildAssistantForm(host, loading) {
     active.translation.value = config[`default_${prefix}_translation_rule`];
     active.translateOptimize.value = config[`default_${prefix}_translate_optimize_rule`];
     active.optimization.value = config[`default_${prefix}_optimization_rule`];
+    active.natural.value = config[`default_${prefix}_natural_rule`];
     setText(error, "Defaults restored in editor; click Save to apply");
     error.dataset.kind = "ok";
   });
@@ -965,9 +968,11 @@ async function buildAssistantForm(host, loading) {
     openai_translation_rule: rules.openai_compatible.translation.value,
     openai_translate_optimize_rule: rules.openai_compatible.translateOptimize.value,
     openai_optimization_rule: rules.openai_compatible.optimization.value,
+    openai_natural_rule: rules.openai_compatible.natural.value,
     ollama_translation_rule: rules.ollama.translation.value,
     ollama_translate_optimize_rule: rules.ollama.translateOptimize.value,
     ollama_optimization_rule: rules.ollama.optimization.value,
+    ollama_natural_rule: rules.ollama.natural.value,
   });
 }
 

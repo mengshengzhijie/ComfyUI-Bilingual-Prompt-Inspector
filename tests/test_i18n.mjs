@@ -85,7 +85,14 @@ assert.equal(
 // 自由文本变量必须用「"…"」包起来才能折叠成 {}，否则整句永远匹配不上。
 // 这里锁死「运行时真实形态」，防止以后有人把引号去掉或换成 ASCII 直引号。
 for (const [source, expected] of [
-  ["“Optimize to Anima” done; please confirm in the preview window", "「优化为 Anima」完成；请在预览窗口确认"],
+  ["“Optimize” done; please confirm in the preview window", "「优化」完成；请在预览窗口确认"],
+  ["Optimize", "优化"],
+  ["Natural Language Rule", "自然语言规则"],
+  ["(Chinese detected; translating to English first)", "（检测到中文，会先译成英文）"],
+  [
+    "Optimize with the rule for the current mode: tag mode tidies the tag flow, natural language mode rewrites it as English sentences",
+    "按当前模式对应的规则优化：标签模式整理标签流，自然语言模式改写为英文自然语句",
+  ],
   ["applied “Translate & optimize”; press Ctrl+Z to undo", "已应用 翻译并优化；按 Ctrl+Z 可撤销"],
   ["Undone: “Sort to Anima order”", "已撤销：Sort to Anima order"],
   ["Redone: “Sort to Anima order”", "已重做：Sort to Anima order"],

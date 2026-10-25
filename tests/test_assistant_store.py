@@ -6,6 +6,7 @@ from pathlib import Path
 
 from assistant_store import (
     AssistantStore,
+    DEFAULT_NATURAL_RULE,
     DEFAULT_OPTIMIZATION_RULE,
     DEFAULT_TRANSLATE_OPTIMIZE_RULE,
     DEFAULT_TRANSLATION_RULE,
@@ -18,6 +19,7 @@ from assistant_store import (
     normalize_ai_base_url,
     openai_chat_endpoint,
     sanitize_anima_prompt,
+    sanitize_natural_prompt,
     translation_direction,
 )
 from dictionary_store import DictionaryStore
@@ -314,6 +316,47 @@ class AssistantStoreTests(unittest.TestCase):
             sanitize_anima_prompt("masterpiece [smile]")
         with self.assertRaisesRegex(ValueError, "仍包含中文"):
             sanitize_anima_prompt("masterpiece, 杰作")
+
+    def test_natural_prompt_keeps_sentence_punctuation(self):
+        # 与 Anima 清洗的核心区别：句点是句子的一部分，不能被换成逗号
+        self.assertEqual(
+            sanitize_natural_prompt("A woman stands in the rain. She looks tired."),
+            "A woman stands in the rain. She looks tired.",
+        )
+        # 逗号是句子内部的停顿，原样保留
+        self.assertEqual(
+            sanitize_natural_prompt("A woman stands in the rain, tired and cold."),
+            "A woman stands in the rain, tired and cold.",
+        )
+        # 全角标点统一成半角，代码块围栏和转义符照旧清掉
+        self.assertEqual(
+            sanitize_natural_prompt('```text\nA woman stands in the rain，tired。\n```'),
+            "A woman stands in the rain, tired.",
+        )
+        self.assertEqual(
+            sanitize_natural_prompt('A woman \\"stands\\" in the rain'),
+            'A woman "stands" in the rain',
+        )
+        # 模型爱用列表；自然语言结果里列表符号要去掉，换行收成空格
+        self.assertEqual(
+            sanitize_natural_prompt("1. A woman stands in the rain\n2. She looks tired"),
+            "A woman stands in the rain She looks tired",
+        )
+        with self.assertRaisesRegex(ValueError, "仍包含中文"):
+            sanitize_natural_prompt("一名女子站在雨中")
+
+    def test_natural_rule_is_persisted_per_backend(self):
+        with tempfile.TemporaryDirectory() as root:
+            store = AssistantStore(config_dir=root, install_id_path=Path(root) / "install")
+            store.update({"openai_natural_rule": "我的自然语言规则", "ollama_natural_rule": "本地规则"})
+            config = store.config()
+            self.assertEqual(config["openai_natural_rule"], "我的自然语言规则")
+            self.assertEqual(config["ollama_natural_rule"], "本地规则")
+            # 另一套不受影响，且默认值能通过 public_config 取回
+            self.assertEqual(config["openai_optimization_rule"], DEFAULT_OPTIMIZATION_RULE)
+            public = store.public_config()
+            self.assertEqual(public["default_openai_natural_rule"], DEFAULT_NATURAL_RULE)
+            self.assertEqual(public["default_ollama_natural_rule"], DEFAULT_NATURAL_RULE)
 
     def test_legacy_default_rules_are_upgraded(self):
         with tempfile.TemporaryDirectory() as root:

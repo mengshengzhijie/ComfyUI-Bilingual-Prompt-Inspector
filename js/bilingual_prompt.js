@@ -132,17 +132,17 @@ function createPanel(node, textWidget) {
   const insertBreakButton = element("button", "bpi-button bpi-mini", "Insert line break");
   // 中文不再单独占一块：每个英文标签下面直接跟一行中文，构成一张双语小卡。
   // 翻译类动作已移到侧边栏，节点里只保留「直接作用于英文提示词」的这两个。
-  const optimizeChineseButton = element("button", "bpi-button bpi-mini", "Optimize to Anima");
+  const optimizeButton = element("button", "bpi-button bpi-mini", "Optimize");
   const sortPromptButton = element("button", "bpi-button bpi-mini", "Sort by Anima order");
   editEnglishButton.type = "button";
   clearEnglishButton.type = "button";
   favoriteButton.type = "button";
   insertBreakButton.type = "button";
-  optimizeChineseButton.type = "button";
+  optimizeButton.type = "button";
   sortPromptButton.type = "button";
   setTitle(favoriteButton, "Save the current English prompt to favorites in the user directory (a reference image can be attached)");
   setTitle(insertBreakButton, "Insert a line break after the selected tag, or at the end when no tag is selected");
-  englishHead.append(englishTitle, englishHint, editEnglishButton, clearEnglishButton, insertBreakButton, favoriteButton, optimizeChineseButton, sortPromptButton);
+  englishHead.append(englishTitle, englishHint, editEnglishButton, clearEnglishButton, insertBreakButton, favoriteButton, optimizeButton, sortPromptButton);
   const englishTokenView = element("div", "bpi-english-token-view bpi-hidden");
   englishTokenView.tabIndex = 0;
   englishTokenView.setAttribute("role", "textbox");
@@ -274,6 +274,11 @@ function createPanel(node, textWidget) {
     option.value = value;
     modeSelect.appendChild(option);
   }
+  // 模式跟着节点存：工作流保存后重开仍是上次选的那一档，没存过就回到自动检测
+  const storedMode = () => {
+    const value = node.properties?.bpiMode;
+    return ["tags", "natural"].includes(value) ? value : "auto";
+  };
 
   const state = {
     data: { tags: [], builtin: [], user: [], packs: [] },
@@ -286,7 +291,7 @@ function createPanel(node, textWidget) {
     selected: new Set(),
     lastText: null,
     renderTimer: null,
-    modePreference: "auto",
+    modePreference: storedMode(),
     modeInfo: { mode: "tags", reason: "Empty input", confidence: "high" },
     issues: [],
     localOverrides: new Map(),
@@ -2154,30 +2159,36 @@ function createPanel(node, textWidget) {
 
   const setAssistantBusy = (busy) => {
     state.assistantBusy = Boolean(busy);
-    optimizeChineseButton.disabled = state.assistantBusy;
+    optimizeButton.disabled = state.assistantBusy;
     sortPromptButton.disabled = state.assistantBusy;
   };
 
-  // 「优化为 Anima」只处理英文提示词本身（中文翻译在侧边栏做），
+  // 自然语言模式下没有标签流可以重排，「按 Anima 排序」整个不出现；
+  // 「优化」也随之改走自然语言规则（可以吃中文），标签模式维持「只处理英文」。
+  const isNaturalPrompt = () => state.modeInfo.mode === "natural";
+
   // 结果不直接写回，先弹预览让用户确认。
-  const runAnimaOptimize = async () => {
+  const runOptimize = async () => {
     if (state.assistantBusy) return;
     const source = String(textWidget.value ?? "").trim();
     if (!source) {
       setStatus("English prompt is empty; nothing to optimize", "error");
       return;
     }
-    if (containsChinese(source)) {
-      setStatus("“Optimize to Anima” only processes English; translate Chinese in the sidebar first", "error");
+    const label = "Optimize";
+    const natural = isNaturalPrompt();
+    const hasChinese = containsChinese(source);
+    if (hasChinese && !natural) {
+      setStatus("“Optimize” only processes English in tag mode; translate Chinese in the sidebar first", "error");
       return;
     }
-    const label = "Optimize to Anima";
     setAssistantBusy(true);
-    setStatus(`Running “${label}”…`, "busy");
+    // 自然语言模式是允许中文的，这里明说一句会顺带翻译，免得用户以为漏处理了
+    setStatus(`Running “${label}”…${hasChinese ? " (Chinese detected; translating to English first)" : ""}`, "busy");
     try {
-      const output = await runInspectorAssistant("optimize", source);
-      const punctuationError = animaPunctuationError(output);
-      openTextPreview("Optimize to Anima", output, null, label);
+      const output = await runInspectorAssistant(natural ? "optimize_natural" : "optimize", source);
+      const punctuationError = natural ? "" : animaPunctuationError(output);
+      openTextPreview(label, output, null, label);
       if (punctuationError) {
         setStatus(`“${punctuationError}”; please fix it in the preview before confirming`, "error");
       } else {
@@ -2208,6 +2219,9 @@ function createPanel(node, textWidget) {
   // 排序写入之后按钮就变成「取消」：点一下把提示词和分类视图一起还原到排序前。
   const updateSortButton = () => {
     const sorted = Boolean(state.animaSortSnapshot);
+    // 排序只重排标签流；整段自然语言没有可排的东西，按钮整个不出现。
+    // 但已经排过序时要留着，否则「取消排序」的入口会跟着一起消失。
+    sortPromptButton.hidden = isNaturalPrompt() && !state.animaSortSnapshot;
     setText(sortPromptButton, sorted ? "Cancel Anima order sort" : "Sort by Anima order");
     setTitle(sortPromptButton, sorted
       ? "Restore the prompt as it was before the Anima sort"
@@ -2886,8 +2900,9 @@ function createPanel(node, textWidget) {
     state.lastText = text;
     // 排序完又手动改了文本，「回到排序前」会把这些改动一起吞掉，取消入口随之失效
     if (state.animaSortSnapshot && text.trim() !== state.animaSortSnapshot.after) state.animaSortSnapshot = null;
-    updateSortButton();
     state.modeInfo = detectInputMode(text, state.modePreference);
+    // 按钮显隐依赖 modeInfo，必须排在它更新之后
+    updateSortButton();
     state.tokens = parseTokens(text);
     queueLargeLookup(state.tokens);
     // 重复分组要在渲染两个视图之前算好，标签区和明细表都吃这份数据
@@ -3424,6 +3439,7 @@ function createPanel(node, textWidget) {
     button("Refresh dictionary", refreshDictionary),
   );
   toolbar.append(leftTools, rightTools);
+  modeSelect.value = state.modePreference;
   searchLine.append(modeSelect, searchLabel, search);
   summary.append(counts, modeInfo, status);
   detailsBody.append(toolbar, searchLine, results, summary, filtersBar, colorPanel, machineBatchBar, issuesPanel, tableSearch, table, detailsHiddenBar);
@@ -3557,8 +3573,8 @@ function createPanel(node, textWidget) {
     event.stopPropagation();
     action();
   });
-  setTitle(optimizeChineseButton, "Only optimizes existing English; does not translate");
-  bindMirrorAction(optimizeChineseButton, runAnimaOptimize);
+  setTitle(optimizeButton, "Optimize with the rule for the current mode: tag mode tidies the tag flow, natural language mode rewrites it as English sentences");
+  bindMirrorAction(optimizeButton, runOptimize);
   bindMirrorAction(sortPromptButton, () => {
     if (state.animaSortSnapshot) cancelAnimaSort();
     else sortByAnimaOrder();
@@ -3638,6 +3654,9 @@ function createPanel(node, textWidget) {
   });
   modeSelect.addEventListener("change", () => {
     state.modePreference = modeSelect.value;
+    if (!node.properties || typeof node.properties !== "object") node.properties = {};
+    if (state.modePreference === "auto") delete node.properties.bpiMode;
+    else node.properties.bpiMode = state.modePreference;
     state.editing = null;
     render();
   });
@@ -3736,6 +3755,9 @@ function createPanel(node, textWidget) {
       // Workflow files keep the hidden-tag list in node.properties; make sure
       // the bar is drawn even when the text itself did not change.
       getHiddenTags();
+      // 工作流里的模式偏好要先回到下拉，否则按钮显隐会退回「自动」那一套
+      state.modePreference = storedMode();
+      modeSelect.value = state.modePreference;
       scheduleRender(true);
     },
     syncSourceBar() {

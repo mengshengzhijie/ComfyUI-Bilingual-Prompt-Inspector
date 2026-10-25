@@ -27,6 +27,7 @@ from .assistant_store import (
     normalize_ai_base_url,
     openai_chat_endpoint,
     sanitize_anima_prompt,
+    sanitize_natural_prompt,
     translation_direction,
 )
 from .dictionary_store import DictionaryStore, normalize_key
@@ -205,12 +206,14 @@ async def _call_ai_assistant(action, text, instruction, config, connection_test=
         config.get("ai_provider", "openai_compatible"), "openai"
     )
     if not config.get(f"{prefix}_model"):
-        raise ValueError("尚未填写 AI 模型名称（“翻译并优化”“优化为 Anima”以及 AI 翻译都需要）")
+        raise ValueError("尚未填写 AI 模型名称（“翻译并优化”“优化”以及 AI 翻译都需要）")
     rule = {
         "translate": config[f"{prefix}_translation_rule"],
         "explain": config[f"{prefix}_translation_rule"],
         "translate_optimize": config[f"{prefix}_translate_optimize_rule"],
         "optimize": config[f"{prefix}_optimization_rule"],
+        # 自然语言模式下的「优化」：输入可以是中文，输出是英文自然语句，不走 Anima 标点规则
+        "optimize_natural": config[f"{prefix}_natural_rule"],
     }[action]
     if connection_test:
         rule = "你是连接测试助手。"
@@ -224,8 +227,12 @@ async def _call_ai_assistant(action, text, instruction, config, connection_test=
         rule = f"{rule}\n\n本次任务：无论输入语言为何，最终必须输出经过优化的英文 Anima 提示词。"
     elif not connection_test and action == "optimize":
         if re.search(r"[\u3400-\u9fff]", text):
-            raise ValueError("“优化为 Anima”只接受英文；中文或混合文本请使用“翻译并优化”")
+            raise ValueError("“优化”在标签模式下只接受英文；中文或混合文本请使用“翻译并优化”，或把模式切到“自然语言”")
         rule = f"{rule}\n\n本次任务：整理现有英文内容，不承担翻译。"
+    elif not connection_test and action == "optimize_natural":
+        # 自然语言模式允许中文输入：先译后整理，输出一段英文自然语句
+        direction = "先把中文忠实译为英文，再整理表达" if translation_direction(text) == "to_english" else "整理现有英文内容，不承担翻译"
+        rule = f"{rule}\n\n本次任务方向：{direction}。"
     if instruction:
         rule = f"{rule}\n\n用户本次附加要求优先遵循：{instruction.strip()}"
     timeout = ClientTimeout(total=config[f"{prefix}_timeout_seconds"])
@@ -275,7 +282,9 @@ async def _call_ai_assistant(action, text, instruction, config, connection_test=
         raise ValueError("模型没有返回文本结果")
     if len(result) > 50000:
         raise ValueError("模型返回内容异常过长")
-    if action in {"translate_optimize", "optimize"}:
+    if action == "optimize_natural":
+        result = sanitize_natural_prompt(result)
+    elif action in {"translate_optimize", "optimize"}:
         result = sanitize_anima_prompt(result)
     return result
 
@@ -283,8 +292,8 @@ async def _call_ai_assistant(action, text, instruction, config, connection_test=
 async def _call_configured_assistant(action, text, instruction="", connection_test=False):
     config = assistant_store.config()
     translate_service = config["translate_service"]
-    # “翻译并优化”“优化为 Anima”恒走 AI；翻译/解释在翻译服务就是某个 AI 后端时也走 AI
-    needs_ai = action in {"translate_optimize", "optimize"} or (
+    # “翻译并优化”“优化”恒走 AI；翻译/解释在翻译服务就是某个 AI 后端时也走 AI
+    needs_ai = action in {"translate_optimize", "optimize", "optimize_natural"} or (
         action in {"translate", "explain"} and translate_service in AI_SERVICES
     )
     if needs_ai:
@@ -357,7 +366,7 @@ async def run_assistant(request):
         action = str(payload.get("action", "translate")) if isinstance(payload, dict) else "translate"
         text = str(payload.get("text", "")) if isinstance(payload, dict) else ""
         instruction = str(payload.get("instruction", "")) if isinstance(payload, dict) else ""
-        if action not in {"translate", "explain", "translate_optimize", "optimize"}:
+        if action not in {"translate", "explain", "translate_optimize", "optimize", "optimize_natural"}:
             raise ValueError("未知的助手操作")
         if not text.strip():
             raise ValueError("输入内容为空")

@@ -46,11 +46,18 @@ DEFAULT_OPTIMIZATION_RULE = """你是 Anima 模型英文提示词优化器。输
 对于明确为成年人的合法成人内容，准确保留并规范相关成人标签，不弱化、不含糊替换，也不主动增加原文没有的成人内容；不得将未成年人或年龄不明确的人物成人化。
 标签使用英文逗号分隔；自然语言只放在末尾并使用英文句点分隔。仅使用 Anima 支持的英文标点和语法：逗号、句点、圆括号与冒号权重、@ 画师前缀、下划线、连字符、撇号、百分号，以及尖括号 LoRA 语法。"""
 
+DEFAULT_NATURAL_RULE = """你是面向现代生图模型（Krea、FLUX、Qwen-Image 等）的英文自然语言提示词助手。把用户输入整理成一段通顺、具体、可直接使用的英文描述；只返回最终结果，不输出 Markdown、标题、引号、解释、警告或免责声明。
+输入是中文、英文或中英混合都可以：含中文时先忠实译为英文再整理表达，纯英文时只做表达优化，不改变原意。输入是逗号分隔的标签时，先理解这些标签的含义，再改写成一段连贯的英文自然语言描述。
+保留主体、动作与状态、外貌与服装、环境与背景、光线、镜头与构图、风格与画材、氛围与情绪；原文没有给出的要素不要凭空添加，也不要删掉原文已经写明的限制。
+严格保留人物数量、成年人身份、角色名、作品名、否定关系、左右位置和安全等级，不得擅自换人、增加人物或改变主题。
+对于明确为成年人的合法成人内容，准确保留相关描述，不弱化、不含糊替换，也不主动增加原文没有的成人内容；不得将未成年人或年龄不明确的人物成人化。
+用完整的英文句子输出，按语法正常使用逗号、句点和连接词；不要写成逗号分隔的标签列表，也不要使用括号权重、@ 画师前缀或尖括号语法。"""
+
 DEFAULT_CONFIG = {
     "schema_version": 4,
     # 翻译/解释走哪个服务；OpenAI 兼容与 Ollama 本身就是两个平级选项
     "translate_service": "dictionary",  # dictionary | baidu | openai_compatible | ollama
-    # 选词库/百度时翻译不走 AI，但「翻译并优化」「优化为 Anima」恒走 AI —— 这时用它决定读哪一套
+    # 选词库/百度时翻译不走 AI，但「翻译并优化」「优化」恒走 AI —— 这时用它决定读哪一套
     "ai_provider": "openai_compatible",  # openai_compatible | ollama
     # OpenAI 兼容：远端必须 https，本机回环 http 也放行（本地 LM Studio 之类）
     "openai_base_url": "",
@@ -76,9 +83,11 @@ DEFAULT_CONFIG = {
     "openai_translation_rule": DEFAULT_TRANSLATION_RULE,
     "openai_translate_optimize_rule": DEFAULT_TRANSLATE_OPTIMIZE_RULE,
     "openai_optimization_rule": DEFAULT_OPTIMIZATION_RULE,
+    "openai_natural_rule": DEFAULT_NATURAL_RULE,
     "ollama_translation_rule": DEFAULT_TRANSLATION_RULE,
     "ollama_translate_optimize_rule": DEFAULT_TRANSLATE_OPTIMIZE_RULE,
     "ollama_optimization_rule": DEFAULT_OPTIMIZATION_RULE,
+    "ollama_natural_rule": DEFAULT_NATURAL_RULE,
 }
 
 # 规则按后端分成两套，遍历时统一用这两个前缀
@@ -86,7 +95,7 @@ AI_PROVIDER_PREFIXES = {"openai_compatible": "openai", "ollama": "ollama"}
 # translate_service 里属于 AI 的两个值，与 ai_provider 共用同一套前缀
 AI_SERVICES = frozenset(AI_PROVIDER_PREFIXES)
 TRANSLATE_SERVICES = frozenset({"dictionary", "baidu"}) | AI_SERVICES
-RULE_KEYS = ("translation_rule", "translate_optimize_rule", "optimization_rule")
+RULE_KEYS = ("translation_rule", "translate_optimize_rule", "optimization_rule", "natural_rule")
 
 BAIDU_TRANSLATE_ENDPOINT = "https://fanyi-api.baidu.com/api/trans/vip/translate"
 
@@ -289,6 +298,35 @@ def sanitize_anima_prompt(value):
     return text
 
 
+def sanitize_natural_prompt(value):
+    """自然语言优化结果的清洗。
+
+    与 sanitize_anima_prompt 的区别：这里要保留完整句子，所以既不把句点改成逗号，
+    也不做 Anima 标点白名单收窄——只挡代码块、转义符、列表符号和残留中文。
+    """
+    text = str(value or "").strip()
+    fenced = re.fullmatch(r"```(?:text|plaintext)?\s*([\s\S]*?)\s*```", text, re.IGNORECASE)
+    text = fenced.group(1).strip() if fenced else text
+    replacements = {
+        "，": ", ", "、": ", ", "；": "; ", "。": ". ",
+        "！": "! ", "？": "? ", "：": ": ",
+        "（": "(", "）": ")", "＜": "<", "＞": ">", "—": " - ", "–": " - ",
+        "“": '"', "”": '"', "＂": '"', "‘": "'", "’": "'", "＇": "'", "`": "",
+    }
+    for source, target in replacements.items():
+        text = text.replace(source, target)
+    text = re.sub(r"\\+[nrt]", "\n", text)
+    text = text.replace("\\", "")
+    text = re.sub(r"(?m)^\s*(?:[-*•]+|\d+[.)])\s*", "", text)
+    text = re.sub(r"[\r\n]+", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    if re.search(r"[\u3400-\u9fff]", text):
+        raise ValueError("助手返回的自然语言提示词仍包含中文，请调整规则后重试")
+    if not text:
+        raise ValueError("助手返回的自然语言提示词为空")
+    return text
+
+
 def _default_config_dir():
     try:
         import folder_paths
@@ -488,6 +526,7 @@ class AssistantStore:
             defaults[f"default_{prefix}_translation_rule"] = DEFAULT_TRANSLATION_RULE
             defaults[f"default_{prefix}_translate_optimize_rule"] = DEFAULT_TRANSLATE_OPTIMIZE_RULE
             defaults[f"default_{prefix}_optimization_rule"] = DEFAULT_OPTIMIZATION_RULE
+            defaults[f"default_{prefix}_natural_rule"] = DEFAULT_NATURAL_RULE
         return {
             key: config[key] for key in DEFAULT_CONFIG if key not in ("openai_api_key", "baidu_secret_key")
         } | {
