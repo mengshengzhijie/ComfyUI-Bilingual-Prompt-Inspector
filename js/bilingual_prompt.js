@@ -60,6 +60,11 @@ const NODE_NAME = "BilingualPromptInspector";
 const EXTENSION_VERSION = "v2.1.5";
 const PROJECT_URL = "https://github.com/mengshengzhijie/ComfyUI-Bilingual-Prompt-Inspector";
 const COLLAPSED_WIDGET_FALLBACK_HEIGHT = 390;
+// 「适应高度」打开后面板能长到的上限。ComfyUI 按 min/max 分配空间，max 必须明显高于 min，
+// 否则手动拉大节点多出来的高度全变成空白（distributeSpace 只会在 min..max 之间给）。
+const EXPANDED_WIDGET_MAX_HEIGHT = 1600;
+// 打开开关时至少给节点加这么高，保证「点了有反应」；内容被压掉更多时按实际差值撑
+const FILL_HEIGHT_MIN_GROWTH = 200;
 const COLLAPSED_NODE_MIN_HEIGHT = 360;
 const IMPORT_POLICIES = [
   { value: "changed", label: "Import: on content change" },
@@ -134,6 +139,14 @@ function createPanel(node, textWidget) {
   // 翻译类动作已移到侧边栏，节点里只保留「直接作用于英文提示词」的这两个。
   const optimizeButton = element("button", "bpi-button bpi-mini", "Optimize");
   const sortPromptButton = element("button", "bpi-button bpi-mini", "Sort by Anima order");
+  // 「适应高度」：把面板高度从写死的上限里放出来，让提示词区跟着节点一起变高。
+  // 做成滑动开关（和设置面板里同款，只是用主题色而不是危险色），放在明细表上方的筛选栏里。
+  const fillSwitchRow = element("label", "bpi-switch-row bpi-switch-accent");
+  const fillSwitch = element("input", "bpi-switch");
+  fillSwitch.type = "checkbox";
+  const fillTrack = element("span", "bpi-switch-track");
+  fillTrack.appendChild(element("span", "bpi-switch-thumb"));
+  fillSwitchRow.append(fillSwitch, fillTrack, element("span", "bpi-switch-text", "Fit height"));
   editEnglishButton.type = "button";
   clearEnglishButton.type = "button";
   favoriteButton.type = "button";
@@ -279,6 +292,8 @@ function createPanel(node, textWidget) {
     const value = node.properties?.bpiMode;
     return ["tags", "natural"].includes(value) ? value : "auto";
   };
+  // 「适应高度」也跟着节点存：工作流重开后仍是上次那个状态
+  const storedFillHeight = () => node.properties?.bpiFillHeight === true;
 
   const state = {
     data: { tags: [], builtin: [], user: [], packs: [] },
@@ -292,6 +307,7 @@ function createPanel(node, textWidget) {
     lastText: null,
     renderTimer: null,
     modePreference: storedMode(),
+    fillHeight: storedFillHeight(),
     modeInfo: { mode: "tags", reason: "Empty input", confidence: "high" },
     issues: [],
     localOverrides: new Map(),
@@ -371,6 +387,12 @@ function createPanel(node, textWidget) {
   };
   const autoFitGreenArea = (target, minimum) => {
     if (!target || target.classList.contains("bpi-hidden")) return;
+    // 适应高度模式下高度交给 flex；这里再写死 height 会把刚放开的上限又按回去
+    if (state.fillHeight) {
+      target.style.height = "";
+      target.style.overflowY = "auto";
+      return;
+    }
     const maximum = 360;
     target.style.height = "auto";
     const height = Math.max(minimum, Math.min(maximum, Math.ceil(target.scrollHeight + 2)));
@@ -444,9 +466,20 @@ function createPanel(node, textWidget) {
     if (state.resizeFrame !== null) cancelAnimationFrame(state.resizeFrame);
     state.resizeFrame = requestAnimationFrame(() => {
       state.resizeFrame = null;
+      const width = Math.max(node.size?.[0] ?? 0, 590);
+      // 适应高度模式：高度归用户，只同步宽度。这里绝不能按内容重算——
+      // 英文区一变高就会推高自动高度、再推高节点、英文区又更高，越滚越大。
+      if (state.fillHeight) {
+        if (Math.abs((node.size?.[0] ?? 0) - width) > 0.5) {
+          node.setSize?.([width, Number(node.size?.[1]) || COLLAPSED_NODE_MIN_HEIGHT]);
+          node.graph?.change?.();
+        }
+        node.graph?.setDirtyCanvas?.(true, true);
+        app.graph?.setDirtyCanvas?.(true, true);
+        return;
+      }
       state.collapsedWidgetHeight = measureCollapsedWidgetHeight();
       panel.style.setProperty("--bpi-collapsed-height", `${state.collapsedWidgetHeight}px`);
-      const width = Math.max(node.size?.[0] ?? 0, 590);
       // 稳定基线 = 标题栏 + 原生 text 控件的真实内容高度。
       // 绝不能读 inspectorWidget().y（= bilingual_inspector.y）——那是 ComfyUI arrange
       // 从 text.computedHeight 派生的，而 text.computedHeight 在「setSize 变高 → 文本框
@@ -472,15 +505,73 @@ function createPanel(node, textWidget) {
         fallbackBaseHeight: state.nodeBaseHeight ?? 96,
         minimumHeight: COLLAPSED_NODE_MIN_HEIGHT,
       });
+      // 高度只补不缩：用户把节点拉大之后，任何一次 render 都不该把它拽回自动高度，
+      // 否则「拉大 → 改一个字 → 被打回原形」，拉大等于白拉。宽度仍按最小可用宽度收敛。
+      const currentHeight = Number(node.size?.[1]) || 0;
+      const nextHeight = Math.max(targetHeight, currentHeight);
       const sizeChanged = Math.abs((node.size?.[0] ?? 0) - width) > 0.5
-        || Math.abs((node.size?.[1] ?? 0) - targetHeight) > 0.5;
+        || Math.abs(currentHeight - nextHeight) > 0.5;
       if (sizeChanged) {
-        node.setSize?.([width, targetHeight]);
+        node.setSize?.([width, nextHeight]);
         node.graph?.change?.();
       }
       node.graph?.setDirtyCanvas?.(true, true);
       app.graph?.setDirtyCanvas?.(true, true);
     });
+  };
+
+  // 量出英文标签区「没被 360 压住时」的真实高度：临时解除上限读 scrollHeight 再恢复
+  const measureNaturalEnglishHeight = () => {
+    const previousHeight = englishTokenView.style.height;
+    const previousMax = englishTokenView.style.maxHeight;
+    englishTokenView.style.height = "auto";
+    englishTokenView.style.maxHeight = "none";
+    const natural = englishTokenView.scrollHeight;
+    englishTokenView.style.height = previousHeight;
+    englishTokenView.style.maxHeight = previousMax;
+    return natural;
+  };
+
+  // 打开开关时把节点撑高一次，撑的量 = 被压掉的内容高度，但至少给一个看得出变化的量
+  const growNodeForFill = () => {
+    if (!hasNodeSize()) return;
+    const natural = measureNaturalEnglishHeight();
+    const extra = Math.max(FILL_HEIGHT_MIN_GROWTH, Math.ceil(natural - englishTokenView.offsetHeight));
+    const height = Math.min((Number(node.size?.[1]) || COLLAPSED_NODE_MIN_HEIGHT) + extra, 2400);
+    node.setSize?.([Math.max(node.size?.[0] ?? 0, 590), height]);
+    node.graph?.change?.();
+  };
+
+  const setFillHeight = (next) => {
+    const fill = Boolean(next);
+    if (fill === state.fillHeight) return;
+    state.fillHeight = fill;
+    if (!node.properties || typeof node.properties !== "object") node.properties = {};
+    node.properties.bpiFillHeight = fill;
+    panel.classList.toggle("bpi-fill", fill);
+    fillSwitch.checked = fill;
+    setTitle(fillSwitchRow, fill
+      ? "Back to the automatic height; the prompt area stops following the node"
+      : "Let the prompt area grow with the node instead of being capped");
+    if (fill) {
+      // 先放开限制再撑高，撑完重排一次让英文区吃到新空间
+      growNodeForFill();
+      requestNodeResize();
+    } else {
+      state.collapsedWidgetHeight = measureCollapsedWidgetHeight();
+      panel.style.setProperty("--bpi-collapsed-height", `${state.collapsedWidgetHeight}px`);
+      if (hasNodeSize()) {
+        const baseHeight = state.nodeBaseHeight ?? 96;
+        node.setSize?.([Math.max(node.size?.[0] ?? 0, 590), Math.max(inspectorNodeTargetHeight({
+          baseHeight,
+          targetWidgetHeight: state.collapsedWidgetHeight,
+          fallbackBaseHeight: state.nodeBaseHeight ?? 96,
+          minimumHeight: COLLAPSED_NODE_MIN_HEIGHT,
+        }), COLLAPSED_NODE_MIN_HEIGHT)]);
+        node.graph?.change?.();
+      }
+    }
+    render();
   };
   const isFavorite = (english) => state.preferences.favorites.includes(normalizeKey(english));
   const changeFavorite = (english) => {
@@ -3423,6 +3514,9 @@ function createPanel(node, textWidget) {
     }));
   });
   filtersBar.appendChild(colorButton);
+  // 「适应高度」跟着明细表走：明细表被侧边栏「标签管理」复用，开关也就在那边，
+  // 跟着所选节点换（每个节点一份实例 + 状态存在 node.properties 上）
+  filtersBar.appendChild(fillSwitchRow);
   leftTools.append(
     button("Add tag", () => openTagDialog({}, refreshDictionary), "bpi-primary"),
     translateAllButton,
@@ -3575,6 +3669,12 @@ function createPanel(node, textWidget) {
   });
   setTitle(optimizeButton, "Optimize with the rule for the current mode: tag mode tidies the tag flow, natural language mode rewrites it as English sentences");
   bindMirrorAction(optimizeButton, runOptimize);
+  fillSwitch.checked = state.fillHeight;
+  setTitle(fillSwitchRow, state.fillHeight
+    ? "Back to the automatic height; the prompt area stops following the node"
+    : "Let the prompt area grow with the node instead of being capped");
+  panel.classList.toggle("bpi-fill", state.fillHeight);
+  fillSwitch.addEventListener("change", () => setFillHeight(fillSwitch.checked));
   bindMirrorAction(sortPromptButton, () => {
     if (state.animaSortSnapshot) cancelAnimaSort();
     else sortByAnimaOrder();
@@ -3749,7 +3849,8 @@ function createPanel(node, textWidget) {
       return state.collapsedWidgetHeight;
     },
     getMaxHeight() {
-      return state.collapsedWidgetHeight;
+      // 适应高度模式把上限抬高：两者相等时 ComfyUI 只按下限给，拉大节点多出来的空间全变空白
+      return state.fillHeight ? EXPANDED_WIDGET_MAX_HEIGHT : state.collapsedWidgetHeight;
     },
     refreshAfterConfigure() {
       // Workflow files keep the hidden-tag list in node.properties; make sure
@@ -3758,6 +3859,10 @@ function createPanel(node, textWidget) {
       // 工作流里的模式偏好要先回到下拉，否则按钮显隐会退回「自动」那一套
       state.modePreference = storedMode();
       modeSelect.value = state.modePreference;
+      // 工作流里的「适应高度」也要还原回按钮和面板 class
+      state.fillHeight = storedFillHeight();
+      panel.classList.toggle("bpi-fill", state.fillHeight);
+      fillSwitch.checked = state.fillHeight;
       scheduleRender(true);
     },
     syncSourceBar() {
