@@ -1427,7 +1427,7 @@ function injectBpiStyles() {
     .bpm-loading{padding:24px;text-align:center;color:var(--bpi-text-faint)}
     .bpi-form-actions{display:flex;justify-content:flex-end;gap:7px;margin-top:12px;flex-wrap:wrap}
     /* 助手设置在 ComfyUI「设置」面板里：原生那一行是「标签 + 控件」，把标签收掉、控件占满整行 */
-    .bpi-settings-form{box-sizing:border-box;width:100%;padding:2px 0 6px}.bpi-settings-form h3{margin:0 0 10px;font-size:15px}
+    .bpi-settings-form{box-sizing:border-box;width:100%;padding:2px 0 6px}
     /* 设置面板每一项 = 名称列 + 控件列，名称列宽度跟着名字长短走：插件这两项一个叫
        「语言与外观」一个叫「助手设置」，字数不同，右边的内容就被推得差了一格。
        让名称列不占位、控件列占满，两块都从最左边开始，标题由各自的 h3 显示。
@@ -1437,6 +1437,15 @@ function injectBpiStyles() {
     *:has(> :not(:first-child) > .bpi-settings-form) > :not(:first-child){flex:1 1 0%;min-width:0;justify-content:flex-start}
     /* ComfyUI 给控件列自带 justify-end：宽度一占满就会把内容推到最右，这里改回靠左 */
     *:has(> .bpi-settings-form){flex:1 1 0%;min-width:0}
+    /* 设置面板里的可展开分组：直接用原生 details，三角自己画，展开状态由 open 属性管 */
+    .bpi-fold{grid-column:1 / -1;margin-top:8px;border:1px solid var(--bpi-border-2);border-radius:6px}
+    .bpi-fold>summary{display:flex;align-items:center;gap:6px;padding:7px 10px;font-size:12px;font-weight:600;color:var(--bpi-text);cursor:pointer;list-style:none;user-select:none}
+    .bpi-fold>summary::-webkit-details-marker{display:none}
+    .bpi-fold>summary::before{flex:none;content:"";width:0;height:0;border-left:5px solid var(--bpi-text-muted);border-top:4px solid transparent;border-bottom:4px solid transparent;transition:transform .15s ease}
+    .bpi-fold[open]>summary::before{transform:rotate(90deg)}
+    .bpi-fold>summary:hover{background-image:linear-gradient(var(--bpi-row-hover-overlay),var(--bpi-row-hover-overlay))}
+    .bpi-fold-body{padding:8px 10px 10px;border-top:1px solid var(--bpi-border-3);display:flex;flex-direction:column;gap:8px}
+    .bpi-fold-note{font-size:10px;color:var(--bpi-text-faint)}
     .bpi-switch-row{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;width:fit-content}
     .bpi-switch-row input{position:absolute;width:0;height:0;opacity:0;margin:0}
     .bpi-switch-track{position:relative;flex:0 0 auto;width:34px;height:18px;border-radius:9px;background-color:var(--bpi-switch-off);border:1px solid var(--bpi-switch-off-border);transition:background-color .16s ease,border-color .16s ease}

@@ -69,8 +69,7 @@ assert.equal(t("“1girl” appears 3 times; “Unique” is on, only the first 
   "「1girl」出现了 3 次；已开「唯一」：只有第一次进入实际输出");
 assert.equal(t("“1girl” occurrence 2 of 3; click again for the next one, double-click to delete it"),
   "「1girl」第 2 / 3 处；再点一次跳下一处，双击删除这一处");
-assert.equal(t("“1girl” now unique: only the first occurrence enters the actual output; press Ctrl+Z to undo"),
-  "「1girl」已设为唯一：只有第一次出现进入实际输出；按 Ctrl+Z 可撤销");
+assert.equal(t("“1girl” now unique"), "「1girl」已设为唯一");
 // 「Unique」在译文里会被二次翻译，tooltip 读起来是一致的中文
 assert.equal(t("Query: “1girl” | “Unique” is on: only the first occurrence reaches the actual output"),
   "查询「1girl」｜已开「唯一」：只有第一次出现进入实际输出");

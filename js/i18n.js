@@ -7,7 +7,7 @@
 //   · 运行时按英文原文查中文表，查不到就原样显示英文 —— 缺翻译只会退回英文，不会出现空文案
 //   · 「跟随 ComfyUI」读 ComfyUI 的 Comfy.Locale 设置，中文系语言走中文，其余走英文
 //
-// 带变量的文案（例如 `deleted “${term}”; press Ctrl+Z to undo`）没法直接整句做键，
+// 带变量的文案（例如 `deleted “${term}”`）没法直接整句做键，
 // 这里把「“...”」和数字统一折叠成 {} 再查表，命中后按出现顺序回填。
 
 const STORAGE_KEY = "bpi.language.v1";
@@ -130,8 +130,8 @@ const ZH = {
     "输入时保持文本编辑；失焦或点「完成」后切回标签视图",
   "Switch between the English text editor and the linked tag view":
     "在英文文本编辑框与联动标签视图之间切换",
-  "Requires a second click to clear the actual English output; after clearing, click the same button or press Ctrl+Z to undo":
-    "需要再点一次才会清空英文实际输出；清空后点同一个按钮或按 Ctrl+Z 可撤销",
+  "Requires a second click to clear the actual English output; after clearing, click the same button to undo":
+    "需要再点一次才会清空英文实际输出；清空后点同一个按钮撤销",
   "Save the current English prompt to favorites in the user directory (a reference image can be attached)":
     "把当前英文提示词保存到用户目录的收藏里（可附带参考图）",
   "Hidden tags will not enter the actual output": "隐藏的标签不会进入实际输出",
@@ -193,18 +193,17 @@ const ZH = {
   "Only optimizes existing English; does not translate": "只优化已有英文，不做翻译",
   "press Anima stable sort by recommended categories, one row per non-empty category; natural language and BREAK/AND kept intact":
     "按 Anima 推荐分类做稳定排序，每个非空分类一行；自然语言与 BREAK/AND 原样保留",
-  "Drag to reorder tags; or select then press Alt+↑/↓ to nudge; Ctrl+Z to undo":
-    "拖动可调整标签顺序；或选中后按 Alt+↑/↓ 微调；Ctrl+Z 撤销",
-  "applied {}; press Ctrl+Z to undo": "已应用 {}；按 Ctrl+Z 可撤销",
-  "deleted {}; press Ctrl+Z to undo": "已删除「{}」；按 Ctrl+Z 可撤销",
-  "{}; press Ctrl+Z to undo": "{}；按 Ctrl+Z 可撤销",
-  "moved {}; press Ctrl+Z to undo": "已移动「{}」；按 Ctrl+Z 可撤销",
-  "rewrote {}; press Ctrl+Z to undo": "已改写「{}」；按 Ctrl+Z 可撤销",
-  "rewrote {} tags; press Ctrl+Z to undo": "已改写 {} 个标签；按 Ctrl+Z 可撤销",
-  "hidden {} (excluded from actual output); can be restored anytime in the hidden section; press Ctrl+Z to undo":
-    "已隐藏「{}」（不计入实际输出）；随时可在隐藏区恢复；按 Ctrl+Z 可撤销",
-  "restored {} to its original position; press Ctrl+Z to undo": "已把「{}」恢复到原位置；按 Ctrl+Z 可撤销",
-  "restored {} hidden tags; press Ctrl+Z to undo": "已恢复 {} 个隐藏标签；按 Ctrl+Z 可撤销",
+  "Drag to reorder tags; or select then press Alt+↑/↓ to nudge":
+    "拖动可调整标签顺序；或选中后按 Alt+↑/↓ 微调",
+  "applied {}": "已应用 {}",
+  "deleted {}": "已删除「{}」",
+  "moved {}": "已移动「{}」",
+  "rewrote {}": "已改写「{}」",
+  "rewrote {} tags": "已改写 {} 个标签",
+  "hidden {} (excluded from actual output); can be restored anytime in the hidden section":
+    "已隐藏「{}」（不计入实际输出）；随时可在隐藏区恢复",
+  "restored {} to its original position": "已把「{}」恢复到原位置",
+  "restored {} hidden tags": "已恢复 {} 个隐藏标签",
   "{} is already at the front": "「{}」已经在最前面",
   "{} is already at the back": "「{}」已经在最后面",
   "temporarily modified {}; not saved to dictionary": "已临时修改「{}」，未存入词库",
@@ -225,10 +224,10 @@ const ZH = {
   "Hide {}: keeps it visible here (strikethrough) but excludes it from the actual output":
     "隐藏「{}」：仍显示在节点里（加删除线），但不参与实际输出",
   "Unhide {}: back into the actual output": "取消隐藏「{}」：重新参与实际输出",
-  "Hidden {}: stays visible and editable here, but excluded from the actual output; click the eye-slash to unhide; press Ctrl+Z to undo":
-    "已隐藏「{}」：仍显示、可照常编辑，但不参与实际输出；点眼睛斜线图标取消隐藏；按 Ctrl+Z 可撤销",
-  "Unhidden {}: back in the actual output; press Ctrl+Z to undo":
-    "已取消隐藏「{}」：重新参与实际输出；按 Ctrl+Z 可撤销",
+  "Hidden {}: stays visible and editable here, but excluded from the actual output; click the eye-slash to unhide":
+    "已隐藏「{}」：仍显示、可照常编辑，但不参与实际输出；点眼睛斜线图标取消隐藏",
+  "Unhidden {}: back in the actual output":
+    "已取消隐藏「{}」：重新参与实际输出",
   "These tags stay visible above (strikethrough) but will not enter the actual output; click a tag to unhide":
     "这些标签仍显示在上方（加删除线），但不会进入实际输出；点击标签取消隐藏",
   "Click to unhide {}": "点击取消隐藏「{}」",
@@ -259,9 +258,9 @@ const ZH = {
     "换行｜拖到某个标签上可移动位置；点 × 删除（上下两行合并）",
   "Delete this line break": "删除这个换行",
   "Enter tags first, then insert a line break": "先输入标签，再插入换行",
-  "Inserted a line break; press Ctrl+Z to undo": "已插入换行；按 Ctrl+Z 撤销",
-  "Deleted a line break; press Ctrl+Z to undo": "已删除换行；按 Ctrl+Z 撤销",
-  "Moved the line break; press Ctrl+Z to undo": "已移动换行；按 Ctrl+Z 撤销",
+  "Inserted a line break": "已插入换行",
+  "Deleted a line break": "已删除换行",
+  "Moved the line break": "已移动换行",
   "Check this machine translation; use the toolbar above the table to add several entries to the personal dictionary at once":
     "勾选这条机器翻译；用表格上方的工具条可以一次把多条加入个人词库",
   "Drag to resize the two columns; double-click to reset to the default ratio": "拖动调整左右两栏宽度；双击恢复默认比例",
@@ -468,8 +467,16 @@ const ZH = {
   "Follow ComfyUI language setting": "跟随 ComfyUI 语言设置",
   "Choose the language for this plugin's own panels. \"Follow ComfyUI\" reads the ComfyUI language setting; \"Chinese\" and \"English\" force one. Applied to open panels right away; reload the page if anything still shows the old language.":
     "选择本插件面板的语言。「跟随 ComfyUI 语言设置」会随 ComfyUI 的语言切换；「中文」「英文」为强制指定。已打开的面板会立即更新；若个别位置仍是旧语言，刷新页面即可。",
-  "Appearance & Language": "语言与外观",
   "Appearance and language saved": "外观与语言已保存",
+  "Notification popup (top right)": "右上角通知弹窗",
+  "Operation results show as a popup in the top-right corner instead of the status line.": "操作结果改用右上角弹窗显示，不再写在状态栏上。",
+  "Notifications moved to the top-right popup": "已改为右上角弹窗提示",
+  "Notifications back in the status bar": "已改回状态栏提示",
+  // 弹窗标题：按提示类型给一个短词，消息本身放展开后的正文里
+  "Done": "已完成",
+  "Something went wrong": "出错了",
+  "Working...": "处理中",
+  "Notice": "提示",
 
   // ── 标签来源 / 分类 / 模式 ──────────────────────────────────────────
   "Inspector assistant": "检查器助手",
@@ -640,7 +647,7 @@ const ZH = {
   "No matching favorites.": "没有匹配的收藏。",
   "No favorites yet. Click the star button on a node to save the current prompt.":
     "还没有收藏。点节点上的星标按钮即可保存当前提示词。",
-  "This will overwrite node #{} prompt. Cannot be undone with Ctrl+Z.": "这会覆盖节点 #{} 的提示词，Ctrl+Z 无法撤销。",
+  "This will overwrite node #{} prompt. This cannot be undone.": "这会覆盖节点 #{} 的提示词，此操作无法撤销。",
   "Loaded to node #{}": "已载入到节点 #{}",
   "Delete {}? Reference image will be deleted too.": "删除「{}」？参考图也会一并删除。",
   "Node #{}": "节点 #{}",
@@ -684,10 +691,14 @@ const ZH = {
     "「{}」第 {} / {} 处；再点一次跳下一处，双击删除这一处",
   "Click a duplicate chip once to step to it before double-clicking to delete":
     "先单击一次重复胶囊定位到某一处，再双击才会删除",
-  "{} now unique: only the first occurrence enters the actual output; press Ctrl+Z to undo":
-    "「{}」已设为唯一：只有第一次出现进入实际输出；按 Ctrl+Z 可撤销",
-  "{} no longer unique: all occurrences enter the actual output again; press Ctrl+Z to undo":
-    "「{}」已取消唯一：所有重复项重新进入实际输出；按 Ctrl+Z 可撤销",
+  "{} now unique": "「{}」已设为唯一",
+  "{} no longer unique": "「{}」已取消唯一",
+  "Bottom-right toast": "右下角提示条",
+  "Bottom-right toast on": "已开启右下角提示条",
+  "Bottom-right toast off": "已关闭右下角提示条，提示回到状态栏",
+  "Per-operation feedback (translation, tag edits, duplicate toggle) shows as a small bar stacked in the bottom-right corner. Turn it off to keep everything in the status line and save a bit of CPU.":
+    "逐条操作结果（翻译、标签增删改移、重复开关）用右下角堆叠的小条显示；关掉就全部回到状态栏，能省一点性能开销。",
+  "added {}": "已添加「{}」",
   "Query: {} | {} is on: only the first occurrence reaches the actual output": "查询「{}」｜已开「{}」：只有第一次出现进入实际输出",
   "keep only the first {}": "只保留第一次出现的「{}」",
   "restore duplicates of {}": "恢复「{}」的重复项",

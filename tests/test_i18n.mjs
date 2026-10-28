@@ -27,8 +27,8 @@ assert.equal(t(""), "");
 assert.equal(t(undefined), undefined);
 
 // 带变量的文案：「“...”」和数字折叠成占位符后回填
-assert.equal(t("deleted “masterpiece”; press Ctrl+Z to undo"), "已删除「masterpiece」；按 Ctrl+Z 可撤销");
-assert.equal(t("restored 3 hidden tags; press Ctrl+Z to undo"), "已恢复 3 个隐藏标签；按 Ctrl+Z 可撤销");
+assert.equal(t("deleted “masterpiece”"), "已删除「masterpiece」");
+assert.equal(t("restored 3 hidden tags"), "已恢复 3 个隐藏标签");
 
 // 用户实际会看到的组合文案：统计行、词包信息、操作回执、模式提示
 assert.equal(t("items 3 | recognized 1 | unknown 2"), "共 3 个标签｜已识别 1｜未收录 2");
@@ -74,7 +74,7 @@ assert.equal(
 assert.equal(t("Large 12000 (on-demand)"), "大词库 12000（按需）");
 assert.equal(t("Large 12000 (disabled)"), "大词库 12000（已停用）");
 assert.equal(t("Common dictionary 952 items"), "通用词库 952 条");
-assert.equal(t("moved “1girl”; press Ctrl+Z to undo"), "已移动「1girl」；按 Ctrl+Z 可撤销");
+assert.equal(t("moved “1girl”"), "已移动「1girl」");
 assert.equal(t("Mode: “Tag” | “标签式输入”"), "模式：标签｜标签式输入");
 assert.equal(t("Mode: “Tag”"), "模式：标签");
 assert.equal(
@@ -94,7 +94,7 @@ for (const [source, expected] of [
     "Optimize with the rule for the current mode: tag mode tidies the tag flow, natural language mode rewrites it as English sentences",
     "按当前模式对应的规则优化：标签模式整理标签流，自然语言模式改写为英文自然语句",
   ],
-  ["applied “Translate & optimize”; press Ctrl+Z to undo", "已应用 翻译并优化；按 Ctrl+Z 可撤销"],
+  ["applied “Translate & optimize”", "已应用 翻译并优化"],
   ["Undone: “Sort to Anima order”", "已撤销：Sort to Anima order"],
   ["Redone: “Sort to Anima order”", "已重做：Sort to Anima order"],
   ["Running “Translate”…", "正在运行 翻译…"],
@@ -160,8 +160,7 @@ assert.equal(t("(weight 1.5)"), "（权重 1.5）");
 // 插件名：侧边栏标签写死中文，面板/关于框走译表，三处必须同一个名字
 assert.equal(t("Bilingual Prompt Manager"), "提示词翻译与管理");
 assert.equal(t("Bilingual Prompt Inspector"), "提示词翻译与管理");
-// 设置面板里「语言与外观」那一项
-assert.equal(t("Appearance & Language"), "语言与外观");
+// 「语言与外观 / 助手设置」两项的标题由 ComfyUI 渲染设置项名称，插件不再自带 h3
 assert.equal(t("Appearance and language saved"), "外观与语言已保存");
 // 两个本地预设按钮各有一套文案，别混
 assert.equal(t("Use LM Studio Local Preset"), "使用 LM Studio 本地预设");
@@ -171,9 +170,9 @@ assert.equal(t("Ollama default URL filled; select a pulled model ID, then Save &
 // 确认对话框：默认确认按钮是 "OK"，必须译为「确认」而不是「正常」
 assert.equal(t("OK"), "确认");
 assert.equal(t("Cancel"), "取消");
-assert.equal(t("This will overwrite node #3 prompt. Cannot be undone with Ctrl+Z."), "这会覆盖节点 #3 的提示词，Ctrl+Z 无法撤销。");
+assert.equal(t("This will overwrite node #3 prompt. This cannot be undone."), "这会覆盖节点 #3 的提示词，此操作无法撤销。");
 assert.equal(t("Delete “Fluffy”? Reference image will be deleted too."), "删除「Fluffy」？参考图也会一并删除。");
-assert.equal(t("restored 3 hidden tags; press Ctrl+Z to undo"), "已恢复 3 个隐藏标签；按 Ctrl+Z 可撤销");
+assert.equal(t("restored 3 hidden tags"), "已恢复 3 个隐藏标签");
 assert.equal(t("Node #3"), "节点 #3");
 
 // 状态提示（整句形态）

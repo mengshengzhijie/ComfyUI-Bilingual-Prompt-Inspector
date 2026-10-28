@@ -29,6 +29,8 @@ import {
 import { classifyAnimaToken, groupAnimaTokensForDisplay, sortAnimaPrompt } from "./anima_sorter.js";
 import { panelSyncHub } from "./panel_sync.js";
 import { installBpiWheelGuard } from "./wheel_guard.js";
+import { notify } from "./bpi_notify.js";
+import { showToast } from "./bpi_toast.js";
 import {
   buildTagFields,
   button,
@@ -376,7 +378,17 @@ function createPanel(node, textWidget) {
     syncSource: Symbol(`bpi-node-${node.id ?? "unknown"}`),
   };
 
-  const setStatus = (message, kind = "") => {
+  // notifyOptions：给右上角弹窗的附加参数（group/hold），需要「连点就刷新并重计停留时间」时用
+  const setStatus = (message, kind = "", notifyOptions = null) => {
+    // 开了右上角弹窗就把提示交给弹窗，状态栏不再重复显示
+    if (notify(message, kind, notifyOptions)) return;
+    setText(status, message);
+    status.dataset.kind = kind;
+  };
+
+  // 只写节点状态栏，不惊动右上角弹窗：批量翻译的逐条结果用它，
+  // 否则每译完一条就会把「处理中」那张卡顶掉、下一次循环又新开一张，弹窗一条接一条冒出来
+  const setStatusQuiet = (message, kind = "") => {
     setText(status, message);
     status.dataset.kind = kind;
   };
@@ -758,7 +770,8 @@ function createPanel(node, textWidget) {
     updateText(after);
     // 排序落盘后记住排序前那一版，按钮才好变成「取消 Anima 顺序排序」
     if (label === "Anima official sort") state.animaSortSnapshot = { before, after };
-    setStatus(`applied “${label}”; press Ctrl+Z to undo`, "ok");
+    const appliedMsg = `applied “${label}”`;
+    if (!showToast(appliedMsg, { type: "edit" })) setStatus(appliedMsg, "ok");
     return true;
   };
 
@@ -905,7 +918,7 @@ function createPanel(node, textWidget) {
       beforeStart: token.start,
       beforeEnd: token.end,
       afterCursor: result.cursor,
-      label: `Delete “${token.term}”`,
+      label: `删除「${token.term}」`,
     };
     if (hiddenAfter.length !== hidden.length) {
       entry.hiddenBefore = hidden.slice();
@@ -917,7 +930,9 @@ function createPanel(node, textWidget) {
     if (entry.hiddenAfter) setHiddenTags(entry.hiddenAfter);
     state.pinned = null;
     updateText(result.text, result.cursor);
-    setStatus(`deleted “${token.term}”; press Ctrl+Z to undo`, "ok");
+    // 右下角提示条关掉时退回状态栏（showToast 返回 false 表示没显示）
+    const deletedMsg = `已删除「${token.term}」`;
+    if (!showToast(deletedMsg, { type: "edit" })) setStatus(deletedMsg, "ok");
   };
 
   const applyTokenWeight = (token, weight) => {
@@ -928,8 +943,8 @@ function createPanel(node, textWidget) {
       return false;
     }
     const action = weight === null
-      ? `Clear “${token.term}” weight`
-      : `will set “${token.term}” weight to ${Number(weight)}`;
+      ? `清除「${token.term}」的权重`
+      : `把「${token.term}」的权重设为 ${Number(weight)}`;
     state.undoStack.push({
       before,
       after: result.text,
@@ -942,7 +957,8 @@ function createPanel(node, textWidget) {
     state.redoStack = [];
     state.pinned = null;
     updateText(result.text, result.cursor);
-    setStatus(`“${action}”; press Ctrl+Z to undo`, "ok");
+    const appliedActionMsg = `已${action}`;
+    if (!showToast(appliedActionMsg, { type: "edit" })) setStatus(appliedActionMsg, "ok");
     return true;
   };
 
@@ -960,13 +976,14 @@ function createPanel(node, textWidget) {
       beforeStart: token.start,
       beforeEnd: token.end,
       afterCursor: result.cursor,
-      label: `Move “${token.term}”`,
+      label: `移动「${token.term}」`,
     });
     if (state.undoStack.length > 50) state.undoStack.shift();
     state.redoStack = [];
     state.pinned = null;
     updateText(result.text, result.cursor);
-    setStatus(`moved “${token.term}”; press Ctrl+Z to undo`, "ok");
+    const movedMsg = `已移动「${token.term}」`;
+    if (!showToast(movedMsg, { type: "edit" })) setStatus(movedMsg, "ok");
     return true;
   };
 
@@ -1044,7 +1061,7 @@ function createPanel(node, textWidget) {
   const removeBreakAt = (gapIndex) => {
     const gaps = currentBreakGaps();
     if (!gaps.delete(gapIndex)) return false;
-    return applyBreakGaps(gaps, "Delete line break");
+    return applyBreakGaps(gaps, "删除换行");
   };
 
   const moveBreakTo = (fromGap, toGap) => {
@@ -1054,7 +1071,7 @@ function createPanel(node, textWidget) {
     if (target === fromGap) return false;
     gaps.delete(fromGap);
     gaps.add(target);
-    return applyBreakGaps(gaps, "Move line break");
+    return applyBreakGaps(gaps, "移动换行");
   };
 
   const insertBreakFromToolbar = () => {
@@ -1070,13 +1087,13 @@ function createPanel(node, textWidget) {
     if (pinnedIndex >= 0 && pinnedIndex < breakGapCount()) {
       const gaps = currentBreakGaps();
       gaps.add(pinnedIndex);
-      if (applyBreakGaps(gaps, "Insert line break")) setStatus("Inserted a line break; press Ctrl+Z to undo", "ok");
+      if (applyBreakGaps(gaps, "插入换行")) setStatus("Inserted a line break", "ok");
       return;
     }
     // 没选中标签，或选中的是最后一个标签（它后面没有 gap）：换行加在整段末尾。
     const source = String(textWidget.value ?? "");
-    if (replacePromptText(`${source.replace(/[ \t]+$/, "")}\n`, "Insert line break")) {
-      setStatus("Inserted a line break; press Ctrl+Z to undo", "ok");
+    if (replacePromptText(`${source.replace(/[ \t]+$/, "")}\n`, "插入换行")) {
+      setStatus("Inserted a line break", "ok");
     }
   };
   insertBreakButton.addEventListener("click", () => insertBreakFromToolbar());
@@ -1087,7 +1104,7 @@ function createPanel(node, textWidget) {
   // from the actual output, via the effective_text/use_effective widgets that
   // syncEffectiveOutput keeps up to date.  The list lives in
   // properties.bpiHiddenTags so it survives workflow save/load, and every undo
-  // entry snapshots the list so Ctrl+Z rolls mark and text back together.
+  // entry snapshots the list so undo rolls mark and text back together.
   // Entries from older saves (whose tags were physically removed from the text
   // back then) are re-inserted at their old anchor on restore.
   const getHiddenTags = () => {
@@ -1199,7 +1216,7 @@ function createPanel(node, textWidget) {
       beforeStart: token.start,
       beforeEnd: token.end,
       afterCursor: token.start,
-      label: `Hide “${token.term}”`,
+      label: `隐藏「${token.term}」`,
       hiddenBefore: hidden.slice(),
       hiddenAfter: hidden.concat([{
         raw: token.raw,
@@ -1212,7 +1229,9 @@ function createPanel(node, textWidget) {
     setHiddenTags(entry.hiddenAfter);
     state.pinned = null;
     updateText(before, token.start);
-    setStatus(`Hidden “${token.term}”: stays visible and editable here, but excluded from the actual output; click the eye-slash to unhide; press Ctrl+Z to undo`, "ok");
+    // 有了右下角提示条就不用再写「点眼睛斜线图标取消隐藏」这种操作说明了
+    const hiddenMsg = `已隐藏「${token.term}」`;
+    if (!showToast(hiddenMsg, { type: "edit" })) setStatus(hiddenMsg, "ok");
     return true;
   };
 
@@ -1238,16 +1257,15 @@ function createPanel(node, textWidget) {
       beforeStart: 0,
       beforeEnd: before.length,
       afterCursor: cursor,
-      label: `restore “${item.raw}”`,
+      label: `恢复「${item.raw}」`,
       hiddenBefore: hidden.slice(),
       hiddenAfter: hidden.filter((_, i) => i !== index),
     };
     pushHistoryWithHidden(entry);
     setHiddenTags(entry.hiddenAfter);
     updateText(after, cursor);
-    setStatus(inText
-      ? `Unhidden “${item.raw}”: back in the actual output; press Ctrl+Z to undo`
-      : `restored “${item.raw}” to its original position; press Ctrl+Z to undo`, "ok");
+    const restoreMsg = inText ? `已取消隐藏「${item.raw}」` : `已把「${item.raw}」恢复到原位置`;
+    if (!showToast(restoreMsg, { type: "edit" })) setStatus(restoreMsg, "ok");
     return true;
   };
 
@@ -1275,7 +1293,7 @@ function createPanel(node, textWidget) {
       beforeStart: 0,
       beforeEnd: before.length,
       afterCursor: text.length,
-      label: `Restore all hidden tags (${hidden.length} )`,
+      label: `恢复全部隐藏标签（${hidden.length}）`,
       hiddenBefore: hidden.slice(),
       hiddenAfter: [],
     };
@@ -1283,7 +1301,8 @@ function createPanel(node, textWidget) {
     setHiddenTags([]);
     state.pinned = null;
     updateText(text, text.length);
-    setStatus(`restored ${hidden.length} hidden tags; press Ctrl+Z to undo`, "ok");
+    const restoreAllMsg = `已恢复 ${hidden.length} 个隐藏标签`;
+    if (!showToast(restoreAllMsg, { type: "edit" })) setStatus(restoreAllMsg, "ok");
     return true;
   };
 
@@ -1390,7 +1409,7 @@ function createPanel(node, textWidget) {
     remove.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      if (removeBreakAt(gapIndex)) setStatus("Deleted a line break; press Ctrl+Z to undo", "ok");
+      if (removeBreakAt(gapIndex)) setStatus("Deleted a line break", "ok");
     });
     chip.appendChild(remove);
     chip.addEventListener("pointerdown", (event) => {
@@ -1434,7 +1453,7 @@ function createPanel(node, textWidget) {
         chip.classList.remove("bpi-dragging");
         clearHover();
         if (active && targetGap !== null && chip.isConnected) {
-          if (moveBreakTo(gapIndex, targetGap)) setStatus("Moved the line break; press Ctrl+Z to undo", "ok");
+          if (moveBreakTo(gapIndex, targetGap)) setStatus("Moved the line break", "ok");
           requestAnimationFrame(() => view.focus({ preventScroll: true }));
         }
       };
@@ -1450,7 +1469,7 @@ function createPanel(node, textWidget) {
   const buildBreakRow = (gapIndex) => {
     const row = element("div", "bpi-row bpi-break-row");
     const handle = element("span", "bpi-drag-handle", "⠿");
-    setTitle(handle, "Drag onto a tag row to move this line break; Ctrl+Z to undo");
+    setTitle(handle, "Drag onto a tag row to move this line break");
     row.appendChild(handle);
     row.appendChild(element("span", "bpi-break-row-label", "换行"));
     handle.addEventListener("click", (event) => event.stopPropagation());
@@ -1469,7 +1488,7 @@ function createPanel(node, textWidget) {
         row.classList.remove("bpi-dragging");
         if (indicator) { indicator.remove(); indicator = null; }
         if (active && targetGap !== null && row.isConnected) {
-          if (moveBreakTo(gapIndex, targetGap)) setStatus("Moved the line break; press Ctrl+Z to undo", "ok");
+          if (moveBreakTo(gapIndex, targetGap)) setStatus("Moved the line break", "ok");
         }
       };
       const onMove = (moveEvent) => {
@@ -1644,7 +1663,7 @@ function createPanel(node, textWidget) {
     const rawEditor = element("textarea", "bpi-raw-editor");
     rawEditor.value = originalSlice;
     rawPanel.appendChild(rawEditor);
-    rawPanel.appendChild(element("div", "bpi-config-note", "怎么改都行：逗号会被重新切成标签，清空等于删除这一段；Ctrl+Enter 应用，应用后 Ctrl+Z 可撤销"));
+    rawPanel.appendChild(element("div", "bpi-config-note", "怎么改都行：逗号会被重新切成标签，清空等于删除这一段；Ctrl+Enter 应用"));
 
     // 编辑 Tab：整套词条字段（含分类下拉），跟「新增／编辑个人标签」弹窗同一份构件。
     // 命中词库就整条带过来改；没命中就按这条标签卡起个头，存进去即新建。
@@ -1777,9 +1796,10 @@ function createPanel(node, textWidget) {
       updateText(result.text, result.cursor);
       close();
       // 状态栏这两句分开写：套一层「“…”」再塞带引号的 label 会打乱变量折叠
-      setStatus(multi
-        ? `rewrote ${rawSpan.tokens.length} tags; press Ctrl+Z to undo`
-        : `rewrote “${rawSpan.tokens[0].term}”; press Ctrl+Z to undo`, "ok");
+      const rewroteMsg = multi
+        ? `rewrote ${rawSpan.tokens.length} tags`
+        : `rewrote “${rawSpan.tokens[0].term}”`;
+      if (!showToast(rewroteMsg, { type: "edit" })) setStatus(rewroteMsg, "ok");
     };
     // 词条页：只改词条，不动当前这行提示词文本，所以不进撤销栈
     const applyEdit = async () => {
@@ -1888,7 +1908,8 @@ function createPanel(node, textWidget) {
     if (Array.isArray(entry.hiddenBefore)) setHiddenTags(entry.hiddenBefore);
     if (Array.isArray(entry.uniqueBefore)) setUniqueKeys(entry.uniqueBefore);
     updateText(entry.before, entry.beforeStart);
-    setStatus(`Undone: “${entry.label}”`, "ok");
+    const undoneMsg = `已撤销：${entry.label}`;
+    if (!showToast(undoneMsg, { type: "edit" })) setStatus(undoneMsg, "ok");
     return true;
   };
 
@@ -1902,15 +1923,18 @@ function createPanel(node, textWidget) {
     if (Array.isArray(entry.hiddenAfter)) setHiddenTags(entry.hiddenAfter);
     if (Array.isArray(entry.uniqueAfter)) setUniqueKeys(entry.uniqueAfter);
     updateText(entry.after, entry.afterCursor);
-    setStatus(`Redone: “${entry.label}”`, "ok");
+    const redoneMsg = `已重做：${entry.label}`;
+    if (!showToast(redoneMsg, { type: "edit" })) setStatus(redoneMsg, "ok");
     return true;
   };
 
+  // 撤销/重做用 Shift+Alt+Z / Shift+Alt+Y：
+  // Ctrl+Z 在 ComfyUI 里被画布自己的撤销吃掉（焦点不在文本框时甚至根本到不了这里），
+  // 与其抢一个抢不过的键，不如整个让给它，换一个没人占的组合。
   const handleHistoryShortcut = (event) => {
-    if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+    if (!event.altKey || !event.shiftKey || event.ctrlKey || event.metaKey) return;
     const key = event.key.toLowerCase();
-    const redo = key === "y" || (key === "z" && event.shiftKey);
-    const handled = redo ? redoStructuredEdit() : key === "z" ? undoStructuredEdit() : false;
+    const handled = key === "y" ? redoStructuredEdit() : key === "z" ? undoStructuredEdit() : false;
     if (handled) {
       event.preventDefault();
       event.stopPropagation();
@@ -1975,6 +1999,8 @@ function createPanel(node, textWidget) {
     rememberRecent(english);
     if (!keepSearch) search.value = "";
     renderSearch();
+    // 添加原本就没有「原来的位置」，关掉提示条后就不提示
+    showToast(`added “${english}”`, { type: "edit" });
   };
 
   const queueLargeLookup = (tokens) => {
@@ -2089,9 +2115,10 @@ function createPanel(node, textWidget) {
       }
       await refreshDictionary();
       const total = imported.added + imported.replaced;
-      setStatus(imported.skipped
+      const importMsg = imported.skipped
         ? `Added “${total}” entries | new “${imported.added}”, replaced “${imported.replaced}”, skipped “${imported.skipped}”`
-        : `Added “${total}” entries | new “${imported.added}”, replaced “${imported.replaced}”`, "ok");
+        : `Added “${total}” entries | new “${imported.added}”, replaced “${imported.replaced}”`;
+      if (!showToast(importMsg, { type: "edit" })) setStatus(importMsg, "ok");
     } catch (error) {
       setStatus(error.message, "error");
     }
@@ -2162,7 +2189,8 @@ function createPanel(node, textWidget) {
     if (!persist) {
       state.localOverrides.set(token.key, { text: chinese, source: "session" });
       state.editing = null;
-      setStatus(`temporarily modified “${token.term}”; not saved to dictionary`, "ok");
+      const tempMsg = `temporarily modified “${token.term}”; not saved to dictionary`;
+      if (!showToast(tempMsg, { type: "edit" })) setStatus(tempMsg, "ok");
       render();
       return;
     }
@@ -2183,7 +2211,8 @@ function createPanel(node, textWidget) {
       deleteMachineTranslation(token.key);
       state.editing = null;
       await refreshDictionary();
-      setStatus(`saved “${token.term}” to personal dictionary`, "ok");
+      const savedMsg = `saved “${token.term}” to personal dictionary`;
+      if (!showToast(savedMsg, { type: "edit" })) setStatus(savedMsg, "ok");
     } catch (error) {
       setStatus(error.message, "error");
     }
@@ -2212,10 +2241,13 @@ function createPanel(node, textWidget) {
     return true;
   };
 
-  const translateToken = async (token) => {
+  // quiet（批量翻译时用）：右上角只留一张「总进度」卡，逐条结果一律走状态栏 + 右下角，
+  // 不碰右上角，免得一条一弹窗。单条翻译（默认）行为不变。
+  const translateToken = async (token, options = null) => {
+    const say = options?.quiet === true ? setStatusQuiet : setStatus;
     if (!token?.key || state.translating.has(token.key)) return;
     state.translating.add(token.key);
-    setStatus(`Translating: “${token.term}”`, "busy");
+    say(`Translating: “${token.term}”`, "busy");
     render();
     try {
       const naturalLanguage = isNaturalSegment(token);
@@ -2229,18 +2261,23 @@ function createPanel(node, textWidget) {
           break;
         } catch (error) {
           if (error.status === 429 && attempt < 3) {
-            setStatus(`Rate limited; waiting to retry “${token.term}”…`, "busy");
+            say(`Rate limited; waiting to retry “${token.term}”…`, "busy");
             await new Promise((resolve) => setTimeout(resolve, 15000));
             continue;
           }
           throw error;
         }
       }
-      if (!commitTranslation(token, translated)) return false;
-      setStatus(`translated “${token.term}”; can save after confirming`, "ok");
+      // 失败不上右下角（那里只报成功），走状态栏 / 右上角的红色提示
+      if (!commitTranslation(token, translated)) {
+        say(`Rejected invalid translation: “${token.term}”`, "error");
+        return false;
+      }
+      say(`translated “${token.term}”; can save after confirming`, "ok");
+      showToast(`Translated “${token.term}”`, { type: "translate" });
       return true;
     } catch (error) {
-      setStatus(error.message, "error");
+      say(error.message, "error");
       return false;
     } finally {
       state.translating.delete(token.key);
@@ -2573,7 +2610,7 @@ function createPanel(node, textWidget) {
   // the table auto-scrolls near its edges while dragging.
   const buildRowDragHandle = (row, token) => {
     const handle = element("span", "bpi-drag-handle", "⠿");
-    setTitle(handle, "Drag to reorder tags; or select then press Alt+↑/↓ to nudge; Ctrl+Z to undo");
+    setTitle(handle, "Drag to reorder tags; or select then press Alt+↑/↓ to nudge");
     handle.addEventListener("click", (event) => event.stopPropagation());
     handle.addEventListener("pointerdown", (event) => {
       if (event.button !== 0) return;
@@ -2730,15 +2767,17 @@ function createPanel(node, textWidget) {
       beforeStart: 0,
       beforeEnd: 0,
       afterCursor: 0,
-      label: on ? `keep only the first “${term}”` : `restore duplicates of “${term}”`,
+      label: on ? `只保留第一次出现的「${term}」` : `恢复「${term}」的重复项`,
       uniqueBefore: keys.slice(),
       uniqueAfter: after,
     });
     setUniqueKeys(after);
     render();
-    setStatus(on
-      ? `“${term}” now unique: only the first occurrence enters the actual output; press Ctrl+Z to undo`
-      : `“${term}” no longer unique: all occurrences enter the actual output again; press Ctrl+Z to undo`, "ok");
+    // 「唯一」开关的反馈走右下角橙色提示条；关掉时退回右上角弹窗，并给足 5 秒、连点刷新重计时
+    const uniqueMsg = on ? `“${term}” now unique` : `“${term}” no longer unique`;
+    if (!showToast(uniqueMsg, { type: "duplicate" })) {
+      setStatus(uniqueMsg, "ok", { group: `bpi-unique-${node.id ?? "x"}`, hold: 5000 });
+    }
   };
 
   const buildUniqueToggle = (key, group) => {
@@ -2764,7 +2803,12 @@ function createPanel(node, textWidget) {
     state.dupFocus = { key, index: next };
     const token = group.tokens[next];
     activateToken(token);
-    setStatus(`“${token.term}” occurrence ${next + 1} of ${group.tokens.length}; click again for the next one, double-click to delete it`, "ok");
+    // 连点胶囊时右上角那张卡就地换内容（像多选翻译那样），并从最后一次点击起重新计 5 秒
+    setStatus(
+      `“${token.term}” occurrence ${next + 1} of ${group.tokens.length}; click again for the next one, double-click to delete it`,
+      "ok",
+      { group: `bpi-dup-${node.id ?? "x"}`, hold: 5000 },
+    );
   };
 
   // 双击删掉当前定位到的那一处；没先单击定位过就不动，避免手滑删内容
@@ -3458,12 +3502,18 @@ function createPanel(node, textWidget) {
     let completed = 0;
     try {
       // 一个一个来：后端按 QPS 排队，慢但不会撞百度 54003，界面也能逐条看到进度
+      // 右上角只挂一张「总进度」卡，逐条结果走右下角（quiet），收尾再换一张新卡报总数
+      const groupKey = `bpi-translate-${node.id ?? "x"}`;
       for (let index = 0; index < unknown.length; index += 1) {
-        setStatus(`Translating unknown tags ${index + 1}/${unknown.length}：“${unknown[index].term}”`, "busy");
-        if (await translateToken(unknown[index])) completed += 1;
+        setStatus(`Translating unknown tags ${index + 1}/${unknown.length}：“${unknown[index].term}”`, "busy", { group: groupKey });
+        if (await translateToken(unknown[index], { quiet: true })) completed += 1;
       }
       const rejected = unknown.length - completed;
-      setStatus(`Translation complete ${completed} items${rejected ? `, rejected abnormal results ${rejected} items` : ""}`, rejected ? "error" : "ok");
+      const summary = rejected
+        ? `Translation complete ${completed} items, rejected abnormal results ${rejected} items`
+        : `Translation complete ${completed} items`;
+      // fresh：先让进度卡退场，再开一张全新的报「翻译了多少条」
+      setStatus(summary, rejected ? "error" : "ok", { group: groupKey, fresh: true });
     } finally {
       control.disabled = false;
     }
@@ -3681,7 +3731,7 @@ function createPanel(node, textWidget) {
   });
   updateSortButton();
   setTitle(editEnglishButton, "Switch between the English text editor and the linked tag view");
-  setTitle(clearEnglishButton, "Requires a second click to clear the actual English output; after clearing, click the same button or press Ctrl+Z to undo");
+  setTitle(clearEnglishButton, "Requires a second click to clear the actual English output; after clearing, click the same button to undo");
   editEnglishButton.addEventListener("mousedown", (event) => {
     event.preventDefault();
     event.stopPropagation();

@@ -3,6 +3,8 @@ import { normalizeKey, validateTranslationResult } from "./parser.js";
 import { mergeImportAsAliases, previewImport, toggleFavorite } from "./dictionary_tools.js";
 import { panelSyncHub } from "./panel_sync.js";
 import { installBpiWheelGuard } from "./wheel_guard.js";
+import { notifyEnabled, setNotifyEnabled } from "./bpi_notify.js";
+import { setToastEnabled, toastEnabled } from "./bpi_toast.js";
 import {
   MANAGER_OPEN_EVENT,
   MANAGER_TAB_ID,
@@ -628,7 +630,6 @@ function appearanceControl() {
     return appearanceSettingsNode;
   }
   appearanceSettingsNode = element("div", "bpi-settings-form");
-  appearanceSettingsNode.appendChild(element("h3", "", "Appearance & Language"));
   const loading = element("div", "bpm-loading", "Loading settings...");
   appearanceSettingsNode.appendChild(loading);
   buildAppearanceForm(appearanceSettingsNode, loading);
@@ -680,6 +681,39 @@ async function buildAppearanceForm(host, loading) {
   const languageNote = element("div", "bpi-config-note", "Choose the language for this plugin's own panels. \"Follow ComfyUI\" reads the ComfyUI language setting; \"Chinese\" and \"English\" force one. Applied to open panels right away; reload the page if anything still shows the old language.");
   languageNote.style.gridColumn = "1 / -1";
   form.append(languageLabel, languageSelect, languageNote, status);
+  // 开：操作提示改成右上角弹窗；关：还是写回明细表上方那条状态文字
+  const fold = element("details", "bpi-fold");
+  const foldBody = element("div", "bpi-fold-body");
+  const popupRow = element("label", "bpi-switch-row bpi-switch-accent");
+  const popupSwitch = element("input", "bpi-switch");
+  popupSwitch.type = "checkbox";
+  popupSwitch.checked = notifyEnabled();
+  const popupTrack = element("span", "bpi-switch-track");
+  popupTrack.appendChild(element("span", "bpi-switch-thumb"));
+  popupRow.append(popupSwitch, popupTrack, element("span", "bpi-switch-text", "Notification popup (top right)"));
+  popupSwitch.addEventListener("change", () => {
+    setNotifyEnabled(popupSwitch.checked);
+    setText(status, popupSwitch.checked ? "Notifications moved to the top-right popup" : "Notifications back in the status bar");
+    status.dataset.kind = "ok";
+  });
+  // 右下角那套也一样给个总开关：关掉就退回状态栏，电脑省一点开销
+  const toastRow = element("label", "bpi-switch-row bpi-switch-accent");
+  const toastSwitch = element("input", "bpi-switch");
+  toastSwitch.type = "checkbox";
+  toastSwitch.checked = toastEnabled();
+  const toastTrack = element("span", "bpi-switch-track");
+  toastTrack.appendChild(element("span", "bpi-switch-thumb"));
+  toastRow.append(toastSwitch, toastTrack, element("span", "bpi-switch-text", "Bottom-right toast"));
+  toastSwitch.addEventListener("change", () => {
+    setToastEnabled(toastSwitch.checked);
+    setText(status, toastSwitch.checked ? "Bottom-right toast on" : "Bottom-right toast off");
+    status.dataset.kind = "ok";
+  });
+  const foldNote = element("div", "bpi-fold-note", "Operation results show as a popup in the top-right corner instead of the status line.");
+  const toastNote = element("div", "bpi-fold-note", "Per-operation feedback (translation, tag edits, duplicate toggle) shows as a small bar stacked in the bottom-right corner. Turn it off to keep everything in the status line and save a bit of CPU.");
+  foldBody.append(popupRow, foldNote, toastRow, toastNote);
+  fold.append(element("summary", "", "bulingbuling"), foldBody);
+  form.appendChild(fold);
   host.appendChild(form);
 
   // 只提交这两项：后端 update 对没给的字段一律保留原值，不会动翻译服务和密钥
@@ -710,7 +744,6 @@ function assistantSettingsControl() {
     return assistantSettingsNode;
   }
   assistantSettingsNode = element("div", "bpi-settings-form");
-  assistantSettingsNode.appendChild(element("h3", "", "Assistant Settings"));
   const loading = element("div", "bpm-loading", "Loading settings...");
   assistantSettingsNode.appendChild(loading);
   buildAssistantForm(assistantSettingsNode, loading);
@@ -1261,7 +1294,7 @@ async function loadFavoriteIntoNode(item) {
   }
   const confirmed = await confirmDialog(
     "Load",
-    `This will overwrite node #${target.id} prompt. Cannot be undone with Ctrl+Z.`,
+    `This will overwrite node #${target.id} prompt. This cannot be undone.`,
   );
   if (!confirmed) return;
   target._bilingualPromptInspector?.setText?.(item.text ?? "");
@@ -1482,7 +1515,11 @@ function build() {
   refs.sections.appendChild(refs.tagManagerSection);
   refs.sections.appendChild(buildTagsSection());
   refs.sections.appendChild(buildPacksSection());
-  root.append(head, refs.tabs, refs.sections);
+  // 撤销键没写在任何提示里，这里在分区上方给一行小字：
+  // Ctrl+Z 归画布，插件自己的撤销是 Shift+Alt+Z
+  const undoHint = element("div", "bpi-config-note", "Plugin undo: Shift+Alt+Z (redo: Shift+Alt+Y)");
+  undoHint.style.cssText = "padding:0 10px 6px";
+  root.append(head, refs.tabs, undoHint, refs.sections);
   root.addEventListener("mousedown", (event) => event.stopPropagation());
   root.addEventListener("wheel", (event) => event.stopPropagation(), { passive: true });
   // 面板每次都重建，收藏分页也要跟着重新懒加载
