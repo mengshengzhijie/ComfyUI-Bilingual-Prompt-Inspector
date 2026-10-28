@@ -1428,9 +1428,15 @@ function injectBpiStyles() {
     .bpi-form-actions{display:flex;justify-content:flex-end;gap:7px;margin-top:12px;flex-wrap:wrap}
     /* 助手设置在 ComfyUI「设置」面板里：原生那一行是「标签 + 控件」，把标签收掉、控件占满整行 */
     .bpi-settings-form{box-sizing:border-box;width:100%;padding:2px 0 6px}.bpi-settings-form h3{margin:0 0 10px;font-size:15px}
-    div:has(> .form-input > div > .bpi-settings-form){align-items:flex-start}
-    div:has(> .form-input > div > .bpi-settings-form) > .form-label{display:none}
-    div:has(> .form-input > div > .bpi-settings-form) > .form-input{flex:1 1 0%;min-width:0}
+    /* 设置面板每一项 = 名称列 + 控件列，名称列宽度跟着名字长短走：插件这两项一个叫
+       「语言与外观」一个叫「助手设置」，字数不同，右边的内容就被推得差了一格。
+       让名称列不占位、控件列占满，两块都从最左边开始，标题由各自的 h3 显示。
+       只在「我们的块不在第一列」时才生效，结构对不上时不会把内容自己藏掉。 */
+    *:has(> :not(:first-child) > .bpi-settings-form){align-items:flex-start}
+    *:has(> :not(:first-child) > .bpi-settings-form) > :first-child{display:none}
+    *:has(> :not(:first-child) > .bpi-settings-form) > :not(:first-child){flex:1 1 0%;min-width:0;justify-content:flex-start}
+    /* ComfyUI 给控件列自带 justify-end：宽度一占满就会把内容推到最右，这里改回靠左 */
+    *:has(> .bpi-settings-form){flex:1 1 0%;min-width:0}
     .bpi-switch-row{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;width:fit-content}
     .bpi-switch-row input{position:absolute;width:0;height:0;opacity:0;margin:0}
     .bpi-switch-track{position:relative;flex:0 0 auto;width:34px;height:18px;border-radius:9px;background-color:var(--bpi-switch-off);border:1px solid var(--bpi-switch-off-border);transition:background-color .16s ease,border-color .16s ease}

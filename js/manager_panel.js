@@ -585,17 +585,54 @@ function openImportPreview(payload) {
   modal.addEventListener("mousedown", (event) => event.stopPropagation());
 }
 
+// 设置面板每一项 = 名称列 + 控件列，名称列宽度跟着设置项名字长短走：
+// 插件这两项一个「语言与外观」一个「助手设置」，字数不同，右边的内容就被推得差了一格。
+// CSS 里已经用 :has() 处理过一次，这里再兜一次——面板重建后内联样式会丢，
+// 而设置面板每次打开都会重新调用下面的 control，正好顺势对齐一次。
+// 只认「恰好两列、且第二列装着我们内容」的那一行，结构对不上就不动，免得误伤别的元素。
+function alignSettingRow(node) {
+  let row = node.parentElement;
+  while (row && row !== document.body) {
+    if (row.children.length === 2 && row.children[1].contains(node)) break;
+    row = row.parentElement;
+  }
+  if (!row || row === document.body) return;
+  const [name, control] = row.children;
+  name.style.display = "none";
+  control.style.flex = "1 1 0%";
+  control.style.minWidth = "0";
+  // ComfyUI 给控件列自带 justify-end：宽度一占满，它反而把内容整个推到右边。
+  // 改回靠左，并让包着我们的那一层也占满，否则内容仍会缩在右侧。
+  control.style.justifyContent = "flex-start";
+  if (node.parentElement && node.parentElement !== control) {
+    node.parentElement.style.flex = "1 1 0%";
+    node.parentElement.style.minWidth = "0";
+  }
+}
+
+function alignWhenMounted(node, frames = 30) {
+  if (node.isConnected) {
+    alignSettingRow(node);
+    return;
+  }
+  if (frames > 0) requestAnimationFrame(() => alignWhenMounted(node, frames - 1));
+}
+
 // 外观 / 语言从助手设置里拆出来，和它并列挂在「设置」面板的插件分类下。
 // 改动立刻生效并单独保存，不需要去点助手设置的保存按钮。
 let appearanceSettingsNode = null;
 
 function appearanceControl() {
-  if (appearanceSettingsNode) return appearanceSettingsNode;
+  if (appearanceSettingsNode) {
+    alignWhenMounted(appearanceSettingsNode);
+    return appearanceSettingsNode;
+  }
   appearanceSettingsNode = element("div", "bpi-settings-form");
   appearanceSettingsNode.appendChild(element("h3", "", "Appearance & Language"));
   const loading = element("div", "bpm-loading", "Loading settings...");
   appearanceSettingsNode.appendChild(loading);
   buildAppearanceForm(appearanceSettingsNode, loading);
+  alignWhenMounted(appearanceSettingsNode);
   return appearanceSettingsNode;
 }
 
@@ -668,12 +705,16 @@ async function buildAppearanceForm(host, loading) {
 let assistantSettingsNode = null;
 
 function assistantSettingsControl() {
-  if (assistantSettingsNode) return assistantSettingsNode;
+  if (assistantSettingsNode) {
+    alignWhenMounted(assistantSettingsNode);
+    return assistantSettingsNode;
+  }
   assistantSettingsNode = element("div", "bpi-settings-form");
   assistantSettingsNode.appendChild(element("h3", "", "Assistant Settings"));
   const loading = element("div", "bpm-loading", "Loading settings...");
   assistantSettingsNode.appendChild(loading);
   buildAssistantForm(assistantSettingsNode, loading);
+  alignWhenMounted(assistantSettingsNode);
   return assistantSettingsNode;
 }
 
