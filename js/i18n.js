@@ -431,6 +431,11 @@ const ZH = {
   "Ollama only accepts a loopback address on this machine; anything else is rejected before a request is sent.":
     "Ollama 只能填本机回环地址；其它地址在发出请求前就会被拒绝。",
   "Model Name": "模型名称",
+  "Fetch Models": "获取模型",
+  "Fetch Models ({})": "获取模型（{}）",
+  "Fetching...": "获取中…",
+  "Fetched {} models": "已获取 {} 个模型",
+  Close: "关闭",
   "Use LM Studio Local Preset": "使用 LM Studio 本地预设",
   "Connects to localhost:1234 by default; no external API required.": "默认连接 localhost:1234，不需要外部接口。",
   "LM Studio default URL filled; select a loaded model ID, then Save & Test": "已填入 LM Studio 默认地址；选择已加载的模型 ID 后保存并测试",

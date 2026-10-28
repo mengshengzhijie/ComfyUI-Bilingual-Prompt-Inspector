@@ -199,6 +199,18 @@ async function getAssistantConfig() {
   return result.data;
 }
 
+// 拿表单当前填的地址和密钥问一次「你有哪些模型」；后端不读已保存的密钥，也不写配置
+async function listAssistantModels(payload) {
+  const response = await bpiFetch(`${API_ROOT}/assistant/models`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const result = await response.json().catch(() => null);
+  if (!response.ok || !result?.success) throw new Error(result?.error || "Failed to fetch models");
+  return Array.isArray(result.data?.models) ? result.data.models : [];
+}
+
 // 读 data/token_colors.json；用户可以不改源码只改这个文件管理节点标签卡的颜色池。
 // 文件不在或格式不对时后端回退内置默认，这里只管透传。
 let tokenColorsPromise = null;
@@ -1385,6 +1397,11 @@ function injectBpiStyles() {
 .bpi-about-modal{width:min(460px,calc(100vw - 32px))}.bpi-about-name{margin-bottom:7px;color:var(--bpi-text);font-weight:700}.bpi-config-note{color:var(--bpi-text-muted);font-size:10px;word-break:break-all}
 /* 同一句说明变成警告时用：只换颜色，不动字号字重，免得换行数变了把下面的表单顶走 */
 .bpi-config-note-warn{color:var(--bpi-status-error)}
+/* 「获取模型」：输入框照旧独占一行宽度，按钮挤在右边不换行 */
+.bpi-model-line{display:flex;gap:6px;align-items:stretch;min-width:0}
+.bpi-model-line input{flex:1 1 auto;min-width:0}
+.bpi-model-line .bpi-button{flex:none;white-space:nowrap;background-color:var(--bpm-accent);border-color:var(--bpm-accent-border);color:#fff}
+.bpi-model-line .bpi-button:hover{background-color:var(--bpm-accent-hover);border-color:var(--bpm-accent-border);color:#fff}
 .bpi-help{position:relative;display:inline-flex;align-items:center;justify-content:center;width:13px;height:13px;margin-left:5px;border:1px solid var(--bpi-border);border-radius:50%;color:var(--bpi-text-muted);font:10px/1 Arial,sans-serif;vertical-align:middle;cursor:help;user-select:none}
 .bpi-help:hover,.bpi-help:focus{color:var(--bpi-text);border-color:var(--bpi-border-2)}
 .bpi-help-pop{position:absolute;left:50%;bottom:calc(100% + 6px);transform:translateX(-50%);z-index:80;display:none;box-sizing:border-box;width:290px;max-width:70vw;padding:7px 9px;border:1px solid var(--bpi-border-2);border-radius:6px;background:var(--bpi-surface-modal);color:var(--bpi-text-muted);font:11px/1.65 Arial,sans-serif;white-space:pre-line;text-align:left;cursor:default}
@@ -1487,6 +1504,7 @@ export {
   importTags,
   bulkUpdateTags,
   injectBpiStyles,
+  listAssistantModels,
   listModelNames,
   listSavedPrompts,
   loadDictionary,

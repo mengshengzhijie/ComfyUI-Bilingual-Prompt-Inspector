@@ -205,6 +205,68 @@ def openai_chat_endpoint(base_url):
     return f"{base}/chat/completions"
 
 
+def openai_models_endpoint(base_url):
+    """Return a model-list endpoint for an OpenAI-compatible base URL."""
+    base = str(base_url or "").strip().rstrip("/")
+    if not base:
+        return ""
+    if base.endswith("/models"):
+        return base
+    if base.endswith("/chat/completions"):
+        base = base[: -len("/chat/completions")].rstrip("/")
+    return f"{base}/models"
+
+
+def response_snippet(body):
+    """错误应答常常是一整页 HTML 或带换行的纯文本；压成一行并截断，免得提示框被撑爆。"""
+    return re.sub(r"\s+", " ", str(body or "")).strip()[:160]
+
+
+def upstream_error_message(body, status, who):
+    """把上游错误应答压成一句能看懂的中文。
+
+    各家返回的不是齐步走的：OpenAI 系给 JSON，DeepSeek 缺密钥时回的是纯文本一行
+    “Authentication Fails”，还有网关直接甩一页 HTML。所以先看原文能不能解析成 JSON，
+    解析不了就退化成原文片段，绝不在取错误信息的路上把请求整条打崩。
+    `who` 是“Ollama” / “API” 这一类的来源名，只在连原文都没有时用来兜底。
+    """
+    message = None
+    try:
+        data = json.loads(body)
+    except (TypeError, UnicodeDecodeError, json.JSONDecodeError):
+        data = None
+    if isinstance(data, dict):
+        detail = data.get("error")
+        if isinstance(detail, dict):
+            detail = detail.get("message")
+        message = str(detail).strip() if detail else None
+    hint = "；请检查 API 密钥是否已填写、是否有效" if status in {401, 403} else ""
+    return f"{message or response_snippet(body) or f'{who} 请求失败'}（HTTP {status}{hint}）"
+
+
+def parse_json_body(body, who):
+    """解析成功应答；不是 JSON 或不是字典时给一句能看懂的提示，而不是抛堆栈。"""
+    try:
+        data = json.loads(body)
+    except (TypeError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError(f"{who} 返回的不是 JSON（可能是登录页或错误页）：{response_snippet(body)}") from error
+    if not isinstance(data, dict):
+        raise ValueError(f"{who} 返回的内容无法识别：{response_snippet(body)}")
+    return data
+
+
+def ollama_tags_endpoint(base_url):
+    """Return the local-model list endpoint for an Ollama base URL."""
+    base = str(base_url or "").strip().rstrip("/")
+    if not base:
+        return ""
+    if base.endswith("/v1"):
+        base = base[:-3].rstrip("/")
+    if base.endswith("/api/chat"):
+        base = base[: -len("/api/chat")].rstrip("/")
+    return f"{base}/api/tags"
+
+
 def baidu_translate_params(appid, secret_key, query, to_lang, from_lang="auto", salt=None):
     """组装百度通用文本翻译接口参数；sign = MD5(appid + q + salt + 密钥)。"""
     appid = str(appid or "")

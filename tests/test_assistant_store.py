@@ -17,10 +17,14 @@ from assistant_store import (
     baidu_translate_params,
     dictionary_translate,
     normalize_ai_base_url,
+    ollama_tags_endpoint,
     openai_chat_endpoint,
+    openai_models_endpoint,
+    parse_json_body,
     sanitize_anima_prompt,
     sanitize_natural_prompt,
     translation_direction,
+    upstream_error_message,
 )
 from dictionary_store import DictionaryStore
 
@@ -443,6 +447,38 @@ class AssistantStoreTests(unittest.TestCase):
             raw["baidu_qps"] = "not-a-number"
             path.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
             self.assertEqual(store.config()["baidu_qps"], 1.0)
+
+    def test_model_list_endpoints_reuse_the_saved_base_url_shape(self):
+        self.assertEqual(openai_models_endpoint("https://api.openai.com/v1"), "https://api.openai.com/v1/models")
+        self.assertEqual(openai_models_endpoint("http://127.0.0.1:1234/v1/"), "http://127.0.0.1:1234/v1/models")
+        self.assertEqual(openai_models_endpoint("https://x.cn/v1/chat/completions"), "https://x.cn/v1/models")
+        self.assertEqual(openai_models_endpoint("https://x.cn/models"), "https://x.cn/models")
+        self.assertEqual(ollama_tags_endpoint("http://127.0.0.1:11434"), "http://127.0.0.1:11434/api/tags")
+        self.assertEqual(ollama_tags_endpoint("http://127.0.0.1:11434/v1"), "http://127.0.0.1:11434/api/tags")
+        self.assertEqual(ollama_tags_endpoint("http://127.0.0.1:11434/api/chat"), "http://127.0.0.1:11434/api/tags")
+        self.assertEqual(openai_models_endpoint(""), "")
+        self.assertEqual(ollama_tags_endpoint(""), "")
+
+    def test_error_bodies_that_are_not_json_still_read_as_a_sentence(self):
+        # DeepSeek 缺密钥时回的是纯文本一行，不是 JSON；解析不了也不能把整条请求打崩
+        # 第三个参数和 server.py 里的调用保持一致：整条路径改签名时这里会先炸出来
+        self.assertIn("Authentication Fails", upstream_error_message("Authentication Fails (governor)", 401, "API"))
+        self.assertIn("请检查 API 密钥", upstream_error_message("Authentication Fails (governor)", 401, "API"))
+        self.assertEqual(
+            upstream_error_message('{"error":{"message":"Invalid API key"}}', 401, "API"),
+            "Invalid API key（HTTP 401；请检查 API 密钥是否已填写、是否有效）",
+        )
+        self.assertEqual(upstream_error_message("404 page not found", 404, "API"), "404 page not found（HTTP 404）")
+        self.assertEqual(upstream_error_message("", 502, "Ollama"), "Ollama 请求失败（HTTP 502）")
+        self.assertTrue(len(upstream_error_message("<html>" + "x" * 500 + "</html>", 403, "API")) < 220)
+
+    def test_non_json_success_body_reports_instead_of_crashing(self):
+        self.assertEqual(parse_json_body('{"data": []}', "API"), {"data": []})
+        with self.assertRaises(ValueError) as raised:
+            parse_json_body("<html>login</html>", "API")
+        self.assertIn("返回的不是 JSON", str(raised.exception))
+        with self.assertRaises(ValueError):
+            parse_json_body("[1, 2, 3]", "API")
 
     def test_baidu_params_and_query_splitting(self):
         params = baidu_translate_params("appid", "secret", "你好", "zh", salt="12345")

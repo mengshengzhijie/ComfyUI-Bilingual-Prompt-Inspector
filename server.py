@@ -25,10 +25,14 @@ from .assistant_store import (
     baidu_translate_params,
     dictionary_translate,
     normalize_ai_base_url,
+    ollama_tags_endpoint,
     openai_chat_endpoint,
+    openai_models_endpoint,
+    parse_json_body,
     sanitize_anima_prompt,
     sanitize_natural_prompt,
     translation_direction,
+    upstream_error_message,
 )
 from .dictionary_store import DictionaryStore, normalize_key
 from .duplicate_check import find_duplicates
@@ -47,6 +51,7 @@ assistant_store.config()  # 进程启动时立即清除与当前安装身份不�
 _SESSION_TOKEN = secrets.token_urlsafe(32)
 _MAX_JSON_BYTES = 8 * 1024 * 1024
 _MAX_ASSISTANT_JSON_BYTES = 256 * 1024
+_MODEL_LIST_TIMEOUT_SECONDS = 20
 _ASSISTANT_RATE_WINDOW = 60.0
 _ASSISTANT_RATE_LIMIT = 30
 _assistant_requests = deque()
@@ -250,10 +255,10 @@ async def _call_ai_assistant(action, text, instruction, config, connection_test=
         }
         async with ClientSession(timeout=timeout) as session:
             async with session.post(endpoint, json=payload) as response:
-                data = await response.json(content_type=None)
+                body = await response.text()
                 if response.status >= 400:
-                    raise ValueError(data.get("error") or f"Ollama 请求失败：HTTP {response.status}")
-        result = data.get("message", {}).get("content")
+                    raise ValueError(upstream_error_message(body, response.status, "Ollama"))
+        result = parse_json_body(body, "Ollama").get("message", {}).get("content")
     else:
         # OpenAI 兼容：远端必须 https，本机回环才允许 http
         base = normalize_ai_base_url(config["openai_base_url"], allow_remote=True)
@@ -269,13 +274,10 @@ async def _call_ai_assistant(action, text, instruction, config, connection_test=
         }
         async with ClientSession(timeout=timeout) as session:
             async with session.post(openai_chat_endpoint(base), headers=headers, json=payload) as response:
-                data = await response.json(content_type=None)
+                body = await response.text()
                 if response.status >= 400:
-                    detail = data.get("error") if isinstance(data, dict) else None
-                    if isinstance(detail, dict):
-                        detail = detail.get("message")
-                    raise ValueError(detail or f"API 请求失败：HTTP {response.status}")
-        choices = data.get("choices") if isinstance(data, dict) else None
+                    raise ValueError(upstream_error_message(body, response.status, "API"))
+        choices = parse_json_body(body, "API").get("choices")
         result = choices[0].get("message", {}).get("content") if choices else None
     result = _clean_assistant_result(result)
     if not result:
@@ -338,6 +340,54 @@ async def save_assistant_config(request):
         return error_response(error)
 
 
+async def _list_backend_models(prefix, base_url, api_key):
+    """向 AI 后端问一次「你有哪些模型」；地址沿用现有白名单，问完不留任何东西。"""
+    timeout = ClientTimeout(total=_MODEL_LIST_TIMEOUT_SECONDS)
+    async with ClientSession(timeout=timeout) as session:
+        if prefix == "ollama":
+            # Ollama 只认本机回环地址，这里再校验一次，挡住手改配置文件的情况
+            base = normalize_ai_base_url(base_url)
+            if not base:
+                raise ValueError("尚未填写 Ollama 地址")
+            async with session.get(ollama_tags_endpoint(base)) as response:
+                # 先读原文再看状态码：错误应答常常不是 JSON，按 JSON 硬解析会把整个请求打崩
+                body = await response.text()
+                if response.status >= 400:
+                    raise ValueError(upstream_error_message(body, response.status, "Ollama"))
+            names = [item.get("name") for item in parse_json_body(body, "Ollama").get("models") or []]
+        else:
+            base = normalize_ai_base_url(base_url, allow_remote=True)
+            if not base:
+                raise ValueError("尚未填写 OpenAI 兼容 API 地址")
+            headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+            async with session.get(openai_models_endpoint(base), headers=headers) as response:
+                body = await response.text()
+                if response.status >= 400:
+                    raise ValueError(upstream_error_message(body, response.status, "API"))
+            names = [item.get("id") for item in parse_json_body(body, "API").get("data") or []]
+    models = sorted({str(name).strip() for name in names if str(name).strip()})
+    if not models:
+        raise ValueError("服务端没有返回任何模型；也可以直接在输入框里手写模型名称")
+    return models
+
+
+@protected_route("post", "/bpi/assistant/models")
+async def list_assistant_models(request):
+    """用表单里当前填的地址问一次模型列表，只为给下拉候选用：不写配置，也不把密钥返回浏览器。"""
+    try:
+        payload = await _read_json(request, _MAX_ASSISTANT_JSON_BYTES)
+        if not isinstance(payload, dict):
+            raise ValueError("请求内容格式不正确")
+        _consume_assistant_rate_limit()
+        prefix = "ollama" if payload.get("backend") == "ollama" else "openai"
+        # 密钥输入框留空 = 用户已经存过、这次不想再敲一遍，就拿已存的那份去问；仍只用于这一次请求
+        api_key = str(payload.get("api_key") or "").strip() or str(assistant_store.config().get(f"{prefix}_api_key") or "").strip()
+        models = await _list_backend_models(prefix, str(payload.get("base_url") or "").strip(), api_key)
+        return web.json_response({"success": True, "data": {"models": models}})
+    except AssistantLimitError as error:
+        return error_response(error, 429)
+    except Exception as error:
+        return error_response(error)
 
 
 @protected_route("post", "/bpi/assistant/test")
