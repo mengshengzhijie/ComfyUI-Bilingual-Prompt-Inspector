@@ -42,7 +42,10 @@ export function setNotifyEnabled(next) {
 
 const STYLE_ID = "bpi-notify-style";
 const CSS = `
-.bpi-notif-stack{position:fixed;top:30px;right:0;width:min(320px,calc(100vw - 40px));z-index:9999;display:flex;flex-direction:column;gap:10px}
+/* 弹窗自己的主题色：只在这一层覆盖，插件别处的 --bpm-accent（绿）不受影响。
+   它用在两处——入场最后落下的那层、和垫在最底下的那张纸；换青色是为了和退场那层紫红搭。
+   出错时下面 .bpi-notif-error 会把它再改成红色，所以这里只改默认值就行。 */
+.bpi-notif-stack{position:fixed;top:30px;right:0;width:min(320px,calc(100vw - 40px));z-index:9999;display:flex;flex-direction:column;gap:10px;--bpm-accent:#14b8a6}
 /* 投影只有暗色下才需要那么重，亮色下换成淡的；其余颜色都跟着插件的 --bpi-* 主题变量走 */
 [data-bpi-theme="light"] .bpi-notif-stack{--bpi-notif-shadow:0 14px 34px rgba(0,0,0,.16);--bpi-notif-logo-shadow:0 2px 10px rgba(0,0,0,.22)}
 .bpi-notif-slot{position:relative;width:100%;flex:none}
@@ -79,14 +82,20 @@ const CSS = `
 .bpi-notif.bpi-play .bpi-notif-seq:nth-child(2){animation:bpiSeqDrop .22s cubic-bezier(.3,.7,.3,1) .08s forwards}
 @keyframes bpiSeqDrop{from{transform:translateY(-100%)}to{transform:translateY(0)}}
 .bpi-notif-logo-in-mask{z-index:3}
-/* 离场时从卡片下方往上抹满整张卡片的那层：固定蓝 #0b8ce9，不跟主题绿 */
+/* 离场时从卡片下方往上抹满整张卡片的那层：固定蓝 #0b8ce9，不跟主题绿（保持原样） */
 .bpi-notif-cover{position:absolute;inset:0;background:#0b8ce9;z-index:8;pointer-events:none;transform:translateY(calc(100% + 3px));transition:transform .38s cubic-bezier(.45,0,.2,1);will-change:transform}
 .bpi-notif.bpi-covering .bpi-notif-cover{transform:translateY(0)}
+/* 垫在卡片正后方的那张紫红纸：和卡片一样大、不往外露，所以静止时完全被卡片盖住看不见；
+   DOM 排在绿底纸之后 → 压在绿纸上面，卡片滑走后先看到它，它再滑走才轮到绿纸。
+   顺序：卡片（蓝）→ 紫红 → 绿，三层依次向右走。 */
+.bpi-notif-sheet{position:absolute;top:0;right:0;bottom:0;left:0;background:#d946ef;border:0;z-index:0;pointer-events:none;opacity:0;transform:translateY(-120%);transition:transform .5s cubic-bezier(.16,1,.3,1),opacity .4s ease}
+.bpi-notif-sheet.bpi-show{opacity:1;transform:translateY(0)}
+.bpi-notif-sheet.bpi-wipe{transform:translateX(125%);transition:transform .32s cubic-bezier(.55,0,.8,.4)}
 .bpi-notif-close{position:absolute;top:6px;right:6px;z-index:10;width:28px;height:28px;display:grid;place-items:center;padding:0;border:0;border-radius:0;background:transparent;color:var(--bpi-text-muted,#aab5c5);cursor:pointer;transition:background .15s ease,color .15s ease}
 .bpi-notif-close:hover{background:var(--bpi-handle-hover-bg,#2b3a4d);color:var(--bpi-text,#e6edf7)}
 .bpi-notif-close:active{background:var(--bpi-mini-hover-bg,#3c4b60)}
 @media (prefers-reduced-motion: reduce){
-  .bpi-notif,.bpi-notif-extra,.bpi-notif.bpi-out,.bpi-notif-cover,.bpi-notif-logo-standalone,.bpi-notif-seq,.bpi-notif-under,.bpi-notif.bpi-play .bpi-notif-mask{animation-duration:.01ms !important;animation-delay:0s !important;transition-duration:.01ms !important}
+  .bpi-notif,.bpi-notif-extra,.bpi-notif.bpi-out,.bpi-notif-cover,.bpi-notif-logo-standalone,.bpi-notif-seq,.bpi-notif-sheet,.bpi-notif-under,.bpi-notif.bpi-play .bpi-notif-mask{animation-duration:.01ms !important;animation-delay:0s !important;transition-duration:.01ms !important}
 }
 `;
 
@@ -123,7 +132,9 @@ function ensureStack() {
 
 function createCard() {
   const slot = element("div", "bpi-notif-slot");
+  // 由下而上：绿底纸 → 紫红垫纸 → 卡片（卡片盖住前两张，紫红只在卡片滑走后才露出来）
   const under = element("div", "bpi-notif-under");
+  const sheet = element("div", "bpi-notif-sheet");
   const notif = element("div", "bpi-notif");
 
   const logoStandalone = buildLogo("bpi-notif-logo-standalone");
@@ -146,10 +157,10 @@ function createCard() {
   close.type = "button";
 
   notif.append(logoStandalone, content, mask, cover, close);
-  slot.append(under, notif);
+  slot.append(under, sheet, notif);
 
   const card = {
-    slot, notif, under, content, head, titleEl, extraEl,
+    slot, notif, under, sheet, content, head, titleEl, extraEl,
     item: null,
     sticky: false,
     shownAt: 0,
@@ -216,10 +227,13 @@ function playCard(card) {
   // 带着过渡摘类会让它斜着飞回入场起点，看着就是「结束后往上一跳」
   card.notif.style.transition = "none";
   card.under.style.transition = "none";
+  card.sheet.style.transition = "none";
   card.notif.classList.remove("bpi-play", "bpi-out", "bpi-expand", "bpi-covering", "bpi-logo-visible");
   card.under.classList.remove("bpi-show", "bpi-wipe");
+  card.sheet.classList.remove("bpi-show", "bpi-wipe");
   void card.notif.offsetWidth;
   void card.under.offsetWidth;
+  void card.sheet.offsetWidth;
 
   card.extraEl.textContent = t(card.item.message);
   card.titleEl.textContent = t(titleFor(card.item.kind));
@@ -235,8 +249,11 @@ function playCard(card) {
 
   card.notif.classList.add("bpi-play");
   card.under.style.transition = ""; // 归位已无过渡完成，这里恢复后才能滑入
+  card.sheet.style.transition = "";
   void card.under.offsetWidth;
+  void card.sheet.offsetWidth;
   card.under.classList.add("bpi-show");
+  card.sheet.classList.add("bpi-show");
 
   card.timers.push(setTimeout(() => {
     card.notif.classList.add("bpi-expand");
@@ -289,21 +306,29 @@ function dismissCard(card) {
   card.notif.classList.add("bpi-covering", "bpi-logo-visible");
   card.notif.style.maxHeight = `${card.initialH}px`;
 
-  // 退场：先收高度 + 蓝色刷上来，420ms 后卡片右移，走一会儿底纸跟着滑走
+  // 退场：先收高度 + 蓝色刷上来，420ms 后卡片右移；紫红垫纸晚 85ms 跟上，绿底纸再晚 85ms，
+  // 三层依次向右滑走 —— 紫红那张「和蓝色一样向右走，只不过在它后面」
   card.timers.push(setTimeout(() => {
     card.notif.classList.add("bpi-out");
     card.timers.push(setTimeout(() => {
-      card.under.classList.add("bpi-wipe");
+      card.sheet.classList.add("bpi-wipe");
       card.timers.push(setTimeout(() => {
-        // 复位必须先关过渡：底纸此刻停在屏幕右侧，直接摘类会让它一路斜着飞回入场起点
-        card.under.style.transition = "none";
-        card.under.classList.remove("bpi-show", "bpi-wipe");
-        void card.under.offsetWidth;
-        card.under.style.transition = "";
-        card.notif.classList.remove("bpi-logo-visible");
-        removeCard(card);
-      }, 330));
-    }, 170));
+        card.under.classList.add("bpi-wipe");
+        card.timers.push(setTimeout(() => {
+          // 复位必须先关过渡：垫纸和底纸此刻停在屏幕右侧，直接摘类会让它一路斜着飞回入场起点
+          card.sheet.style.transition = "none";
+          card.sheet.classList.remove("bpi-show", "bpi-wipe");
+          void card.sheet.offsetWidth;
+          card.sheet.style.transition = "";
+          card.under.style.transition = "none";
+          card.under.classList.remove("bpi-show", "bpi-wipe");
+          void card.under.offsetWidth;
+          card.under.style.transition = "";
+          card.notif.classList.remove("bpi-logo-visible");
+          removeCard(card);
+        }, 330));
+      }, 85));
+    }, 85));
   }, 420));
 }
 
