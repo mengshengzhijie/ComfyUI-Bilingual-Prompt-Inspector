@@ -1290,6 +1290,11 @@ function injectBpiStyles() {
     .bpi-token-card.bpi-card-linked .bpi-token-card-zh{color:#fff}
     .bpi-token-card.bpi-card-linked .bpi-english-token{background:transparent;border-color:transparent;box-shadow:none;color:#fff}
     .bpi-token-card-zh{min-height:15px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--bpi-text-muted);font:11px/1.35 Arial,sans-serif}
+    /* 落点提示画在整张卡片上（英文行 + 中文小块一起亮）。必须排在
+       .bpi-card-linked 之后：两条规则特异度相同，靠后定义的才盖得住选中态
+       自己的 box-shadow，否则拖到已选中的卡片上看不出插入位置 */
+    .bpi-token-card.bpi-drop-before{box-shadow:-3px 0 0 0 #76c9ff,0 0 6px rgba(118,201,255,.45)}
+    .bpi-token-card.bpi-drop-after{box-shadow:3px 0 0 0 #76c9ff,0 0 6px rgba(118,201,255,.45)}
     .bpi-category-content{display:flex;flex-wrap:wrap;gap:2px 3px}
 .bpi-break-chip{position:relative;display:inline-flex;align-items:center;gap:3px;border:1px dashed var(--bpi-break-border);border-radius:5px;background:var(--bpi-break-bg);color:var(--bpi-break-text);padding:0 5px;margin:1px 0;cursor:grab;user-select:none;font-family:Consolas,monospace}
 .bpi-break-chip:hover,.bpi-break-chip.bpi-drop-target{background:var(--bpi-break-bg-hover);border-color:var(--bpi-break-text);color:#fff}

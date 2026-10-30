@@ -1331,7 +1331,10 @@ function createPanel(node, textWidget) {
   // through the shared undo stack.
   // view / selector 让英文标签区与中文对照区可以共用这套拖拽逻辑：
   // 两处 chip 一一对应同一批 token，拖动任何一个都是重排同一份文本。
-  const attachChipDrag = (chip, token, view = englishTokenView, selector = ".bpi-english-token") => {
+  // selector 必须指到整张卡片（.bpi-token-card）而不是里面的英文行：卡片上
+  // 半是英文、下半是中文小块，只认英文行的话，指针落在中文小块上就判定不到
+  // 目标，插入提示不出现、落点还会被几何兜底算到列表末尾去。
+  const attachChipDrag = (chip, token, view = englishTokenView, selector = ".bpi-token-card") => {
     chip.addEventListener("pointerdown", (event) => {
       if (event.button !== 0 || !canReorderTokens()) return;
       const startX = event.clientX;
@@ -2596,7 +2599,8 @@ function createPanel(node, textWidget) {
       if (!next) continue;
       if (gapHasBreak(index)) {
         // 换行块：它自己独占行尾，后面的标签另起一行，和「实际输出」的行结构一致
-        currentLine().appendChild(buildBreakChip(index, englishTokenView, ".bpi-english-token"));
+        // 换行块的落点目标同样用整张卡片：拖到中文小块上也算拖到这个标签
+        currentLine().appendChild(buildBreakChip(index, englishTokenView, ".bpi-token-card"));
         line = null;
       } else {
         currentLine().appendChild(element("span", "bpi-mirror-separator", ", "));
