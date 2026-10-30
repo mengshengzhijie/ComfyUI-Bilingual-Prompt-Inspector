@@ -6,6 +6,12 @@ import { installBpiWheelGuard } from "./wheel_guard.js";
 import { notifyEnabled, setNotifyEnabled } from "./bpi_notify.js";
 import { setToastEnabled, toastEnabled } from "./bpi_toast.js";
 import {
+  dragPreviewNodeEnabled,
+  dragPreviewTableEnabled,
+  setDragPreviewNodeEnabled,
+  setDragPreviewTableEnabled,
+} from "./bpi_drag_preview.js";
+import {
   MANAGER_OPEN_EVENT,
   MANAGER_TAB_ID,
   button,
@@ -709,9 +715,36 @@ async function buildAppearanceForm(host, loading) {
     setText(status, toastSwitch.checked ? "Bottom-right toast on" : "Bottom-right toast off");
     status.dataset.kind = "ok";
   });
+  // 拖动实时预览：默认关，节点标签区和明细表各一个开关，互不影响
+  const nodeDragRow = element("label", "bpi-switch-row bpi-switch-accent");
+  const nodeDragSwitch = element("input", "bpi-switch");
+  nodeDragSwitch.type = "checkbox";
+  nodeDragSwitch.checked = dragPreviewNodeEnabled();
+  const nodeDragTrack = element("span", "bpi-switch-track");
+  nodeDragTrack.appendChild(element("span", "bpi-switch-thumb"));
+  nodeDragRow.append(nodeDragSwitch, nodeDragTrack, element("span", "bpi-switch-text", "拖动实时预览（节点标签区）"));
+  nodeDragSwitch.addEventListener("change", () => {
+    setDragPreviewNodeEnabled(nodeDragSwitch.checked);
+    setText(status, nodeDragSwitch.checked ? "节点标签区拖动实时预览已开" : "节点标签区拖动实时预览已关");
+    status.dataset.kind = "ok";
+  });
+  const tableDragRow = element("label", "bpi-switch-row bpi-switch-accent");
+  const tableDragSwitch = element("input", "bpi-switch");
+  tableDragSwitch.type = "checkbox";
+  tableDragSwitch.checked = dragPreviewTableEnabled();
+  const tableDragTrack = element("span", "bpi-switch-track");
+  tableDragTrack.appendChild(element("span", "bpi-switch-thumb"));
+  tableDragRow.append(tableDragSwitch, tableDragTrack, element("span", "bpi-switch-text", "拖动实时预览（明细表）"));
+  tableDragSwitch.addEventListener("change", () => {
+    setDragPreviewTableEnabled(tableDragSwitch.checked);
+    setText(status, tableDragSwitch.checked ? "明细表拖动实时预览已开" : "明细表拖动实时预览已关");
+    status.dataset.kind = "ok";
+  });
+  const nodeDragNote = element("div", "bpi-fold-note", "开：按住标签会浮起来跟着鼠标走，原位留一个空位，其余标签像手机桌面挪图标那样平滑让开；松手才真正改写提示词，只留一条撤销记录。每次拖动都要量一遍布局，提示词很长时会多花一点 CPU，受不了就关掉。");
+  const tableDragNote = element("div", "bpi-fold-note", "同上，但只管明细表里的拖动（拖行首的 ⠿ 手柄）。两个开关各管一处，互不影响。");
   const foldNote = element("div", "bpi-fold-note", "Operation results show as a popup in the top-right corner instead of the status line.");
   const toastNote = element("div", "bpi-fold-note", "Per-operation feedback (translation, tag edits, duplicate toggle) shows as a small bar stacked in the bottom-right corner. Turn it off to keep everything in the status line and save a bit of CPU.");
-  foldBody.append(popupRow, foldNote, toastRow, toastNote);
+  foldBody.append(popupRow, foldNote, toastRow, toastNote, nodeDragRow, nodeDragNote, tableDragRow, tableDragNote);
   fold.append(element("summary", "", "bulingbuling"), foldBody);
   form.appendChild(fold);
   host.appendChild(form);
