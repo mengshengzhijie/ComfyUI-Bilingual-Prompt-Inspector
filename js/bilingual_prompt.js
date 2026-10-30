@@ -2440,7 +2440,7 @@ function createPanel(node, textWidget) {
         ? `“${token.term}” ↔ “${token.chinese}” | natural language supports only whole-segment editing; can drag to reorder the whole segment`
         : `“${token.term}” ↔ “${token.chinese}” | click to link; Ctrl+click to select multiple; double-click to open the editor; select then press Delete; drag to reorder or Alt+↑/↓ to nudge`);
     // 隐藏角标挂在整张卡片上（不是英文那一行）：定位基准是卡片方框，
-    // 角标才会落在方框的右上角，而不是跟着英文行的宽度跑到中间去。
+    // 角标才会落在方框的右下角，而不是跟着英文行的宽度跑到中间去。
     let hideCorner = null;
     if (canHideTokens()) {
       const tokenHidden = isTokenHidden(token);
@@ -2457,14 +2457,18 @@ function createPanel(node, textWidget) {
         else hideToken(token);
       });
     }
+    // 删除的 × 也挂成角标（和眼睛一样浮在卡片方框上），不再挤在英文行末尾。
+    // 纯浮层、不占位：卡片尺寸一点都不变，有字就盖在字上面，
+    // 免得给 × 留出空位把卡片撑宽、把刚好一行放得下的标签挤到下一行去
+    let removeCorner = null;
     if (state.pinned === token.id && ["tags", "mixed"].includes(state.modeInfo.mode) && token.segmentKind !== "natural") {
-      const remove = element("span", "bpi-mirror-delete", "×");
-      setTitle(remove, `Delete “${token.term}”`);
-      remove.addEventListener("click", (event) => {
+      removeCorner = element("span", "bpi-mirror-delete", "×");
+      setTitle(removeCorner, `Delete “${token.term}”`);
+      removeCorner.addEventListener("pointerdown", (event) => event.stopPropagation());
+      removeCorner.addEventListener("click", (event) => {
         event.stopPropagation();
         deleteTokenOccurrence(token);
       });
-      chip.appendChild(remove);
     }
     const chinese = element("span", "bpi-token-card-zh", tokenChineseLabel(token));
     setTitle(chinese, `“${token.term}” ↔ “${token.chinese}”`);
@@ -2482,6 +2486,7 @@ function createPanel(node, textWidget) {
     if (cardColor && !card.classList.contains("bpi-card-linked") && !card.classList.contains("bpi-dup-hit")) card.style.background = cardColor;
     card.append(chip, chinese);
     if (hideCorner) card.appendChild(hideCorner);
+    if (removeCorner) card.appendChild(removeCorner);
     // 拖拽也挂在整个方块上：抓中文行一样能拖，不必精确抓英文。
     // 注意必须放在 card 声明之后：在 const card 之前引用它会触发 TDZ 报错，
     // 一报错整个 render 中断，标签区会整个空白。

@@ -1280,7 +1280,10 @@ function injectBpiStyles() {
 .bpi-hidden-term{text-decoration:line-through;color:var(--bpi-text-faint)}
 .bpi-hide-btn-off{color:var(--bpi-badge-warn)}
 .bpi-eye-off{color:var(--bpi-badge-warn)}
-    .bpi-chip-hide{position:absolute;top:2px;right:3px;display:none;cursor:pointer;padding:1px 2px;border-radius:999px;background:var(--bpi-chip-hide-bg);border:1px solid var(--bpi-border-2);color:var(--bpi-link-text);line-height:1;z-index:2}.bpi-token-card:hover .bpi-chip-hide{display:inline-flex}.bpi-chip-hide:hover{background:var(--bpi-primary-bg);border-color:var(--bpi-primary-border);color:#fff}
+    .bpi-chip-hide{position:absolute;bottom:2px;right:3px;display:none;cursor:pointer;padding:1px 2px;border-radius:999px;background:var(--bpi-chip-hide-bg);border:1px solid var(--bpi-border-2);color:var(--bpi-link-text);line-height:1;z-index:2}.bpi-token-card:hover .bpi-chip-hide{display:inline-flex}.bpi-chip-hide:hover{background:var(--bpi-primary-bg);border-color:var(--bpi-primary-border);color:#fff}
+    /* 删除的 × 是选中那张卡的右上角角标，和左上角的眼睛对称；不再跟英文标签挤在一行 */
+    .bpi-mirror-delete{position:absolute;top:2px;right:3px;cursor:pointer;padding:1px 3px;border-radius:999px;background:var(--bpi-chip-hide-bg);border:1px solid var(--bpi-border-2);color:var(--bpi-text-muted);font-size:11px;line-height:1;z-index:2}
+    .bpi-mirror-delete:hover{color:var(--bpi-status-error);border-color:var(--bpi-status-error)}
 .bpi-token-line{display:flex;flex-wrap:wrap;align-items:flex-end;gap:2px 0}
     .bpi-token-card{position:relative;display:inline-flex;flex-direction:column;align-items:flex-start;max-width:100%;border:1px solid var(--bpi-border-3);border-radius:5px;background:var(--bpi-surface-3);padding:1px 5px;margin:2px 3px 2px 0;vertical-align:top;cursor:pointer}
     .bpi-token-card:hover{border-color:var(--bpi-border-2)}
