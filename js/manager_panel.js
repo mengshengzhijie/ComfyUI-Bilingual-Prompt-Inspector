@@ -1516,8 +1516,9 @@ function build() {
   refs.sections.appendChild(buildTagsSection());
   refs.sections.appendChild(buildPacksSection());
   // 撤销键没写在任何提示里，这里在分区上方给一行小字：
-  // Ctrl+Z 归画布，插件自己的撤销是 Shift+Alt+Z
-  const undoHint = element("div", "bpi-config-note", "Plugin undo: Shift+Alt+Z (redo: Shift+Alt+Y)");
+  // Ctrl+Z 归画布，插件自己的撤销是 Shift+Alt+Z。这行直接写中文：
+  // 侧边栏面板的标题/提示不进 i18n 译表，写英文就会一路显示英文
+  const undoHint = element("div", "bpi-config-note", "插件撤销：Shift+Alt+Z（重做：Shift+Alt+Y）");
   undoHint.style.cssText = "padding:0 10px 6px";
   root.append(head, refs.tabs, undoHint, refs.sections);
   root.addEventListener("mousedown", (event) => event.stopPropagation());
