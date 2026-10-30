@@ -6,6 +6,8 @@ import { element, t } from "./bpi_shared.js";
 
 const STORAGE_KEY = "bpi.notify.v1";
 const HOLD_MS = 3000;
+// 报错停留更久：出错时要读两遍才看清（尤其是带原因的长句），3 秒一闪就过去了
+const ERROR_HOLD_MS = 8000;
 // 同一 group 的提示（节点里反复点「唯一」开关这类）停留更久，方便看清内容；
 // 期间再来一条同组的就原地换字并把这段时间重新计一遍，不另开卡片
 const REFRESH_HOLD_MS = 5000;
@@ -43,22 +45,27 @@ export function setNotifyEnabled(next) {
 const STYLE_ID = "bpi-notify-style";
 const CSS = `
 /* 弹窗自己的主题色：只在这一层覆盖，插件别处的 --bpm-accent（绿）不受影响。
-   它用在两处——入场最后落下的那层、和垫在最底下的那张纸；换青色是为了和退场那层紫红搭。
-   出错时下面 .bpi-notif-error 会把它再改成红色，所以这里只改默认值就行。 */
-.bpi-notif-stack{position:fixed;top:30px;right:0;width:min(320px,calc(100vw - 40px));z-index:9999;display:flex;flex-direction:column;gap:10px;--bpm-accent:#14b8a6}
+   它用在入场最后落下的那层、和垫在最底下的那张纸（左侧竖条）；换青色是为了和退场那层紫红搭。
+   另加两个分组变量，出错时这两个颜色对调（见下面 .bpi-notif-error）：
+   --bpi-notif-front 管「离场上抹层 + 底边亮线」（默认蓝 #0b8ce9），
+   --bpi-notif-paper 管垫在卡片正后方那张纸（默认紫红 #d946ef）。 */
+.bpi-notif-stack{position:fixed;top:30px;right:0;width:min(320px,calc(100vw - 40px));z-index:9999;display:flex;flex-direction:column;gap:10px;--bpm-accent:#14b8a6;--bpi-notif-front:#0b8ce9;--bpi-notif-front-rgb:11,140,233;--bpi-notif-paper:#d946ef}
 /* 投影只有暗色下才需要那么重，亮色下换成淡的；其余颜色都跟着插件的 --bpi-* 主题变量走 */
 [data-bpi-theme="light"] .bpi-notif-stack{--bpi-notif-shadow:0 14px 34px rgba(0,0,0,.16);--bpi-notif-logo-shadow:0 2px 10px rgba(0,0,0,.22)}
 .bpi-notif-slot{position:relative;width:100%;flex:none}
-/* 出错的提示整体转成红色：只改这一个变量，左侧条、遮罩、入场层、离场层跟着变 */
-.bpi-notif-slot.bpi-notif-error{--bpm-accent:#e06c75}
+/* 出错时「上抹层的蓝」和「垫纸的紫红」对调：上抹层与底边亮线转成紫红 #d946ef，
+   垫纸转成蓝 #0b8ce9，撤场那三层从前往后变成「紫红 → 蓝 → 红」。
+   左侧竖条（--bpm-accent）和入场两层保持红色，不参与这次对调 */
+.bpi-notif-slot.bpi-notif-error{--bpm-accent:#e06c75;--bpi-notif-front:#d946ef;--bpi-notif-front-rgb:217,70,239;--bpi-notif-paper:#0b8ce9}
 /* 双层纸的下面那张：只在卡片左侧露出 6px，用插件主题色，充当卡片左侧的色条 */
 .bpi-notif-under{position:absolute;top:0;right:0;bottom:0;left:-6px;background:var(--bpm-accent,#45926f);border:0;z-index:0;pointer-events:none;opacity:0;transform:translateY(-120%);transition:transform .5s cubic-bezier(.16,1,.3,1),opacity .4s ease}
 .bpi-notif-under.bpi-show{opacity:1;transform:translateY(0)}
 .bpi-notif-under.bpi-wipe{transform:translateX(125%);transition:transform .32s cubic-bezier(.55,0,.8,.4)}
 .bpi-notif{position:relative;z-index:1;width:100%;padding:18px 20px;background:var(--bpi-surface-modal,#20252d);border:1px solid var(--bpi-border,#3a4250);border-radius:0;box-shadow:var(--bpi-notif-shadow,0 20px 50px rgba(0,0,0,.65));overflow:hidden;max-height:90px;opacity:0;transform:translateY(-120%);transition:transform .5s cubic-bezier(.16,1,.3,1),opacity .4s ease,max-height .32s cubic-bezier(.3,.8,.3,1);will-change:transform,opacity,max-height}
 .bpi-notif.bpi-play{opacity:1;transform:translateY(0)}
-/* 底边亮线跟离场那层同色：固定蓝 #0b8ce9（不是左侧竖条，那条才是主题绿） */
-.bpi-notif::after{content:"";position:absolute;left:0;right:0;bottom:0;height:3px;background:#0b8ce9;box-shadow:0 0 12px rgba(11,140,233,.55),0 0 4px rgba(11,140,233,.8);z-index:1;pointer-events:none}
+/* 底边亮线跟离场那层同色（--bpi-notif-front）：默认蓝，出错时一起转紫红，
+   和垫在卡片后面那张纸（此时转成蓝）正好对调。它不是左侧竖条，竖条是 --bpm-accent */
+.bpi-notif::after{content:"";position:absolute;left:0;right:0;bottom:0;height:3px;background:var(--bpi-notif-front,#0b8ce9);box-shadow:0 0 12px rgba(var(--bpi-notif-front-rgb,11,140,233),.55),0 0 4px rgba(var(--bpi-notif-front-rgb,11,140,233),.8);z-index:1;pointer-events:none}
 .bpi-notif.bpi-out{pointer-events:none;animation:bpiExitSlide .36s cubic-bezier(.55,0,.8,.4) forwards}
 @keyframes bpiExitSlide{from{transform:translateX(0)}to{transform:translateX(125%)}}
 .bpi-notif-content{display:flex;flex-direction:column;gap:10px;position:relative;z-index:0}
@@ -82,13 +89,14 @@ const CSS = `
 .bpi-notif.bpi-play .bpi-notif-seq:nth-child(2){animation:bpiSeqDrop .22s cubic-bezier(.3,.7,.3,1) .08s forwards}
 @keyframes bpiSeqDrop{from{transform:translateY(-100%)}to{transform:translateY(0)}}
 .bpi-notif-logo-in-mask{z-index:3}
-/* 离场时从卡片下方往上抹满整张卡片的那层：固定蓝 #0b8ce9，不跟主题绿（保持原样） */
-.bpi-notif-cover{position:absolute;inset:0;background:#0b8ce9;z-index:8;pointer-events:none;transform:translateY(calc(100% + 3px));transition:transform .38s cubic-bezier(.45,0,.2,1);will-change:transform}
+/* 离场时从卡片下方往上抹满整张卡片的那层：跟底边亮线同色（--bpi-notif-front），
+   默认蓝、出错时紫红 */
+.bpi-notif-cover{position:absolute;inset:0;background:var(--bpi-notif-front,#0b8ce9);z-index:8;pointer-events:none;transform:translateY(calc(100% + 3px));transition:transform .38s cubic-bezier(.45,0,.2,1);will-change:transform}
 .bpi-notif.bpi-covering .bpi-notif-cover{transform:translateY(0)}
 /* 垫在卡片正后方的那张紫红纸：和卡片一样大、不往外露，所以静止时完全被卡片盖住看不见；
    DOM 排在绿底纸之后 → 压在绿纸上面，卡片滑走后先看到它，它再滑走才轮到绿纸。
-   顺序：卡片（蓝）→ 紫红 → 绿，三层依次向右走。 */
-.bpi-notif-sheet{position:absolute;top:0;right:0;bottom:0;left:0;background:#d946ef;border:0;z-index:0;pointer-events:none;opacity:0;transform:translateY(-120%);transition:transform .5s cubic-bezier(.16,1,.3,1),opacity .4s ease}
+   顺序：卡片（蓝）→ 紫红 → 绿，三层依次向右走；出错时前两层对调，变成紫红 → 蓝 → 红。 */
+.bpi-notif-sheet{position:absolute;top:0;right:0;bottom:0;left:0;background:var(--bpi-notif-paper,#d946ef);border:0;z-index:0;pointer-events:none;opacity:0;transform:translateY(-120%);transition:transform .5s cubic-bezier(.16,1,.3,1),opacity .4s ease}
 .bpi-notif-sheet.bpi-show{opacity:1;transform:translateY(0)}
 .bpi-notif-sheet.bpi-wipe{transform:translateX(125%);transition:transform .32s cubic-bezier(.55,0,.8,.4)}
 .bpi-notif-close{position:absolute;top:6px;right:6px;z-index:10;width:28px;height:28px;display:grid;place-items:center;padding:0;border:0;border-radius:0;background:transparent;color:var(--bpi-text-muted,#aab5c5);cursor:pointer;transition:background .15s ease,color .15s ease}
@@ -199,7 +207,8 @@ function armDismiss(card) {
     card.timers.push(setTimeout(() => dismissCard(card), STICKY_MAX_MS));
     return;
   }
-  const hold = Number(card.item.hold) > 0 ? Number(card.item.hold) : HOLD_MS;
+  const baseHold = card.item.kind === "error" ? ERROR_HOLD_MS : HOLD_MS;
+  const hold = Number(card.item.hold) > 0 ? Number(card.item.hold) : baseHold;
   card.timers.push(setTimeout(() => dismissCard(card), hold));
 }
 
@@ -306,8 +315,8 @@ function dismissCard(card) {
   card.notif.classList.add("bpi-covering", "bpi-logo-visible");
   card.notif.style.maxHeight = `${card.initialH}px`;
 
-  // 退场：先收高度 + 蓝色刷上来，420ms 后卡片右移；紫红垫纸晚 85ms 跟上，绿底纸再晚 85ms，
-  // 三层依次向右滑走 —— 紫红那张「和蓝色一样向右走，只不过在它后面」
+  // 退场：先收高度 + 上抹层刷上来（默认蓝、出错时紫红），420ms 后卡片右移；垫纸晚 85ms 跟上，
+  // 最下面那张纸再晚 85ms，三层依次向右滑走 —— 紫红那张「和上抹层一样向右走，只不过在它后面」
   card.timers.push(setTimeout(() => {
     card.notif.classList.add("bpi-out");
     card.timers.push(setTimeout(() => {
