@@ -11,6 +11,7 @@ import {
   setDragPreviewNodeEnabled,
   setDragPreviewTableEnabled,
 } from "./bpi_drag_preview.js";
+import { deleteAnimNodeEnabled, setDeleteAnimNodeEnabled } from "./bpi_delete_anim.js";
 import {
   MANAGER_OPEN_EVENT,
   MANAGER_TAB_ID,
@@ -742,9 +743,22 @@ async function buildAppearanceForm(host, loading) {
   });
   const nodeDragNote = element("div", "bpi-fold-note", "开：按住标签会浮起来跟着鼠标走，原位留一个空位，其余标签像手机桌面挪图标那样平滑让开；松手才真正改写提示词，只留一条撤销记录。每次拖动都要量一遍布局，提示词很长时会多花一点 CPU，受不了就关掉。");
   const tableDragNote = element("div", "bpi-fold-note", "同上，但只管明细表里的拖动（拖行首的 ⠿ 手柄）。两个开关各管一处，互不影响。");
+  const deleteAnimRow = element("label", "bpi-switch-row bpi-switch-accent");
+  const deleteAnimSwitch = element("input", "bpi-switch");
+  deleteAnimSwitch.type = "checkbox";
+  deleteAnimSwitch.checked = deleteAnimNodeEnabled();
+  const deleteAnimTrack = element("span", "bpi-switch-track");
+  deleteAnimTrack.appendChild(element("span", "bpi-switch-thumb"));
+  deleteAnimRow.append(deleteAnimSwitch, deleteAnimTrack, element("span", "bpi-switch-text", "标签增删动画（节点标签区）"));
+  deleteAnimSwitch.addEventListener("change", () => {
+    setDeleteAnimNodeEnabled(deleteAnimSwitch.checked);
+    setText(status, deleteAnimSwitch.checked ? "节点标签区增删动画已开" : "节点标签区增删动画已关");
+    status.dataset.kind = "ok";
+  });
+  const deleteAnimNote = element("div", "bpi-fold-note", "开：删标签时那张卡先被一个大 X 划掉，接着整块从左往右擦走，然后再消失（约 0.9 秒，这期间那张卡点不动）；添加标签时新卡片从左往右展开，旁边的标签滑开让位。关掉就是原来那样：点一下直接没、加一个直接出现。");
   const foldNote = element("div", "bpi-fold-note", "Operation results show as a popup in the top-right corner instead of the status line.");
   const toastNote = element("div", "bpi-fold-note", "Per-operation feedback (translation, tag edits, duplicate toggle) shows as a small bar stacked in the bottom-right corner. Turn it off to keep everything in the status line and save a bit of CPU.");
-  foldBody.append(popupRow, foldNote, toastRow, toastNote, nodeDragRow, nodeDragNote, tableDragRow, tableDragNote);
+  foldBody.append(popupRow, foldNote, toastRow, toastNote, nodeDragRow, nodeDragNote, tableDragRow, tableDragNote, deleteAnimRow, deleteAnimNote);
   fold.append(element("summary", "", "bulingbuling"), foldBody);
   form.appendChild(fold);
   host.appendChild(form);

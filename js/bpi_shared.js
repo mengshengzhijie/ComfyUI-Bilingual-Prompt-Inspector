@@ -1294,6 +1294,29 @@ function injectBpiStyles() {
     /* 删除的 × 是选中那张卡的右上角角标，和左上角的眼睛对称；不再跟英文标签挤在一行 */
     .bpi-mirror-delete{position:absolute;top:2px;right:3px;cursor:pointer;padding:1px 3px;border-radius:999px;background:var(--bpi-chip-hide-bg);border:1px solid var(--bpi-border-2);color:var(--bpi-text-muted);font-size:11px;line-height:1;z-index:2}
     .bpi-mirror-delete:hover{color:var(--bpi-status-error);border-color:var(--bpi-status-error)}
+    /* 删除标签的消失动画（设置里开关，默认关）：X 从四角向心长出 → 颜色从中心铺满
+       → 上下压两条灰边 → 整块从左往右擦掉。只加在正在删的那张卡上，别的卡不受影响 */
+    .bpi-token-card.bpi-deleting{--bpi-del-color:#a78bfa;--bpi-del-bar-color:#5a5a5a;overflow:hidden;pointer-events:none;clip-path:inset(0 0 0 0 round 5px);transition:clip-path .35s cubic-bezier(.4,0,.2,1)}
+    .bpi-token-card.bpi-deleting.bpi-del-wipe{clip-path:inset(0 0 0 100% round 5px)}
+    .bpi-del-stage{position:absolute;inset:0;pointer-events:none}
+    .bpi-del-half{position:absolute;width:var(--bpi-del-len,60px);height:2px;background-color:var(--bpi-del-color);transition:transform .16s cubic-bezier(.4,0,.2,1),height .4s cubic-bezier(.4,0,.2,1)}
+    .bpi-del-half-a1{left:0;top:0;transform-origin:0 0;transform:rotate(var(--bpi-del-angle,30deg)) scaleX(0)}
+    .bpi-del-half-a2{right:0;bottom:0;transform-origin:100% 100%;transform:rotate(var(--bpi-del-angle,30deg)) scaleX(0)}
+    .bpi-del-half-b1{right:0;top:0;transform-origin:100% 0;transform:rotate(calc(-1 * var(--bpi-del-angle,30deg))) scaleX(0)}
+    .bpi-del-half-b2{left:0;bottom:0;transform-origin:0 100%;transform:rotate(calc(-1 * var(--bpi-del-angle,30deg))) scaleX(0)}
+    .bpi-token-card.bpi-del-grow .bpi-del-half-a1{transform:rotate(var(--bpi-del-angle,30deg)) scaleX(1)}
+    .bpi-token-card.bpi-del-grow .bpi-del-half-a2{transform:rotate(var(--bpi-del-angle,30deg)) scaleX(1)}
+    .bpi-token-card.bpi-del-grow .bpi-del-half-b1{transform:rotate(calc(-1 * var(--bpi-del-angle,30deg))) scaleX(1)}
+    .bpi-token-card.bpi-del-grow .bpi-del-half-b2{transform:rotate(calc(-1 * var(--bpi-del-angle,30deg))) scaleX(1)}
+    .bpi-token-card.bpi-del-spread .bpi-del-half{height:var(--bpi-del-fill,60px)}
+    .bpi-del-cover{position:absolute;inset:0;background-color:var(--bpi-del-color);clip-path:inset(50% 50% 50% 50%);transition:clip-path .4s cubic-bezier(.4,0,.2,1);z-index:3}
+    .bpi-token-card.bpi-del-spread .bpi-del-cover{clip-path:inset(0 0 0 0)}
+    .bpi-del-bar{position:absolute;left:0;right:0;height:0;background-color:var(--bpi-del-bar-color);transition:height .1s ease;z-index:5}
+    .bpi-del-bar-top{top:0}.bpi-del-bar-bottom{bottom:0}
+    .bpi-token-card.bpi-del-wipe .bpi-del-bar{height:var(--bpi-del-bar-h,10px)}
+    /* 添加标签的出场动画：新卡片从左往右展开，旁边的卡片由 FLIP 滑开让位 */
+    @keyframes bpi-card-insert{from{clip-path:inset(0 100% 0 0 round 5px)}to{clip-path:inset(0 0 0 0 round 5px)}}
+    .bpi-token-card.bpi-inserting{animation:bpi-card-insert .28s cubic-bezier(.4,0,.2,1)}
 .bpi-token-line{display:flex;flex-wrap:wrap;align-items:flex-end;gap:2px 0}
     .bpi-token-card{position:relative;display:inline-flex;flex-direction:column;align-items:flex-start;max-width:100%;border:1px solid var(--bpi-border-3);border-radius:5px;background:var(--bpi-surface-3);padding:1px 5px;margin:2px 3px 2px 0;vertical-align:top;cursor:pointer}
     .bpi-token-card:hover{border-color:var(--bpi-border-2)}

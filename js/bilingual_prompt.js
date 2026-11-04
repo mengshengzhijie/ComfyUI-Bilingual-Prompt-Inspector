@@ -32,6 +32,8 @@ import { installBpiWheelGuard } from "./wheel_guard.js";
 import { notify } from "./bpi_notify.js";
 import { showToast } from "./bpi_toast.js";
 import { dragPreviewNodeEnabled, dragPreviewTableEnabled } from "./bpi_drag_preview.js";
+import { deleteAnimNodeEnabled, playDeleteAnim } from "./bpi_delete_anim.js";
+import { playInsertAnim } from "./bpi_insert_anim.js";
 import {
   buildTagFields,
   button,
@@ -902,7 +904,8 @@ function createPanel(node, textWidget) {
     };
   };
 
-  const deleteTokenOccurrence = (token) => {
+  // 真正删掉这一处：改文本、进撤销栈、重渲染。动画只在前面拦一下，删完仍然只有一条撤销记录
+  const commitDeleteToken = (token) => {
     if (!["tags", "mixed"].includes(state.modeInfo.mode) || token.segmentKind === "natural") {
       setStatus("Natural-language segments only support whole-segment editing; tags can still be deleted individually", "error");
       return;
@@ -934,6 +937,95 @@ function createPanel(node, textWidget) {
     // 右下角提示条关掉时退回状态栏（showToast 返回 false 表示没显示）
     const deletedMsg = `已删除「${token.term}」`;
     if (!showToast(deletedMsg, { type: "edit" })) setStatus(deletedMsg, "ok");
+  };
+
+  // 卡片擦掉之后其余标签是 flex 重排，会瞬间跳到新位置，看着硬。
+  // 删除前拍一张「内容坐标」（不受滚动影响），重排后按旧位置→新位置补一段
+  // FLIP 让位动画，手感和拖动预览那套一致。
+  const cardRects = () => {
+    const viewBox = englishTokenView.getBoundingClientRect();
+    const rects = new Map();
+    for (const card of englishTokenView.querySelectorAll(".bpi-token-card")) {
+      const chip = card.querySelector(".bpi-english-token[data-token-id]");
+      if (!chip) continue;
+      const box = card.getBoundingClientRect();
+      rects.set(chip.dataset.tokenId, {
+        x: box.left - viewBox.left + englishTokenView.scrollLeft,
+        y: box.top - viewBox.top + englishTokenView.scrollTop,
+      });
+    }
+    return rects;
+  };
+
+  const REFLOW_MS = 260;
+
+  const animateReflow = (before) => {
+    if (!before.size) return;
+    const viewBox = englishTokenView.getBoundingClientRect();
+    const moving = [];
+    for (const card of englishTokenView.querySelectorAll(".bpi-token-card")) {
+      const chip = card.querySelector(".bpi-english-token[data-token-id]");
+      const first = chip ? before.get(chip.dataset.tokenId) : null;
+      if (!first) continue;
+      const box = card.getBoundingClientRect();
+      const dx = first.x - (box.left - viewBox.left + englishTokenView.scrollLeft);
+      const dy = first.y - (box.top - viewBox.top + englishTokenView.scrollTop);
+      if (!dx && !dy) continue;
+      card.style.transition = "none";
+      card.style.transform = `translate(${dx}px,${dy}px)`;
+      moving.push(card);
+    }
+    if (!moving.length) return;
+    void englishTokenView.offsetWidth;
+    for (const card of moving) card.style.transition = `transform ${REFLOW_MS}ms cubic-bezier(.2,.8,.2,1)`;
+    requestAnimationFrame(() => {
+      for (const card of moving) card.style.transform = "";
+      // 落地后清掉内联 transition：留着会盖住删除动画自己要用的 clip-path 过渡，
+      // 紧接着删第二张时那张卡的擦除会变成瞬移
+      window.setTimeout(() => {
+        for (const card of moving) if (card.isConnected) card.style.transition = "";
+      }, REFLOW_MS + 60);
+    });
+  };
+
+  // 添加标签：新卡片自己展开，其余卡片同时滑开让位。开关和删除共用一个；
+  // 关掉、或正在文本框里编辑英文（那时没有卡片可播）就直接执行，和以前一样
+  const withInsertAnim = (mutate) => {
+    if (!deleteAnimNodeEnabled() || state.englishEditing) {
+      mutate();
+      return;
+    }
+    const before = cardRects();
+    mutate();
+    // 添加走的也是排队渲染，插队立刻刷一次才量得到新布局
+    renderNow();
+    const fresh = [];
+    for (const card of englishTokenView.querySelectorAll(".bpi-token-card")) {
+      const chip = card.querySelector(".bpi-english-token[data-token-id]");
+      if (chip && !before.has(chip.dataset.tokenId)) fresh.push(card);
+    }
+    animateReflow(before);
+    playInsertAnim(fresh);
+  };
+
+  // 删除入口统一走这里：开关打开且那张卡正在屏幕上，就先播消失动画，
+  // 擦除结束再真正删、并把其余卡片的让位补成动画；开关关掉、或者卡片当前
+  // 看不见（文本编辑态）就直接删，和以前一样
+  const deleteTokenOccurrence = (token) => {
+    const card = deleteAnimNodeEnabled()
+      ? englishTokenView.querySelector(`.bpi-token-card .bpi-english-token[data-token-id="${token.id}"]`)?.closest(".bpi-token-card")
+      : null;
+    if (!card) {
+      commitDeleteToken(token);
+      return;
+    }
+    playDeleteAnim(card, () => {
+      const before = cardRects();
+      commitDeleteToken(token);
+      // 删除走的是排队渲染（setTimeout 0），这里插队立刻刷一次，才量得到新位置
+      renderNow();
+      animateReflow(before);
+    });
   };
 
   const applyTokenWeight = (token, weight) => {
@@ -2255,13 +2347,15 @@ function createPanel(node, textWidget) {
     // 新标签落在选中标签之后，也就是原来排在它前面的那些标签之后：加完把它设为选中，
     // 连着加几个才会依次往后排，不用每次重新点一遍落点。
     const nextId = state.englishEditing ? null : state.tokens.filter((token) => token.end <= start).length;
-    updateText(nextText, state.englishEditing ? start + insertion.length : null);
-    if (nextId !== null) {
-      state.tokens = parseTokens(nextText);
-      state.pinned = nextId;
-      state.selected.clear();
-      state.selected.add(nextId);
-    }
+    withInsertAnim(() => {
+      updateText(nextText, state.englishEditing ? start + insertion.length : null);
+      if (nextId !== null) {
+        state.tokens = parseTokens(nextText);
+        state.pinned = nextId;
+        state.selected.clear();
+        state.selected.add(nextId);
+      }
+    });
     rememberRecent(english);
     if (!keepSearch) search.value = "";
     renderSearch();
@@ -3936,7 +4030,7 @@ function createPanel(node, textWidget) {
     return trimmed ? `${trimmed}, ${piece}` : piece;
   };
   const appendToPrompt = (piece) => {
-    updateText(insertPieceAtTarget(String(textWidget.value ?? ""), piece));
+    withInsertAnim(() => updateText(insertPieceAtTarget(String(textWidget.value ?? ""), piece)));
   };
   async function submitQuickInput(mode = "translate") {
     if (quickBusy) return;
