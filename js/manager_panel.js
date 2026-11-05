@@ -809,7 +809,8 @@ function followSelectionControl() {
     return followSelectionNode;
   }
   followSelectionNode = element("div", "bpi-settings-form");
-  followSelectionNode.appendChild(element("h3", "", "跟随选中节点"));
+  // 不自己加标题：设置项的名字由 ComfyUI 渲染（和「语言与外观」「助手设置」两项一样），
+  // 这里再加一个 h3 就会在设置面板里出现两个「跟随选中节点」。
   // 和「语言与外观」里那几个实验开关同一套样式，别做成裸复选框
   const row = element("label", "bpi-switch-row bpi-switch-accent");
   const toggle = element("input", "bpi-switch");
