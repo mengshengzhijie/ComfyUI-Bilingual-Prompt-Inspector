@@ -61,6 +61,9 @@ const SECTIONS = [
   ["favorites", "Favorites"],
 ];
 
+// 「跟随选中节点」的开关状态：默认关，关着就是原来只能在下拉里选节点的行为
+const FOLLOW_SELECTION_KEY = "bpi.followSelection.v1";
+
 const manager = {
   data: { tags: [], builtin: [], user: [], packs: [] },
   preferences: loadPreferences(),
@@ -778,6 +781,49 @@ async function buildAppearanceForm(host, loading) {
   };
   appearanceSelect.addEventListener("change", save);
   languageSelect.addEventListener("change", save);
+}
+
+// 「跟随选中节点」：试验开关，单独一项设置，不和外观那块混在一起。
+// 存在本机 localStorage 里，不走后端配置——它只管这一台机器上的操作习惯。
+let followSelectionNode = null;
+
+function followSelectionEnabled() {
+  try {
+    return localStorage.getItem(FOLLOW_SELECTION_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function setFollowSelectionEnabled(enabled) {
+  try {
+    localStorage.setItem(FOLLOW_SELECTION_KEY, enabled ? "1" : "0");
+  } catch (error) {
+    console.warn("[BilingualPromptInspector] Failed to save the follow-selection switch", error);
+  }
+}
+
+function followSelectionControl() {
+  if (followSelectionNode) {
+    alignWhenMounted(followSelectionNode);
+    return followSelectionNode;
+  }
+  followSelectionNode = element("div", "bpi-settings-form");
+  followSelectionNode.appendChild(element("h3", "", "跟随选中节点"));
+  // 和「语言与外观」里那几个实验开关同一套样式，别做成裸复选框
+  const row = element("label", "bpi-switch-row bpi-switch-accent");
+  const toggle = element("input", "bpi-switch");
+  toggle.type = "checkbox";
+  toggle.checked = followSelectionEnabled();
+  const track = element("span", "bpi-switch-track");
+  track.appendChild(element("span", "bpi-switch-thumb"));
+  row.append(toggle, track, element("span", "bpi-switch-text", "点击节点时跟随切换"));
+  toggle.addEventListener("change", () => setFollowSelectionEnabled(toggle.checked));
+  const note = element("div", "bpi-config-note", "开：在画布上点一个「双语提示词检查器」节点，侧边栏的「标签管理」就切到它；点别的节点不动。关：只能在「标签管理」的节点下拉里手动选。");
+  note.style.marginTop = "8px";
+  followSelectionNode.append(row, note);
+  alignWhenMounted(followSelectionNode);
+  return followSelectionNode;
 }
 
 // 助手设置直接长在 ComfyUI「设置」面板里（入口见下方 registerExtension 的 settings），
@@ -1545,6 +1591,34 @@ function rebuildTagManagerSection() {
   target._bilingualPromptInspector.refreshAfterConfigure?.();
 }
 
+// 画布上点节点 → 「标签管理」跟着切过去。
+// 只认真正的检查器节点：点编码器、采样器之类的不动，免得切走了还得手动选回来。
+function followSelectedNode(node) {
+  if (!followSelectionEnabled()) return;
+  if (!node?._bilingualPromptInspector?.detailsBody) return;
+  const id = String(node.id ?? "");
+  if (!id || manager.tagManagerNodeId === id) return;
+  manager.tagManagerNodeId = id;
+  // 面板没打开、或停在别的分页时只记下节点号，等切到「标签管理」时按它渲染
+  if (manager.section === "tag-manager" && refs.tagManagerHost?.isConnected) rebuildTagManagerSection();
+}
+
+// canvas.onNodeSelected 只有一个位置，接管前先把原来的接回去（别的扩展也可能挂在上面）。
+// 前端自己只读不改这个回调，所以在 setup 里装一次就够。
+function installFollowSelection() {
+  const canvas = app.canvas;
+  if (!canvas || canvas.bpiFollowSelection) return;
+  const previous = canvas.onNodeSelected;
+  canvas.onNodeSelected = function (node, ...rest) {
+    try {
+      previous?.apply(this, [node, ...rest]);
+    } finally {
+      followSelectedNode(node);
+    }
+  };
+  canvas.bpiFollowSelection = true;
+}
+
 function build() {
   root = element("div", "bpm-panel");
   const head = element("div", "bpm-head");
@@ -1729,8 +1803,16 @@ app.registerExtension({
       defaultValue: "",
       category: ["双语提示词检查器", "助手设置"],
     },
+    {
+      id: "BilingualPromptInspector.FollowSelection",
+      name: "跟随选中节点",
+      type: followSelectionControl,
+      defaultValue: "",
+      category: ["双语提示词检查器", "跟随选中节点"],
+    },
   ],
   async setup() {
+    installFollowSelection();
     if (!app.extensionManager?.registerSidebarTab) {
       console.warn("[BilingualPromptInspector] Current frontend does not support sidebar; panel unavailable");
       return;
