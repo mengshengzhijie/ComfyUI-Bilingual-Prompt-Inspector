@@ -1434,6 +1434,9 @@ function createPanel(node, textWidget) {
   };
 
   let chipClickSuppressed = false;
+  // 上一次点的是哪张卡、什么时候点的：双击靠这两个自己判断（见 buildTokenCard）
+  let lastCardClickAt = 0;
+  let lastCardClickId = null;
 
   // Drag trackers must listen in the CAPTURE phase on document.
   // Nodes 2.0 (Vue Nodes) renders nodes as DOM and installs @pointermove.stop
@@ -2927,22 +2930,28 @@ function createPanel(node, textWidget) {
     // 注意必须放在 card 声明之后：在 const card 之前引用它会触发 TDZ 报错，
     // 一报错整个 render 中断，标签区会整个空白。
     attachChipDrag(card, token);
-    // 点击 / 双击挂在整个方块上：点中文行、点卡片留白都算选中，不必精确点中英文
+    // 点击 / 双击挂在整个方块上：点中文行、点卡片留白都算选中，不必精确点中英文。
+    // 双击这里自己认：单击会立刻重渲染整个标签区，卡片元素被换成新的之后，
+    // 浏览器就不再把第二下算成「同一个东西被点两次」，dblclick 根本不会派发。
+    // 所以按「两次点击同一张卡 + 间隔够短」来判断，不依赖元素身份。
     card.addEventListener("click", (event) => {
       event.stopPropagation();
       if (chipClickSuppressed) return;
+      const now = Date.now();
+      if (now - lastCardClickAt < 320 && lastCardClickId === token.id) {
+        lastCardClickAt = 0;
+        lastCardClickId = null;
+        window.getSelection()?.removeAllRanges();
+        // 已经在多选里就不重选，否则整组会被打回单选、没法一起编辑
+        if (!state.selected.has(token.id)) activateToken(token);
+        englishTokenView.focus({ preventScroll: true });
+        openWeightEditor(token);
+        return;
+      }
+      lastCardClickAt = now;
+      lastCardClickId = token.id;
       activateToken(token, { additive: event.ctrlKey || event.metaKey });
       englishTokenView.focus({ preventScroll: true });
-    });
-    card.addEventListener("dblclick", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      if (chipClickSuppressed) return;
-      window.getSelection()?.removeAllRanges();
-      // 已经在多选里就不重选，否则整组会被打回单选、没法一起编辑
-      if (!state.selected.has(token.id)) activateToken(token);
-      englishTokenView.focus({ preventScroll: true });
-      openWeightEditor(token);
     });
     return card;
   };

@@ -188,13 +188,13 @@ cd ComfyUI/custom_nodes/
 git clone --depth 1 https://github.com/mengshengzhijie/ComfyUI-Bilingual-Prompt-Inspector.git
 ```
 
-**如果网络受限也可以使用gitee或者使用神奇的 “-c” **
+**如果网络受限也可以使用 gitee，或者用上神奇的 `-c`**：
 
 ```bash
 git clone https://gitee.com/MengShengZhiJie/ComfyUI-Bilingual-Prompt-Inspector.git
 ```
 
-不过这里如果有动手能力的话推荐使用git安转，因为现在就我和我的朋友在使用，有时候修复bug和制作新功能我是总结下来然后一步一步的修复。直到把这次收录的bug和建议给完成之后才bump版本。
+不过这里如果有动手能力的话推荐使用 git 安装，因为现在就我和我的朋友在使用，有时候修复bug和制作新功能我是总结下来然后一步一步的修复。直到把这次收录的bug和建议给完成之后才bump版本。
 
 重启 ComfyUI，在节点菜单的 **text/prompt** 分类里找到 **提示词翻译与管理（英文输出）**（英文界面下显示为 Prompt Translator & Manager），也可以直接搜索「提示词」。
 
