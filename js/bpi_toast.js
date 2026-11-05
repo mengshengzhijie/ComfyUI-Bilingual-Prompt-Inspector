@@ -39,13 +39,17 @@ const LANE_MAX = 3;
 // 被顶掉之前至少要显示这么久，免得结果来得太快、字还没看清就被刷走
 const LANE_MIN_HOLD = 1200;
 
-// 橙 = 开关重复（右下角），蓝 = 节点的增删改移 / 隐藏；
-// 紫 = 翻译、红 = 被拒是备着的，暂时没人调用
+// 一个操作一类色，别都挤在蓝里：
+// 蓝 = 改内容（应用改写 / 权重 / 隐藏恢复 / 词条保存）、紫 = 插入、红 = 删除、
+// 青 = 移动、灰 = 撤销重做、绿 = 翻译成功、橙 = 重复开关
 export const TOAST_ACCENTS = {
   edit: "#60a5fa",
+  insert: "#a78bfa",
+  remove: "#e06c75",
+  move: "#22d3ee",
+  history: "#94a3b8",
+  translate: "#34d399",
   duplicate: "#fbbf24",
-  translate: "#a78bfa",
-  rejected: "#e06c75",
 };
 
 // 图标是塞进 24×24 viewBox 的内联 SVG 片段，颜色靠 currentColor 吃 --bpi-toast-accent
@@ -55,8 +59,11 @@ const ICONS = {
   translate:
     '<path d="M5 8L10 13M4 14L10 8L12 5M2 5H14M7 2H8M12.913 17H20.087M12.913 17L11 21M12.913 17L15.7783 11.009C16.0092 10.5263 16.1246 10.2849 16.2826 10.2086C16.4199 10.1423 16.5801 10.1423 16.7174 10.2086C16.8754 10.2849 16.9908 10.5263 17.2217 11.009L20.087 17M20.087 17L22 21"/>',
   notice: '<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/>',
-  rejected: '<circle cx="12" cy="12" r="9"/><path d="M15 9l-6 6M9 9l6 6"/>',
   edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/>',
+  insert: '<path d="M12 5v14M5 12h14"/>',
+  remove: '<path d="M4 7h16M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/>',
+  move: '<path d="M4 12h16"/><path d="M8 8l-4 4 4 4M16 8l4 4-4 4"/>',
+  history: '<path d="M3.5 12a8.5 8.5 0 1 1 2.6 6.1"/><path d="M3 5v5h5"/><path d="M12 8v4l3 2"/>',
 };
 
 const CLOSE_SVG =

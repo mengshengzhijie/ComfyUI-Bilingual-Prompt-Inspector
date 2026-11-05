@@ -936,7 +936,7 @@ function createPanel(node, textWidget) {
     updateText(result.text, result.cursor);
     // 右下角提示条关掉时退回状态栏（showToast 返回 false 表示没显示）
     const deletedMsg = `已删除「${token.term}」`;
-    if (!showToast(deletedMsg, { type: "edit" })) setStatus(deletedMsg, "ok");
+    if (!showToast(deletedMsg, { type: "remove" })) setStatus(deletedMsg, "ok");
   };
 
   // 卡片擦掉/插入后其余标签是 flex 重排，会瞬间跳到新位置，看着硬。
@@ -1110,7 +1110,7 @@ function createPanel(node, textWidget) {
     state.pinned = null;
     updateText(result.text, result.cursor);
     const movedMsg = `已移动「${token.term}」`;
-    if (!showToast(movedMsg, { type: "edit" })) setStatus(movedMsg, "ok");
+    if (!showToast(movedMsg, { type: "move" })) setStatus(movedMsg, "ok");
     return true;
   };
 
@@ -2301,7 +2301,7 @@ function createPanel(node, textWidget) {
     if (Array.isArray(entry.uniqueBefore)) setUniqueKeys(entry.uniqueBefore);
     updateText(entry.before, entry.beforeStart);
     const undoneMsg = `已撤销：${entry.label}`;
-    if (!showToast(undoneMsg, { type: "edit" })) setStatus(undoneMsg, "ok");
+    if (!showToast(undoneMsg, { type: "history" })) setStatus(undoneMsg, "ok");
     return true;
   };
 
@@ -2316,7 +2316,7 @@ function createPanel(node, textWidget) {
     if (Array.isArray(entry.uniqueAfter)) setUniqueKeys(entry.uniqueAfter);
     updateText(entry.after, entry.afterCursor);
     const redoneMsg = `已重做：${entry.label}`;
-    if (!showToast(redoneMsg, { type: "edit" })) setStatus(redoneMsg, "ok");
+    if (!showToast(redoneMsg, { type: "history" })) setStatus(redoneMsg, "ok");
     return true;
   };
 
@@ -2394,7 +2394,7 @@ function createPanel(node, textWidget) {
     if (!keepSearch) search.value = "";
     renderSearch();
     // 添加原本就没有「原来的位置」，关掉提示条后就不提示
-    showToast(`added “${english}”`, { type: "edit" });
+    showToast(`已添加「${english}」`, { type: "insert" });
   };
 
   const queueLargeLookup = (tokens) => {
@@ -4081,7 +4081,8 @@ function createPanel(node, textWidget) {
     if (!containsChinese(raw)) {
       appendToPrompt(raw);
       quickInput.value = "";
-      setStatus(`Added “${raw}” to the prompt`, "ok");
+      const addedMsg = `已添加「${raw}」`;
+      if (!showToast(addedMsg, { type: "insert" })) setStatus(addedMsg, "ok");
       quickInput.focus({ preventScroll: true });
       return;
     }
@@ -4109,7 +4110,8 @@ function createPanel(node, textWidget) {
         createdAt: Date.now(),
       });
       quickInput.value = "";
-      setStatus(`Translated “${raw}” to “${english}” and added it`, "ok");
+      const addedMsg = `已添加「${english}」`;
+      if (!showToast(addedMsg, { type: "insert" })) setStatus(addedMsg, "ok");
       quickInput.focus({ preventScroll: true });
     } catch (error) {
       setStatus(error.message, "error");

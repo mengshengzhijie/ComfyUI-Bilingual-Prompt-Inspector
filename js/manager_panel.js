@@ -819,7 +819,7 @@ function followSelectionControl() {
   track.appendChild(element("span", "bpi-switch-thumb"));
   row.append(toggle, track, element("span", "bpi-switch-text", "点击节点时跟随切换"));
   toggle.addEventListener("change", () => setFollowSelectionEnabled(toggle.checked));
-  const note = element("div", "bpi-config-note", "开：在画布上点一个「双语提示词检查器」节点，侧边栏的「标签管理」就切到它；点别的节点不动。关：只能在「标签管理」的节点下拉里手动选。");
+  const note = element("div", "bpi-config-note", "开：在画布上点一个「双语提示词检查器」节点，侧边栏的「标签管理」就切到它。关：只能在「标签管理」的节点下拉里手动选。");
   note.style.marginTop = "8px";
   followSelectionNode.append(row, note);
   alignWhenMounted(followSelectionNode);
