@@ -598,7 +598,7 @@ function openImportPreview(payload) {
 }
 
 // 设置面板每一项 = 名称列 + 控件列，名称列宽度跟着设置项名字长短走：
-// 插件这两项一个「语言与外观」一个「助手设置」，字数不同，右边的内容就被推得差了一格。
+// 插件这两项一个「通用」一个「助手设置」，字数不同，右边的内容就被推得差了一格。
 // CSS 里已经用 :has() 处理过一次，这里再兜一次——面板重建后内联样式会丢，
 // 而设置面板每次打开都会重新调用下面的 control，正好顺势对齐一次。
 // 只认「恰好两列、且第二列装着我们内容」的那一行，结构对不上就不动，免得误伤别的元素。
@@ -690,10 +690,32 @@ async function buildAppearanceForm(host, loading) {
   languageSelect.value = config.language || "auto";
   const languageNote = element("div", "bpi-config-note", "Choose the language for this plugin's own panels. \"Follow ComfyUI\" reads the ComfyUI language setting; \"Chinese\" and \"English\" force one. Applied to open panels right away; reload the page if anything still shows the old language.");
   languageNote.style.gridColumn = "1 / -1";
-  form.append(languageLabel, languageSelect, languageNote, status);
+  // 「跟随选中节点」直接长在「通用」这一项里，排在语言设置下面。
+  // 单独注册成一个设置项的话，ComfyUI 会按分类名给各项排序，怎么调都排不到想要的位置。
+  const followRow = element("label", "bpi-switch-row bpi-switch-accent");
+  followRow.style.gridColumn = "1 / -1";
+  const followToggle = element("input", "bpi-switch");
+  followToggle.type = "checkbox";
+  followToggle.checked = followSelectionEnabled();
+  const followTrack = element("span", "bpi-switch-track");
+  followTrack.appendChild(element("span", "bpi-switch-thumb"));
+  followRow.append(followToggle, followTrack, element("span", "bpi-switch-text", "点击节点时跟随切换"));
+  followToggle.addEventListener("change", () => setFollowSelectionEnabled(followToggle.checked));
+  const followNote = element("div", "bpi-config-note", "开：在画布上点一个「双语提示词检查器」节点，侧边栏的「标签管理」就切到它。关：只能在「标签管理」的节点下拉里手动选。");
+  followNote.style.gridColumn = "1 / -1";
+  form.append(languageLabel, languageSelect, languageNote, followRow, followNote, status);
   // 开：操作提示改成右上角弹窗；关：还是写回明细表上方那条状态文字
   const fold = element("details", "bpi-fold");
   const foldBody = element("div", "bpi-fold-body");
+  // 最上面一个总开关：一次把下面这几个弹窗 / 提示条 / 预览 / 动画全打开或全关掉
+  const masterRow = element("label", "bpi-switch-row bpi-switch-accent");
+  const masterSwitch = element("input", "bpi-switch");
+  masterSwitch.type = "checkbox";
+  const masterTrack = element("span", "bpi-switch-track");
+  masterTrack.appendChild(element("span", "bpi-switch-thumb"));
+  masterRow.append(masterSwitch, masterTrack, element("span", "bpi-switch-text", "全部开启"));
+  const masterNote = element("div", "bpi-fold-note", "小孩子才做选择，大人当然选择全都要！😁");
+  const masterNoteTail = element("div", "bpi-fold-note", "如果显存不够，或者电脑资源比较紧张，可以适当开启或关闭。动画会吃一小部分电脑性能。");
   const popupRow = element("label", "bpi-switch-row bpi-switch-accent");
   const popupSwitch = element("input", "bpi-switch");
   popupSwitch.type = "checkbox";
@@ -761,8 +783,31 @@ async function buildAppearanceForm(host, loading) {
   const deleteAnimNote = element("div", "bpi-fold-note", "开：删标签时那张卡先被一个大 X 划掉，接着整块从左往右擦走，然后再消失（约 0.9 秒，这期间那张卡点不动）；添加标签时新卡片从左往右展开，旁边的标签滑开让位。关掉就是原来那样：点一下直接没、加一个直接出现。");
   const foldNote = element("div", "bpi-fold-note", "Operation results show as a popup in the top-right corner instead of the status line.");
   const toastNote = element("div", "bpi-fold-note", "Per-operation feedback (translation, tag edits, duplicate toggle) shows as a small bar stacked in the bottom-right corner. Turn it off to keep everything in the status line and save a bit of CPU.");
-  foldBody.append(popupRow, foldNote, toastRow, toastNote, nodeDragRow, nodeDragNote, tableDragRow, tableDragNote, deleteAnimRow, deleteAnimNote);
-  fold.append(element("summary", "", "bulingbuling"), foldBody);
+  // 总开关最后绑定：这时下面几个子开关都已经建好。
+  // 打开 = 五个全开；关掉 = 五个全关。单独动某个子开关时，总开关跟着反映"是不是全开着"
+  const effectSwitches = [
+    [popupSwitch, setNotifyEnabled],
+    [toastSwitch, setToastEnabled],
+    [nodeDragSwitch, setDragPreviewNodeEnabled],
+    [tableDragSwitch, setDragPreviewTableEnabled],
+    [deleteAnimSwitch, setDeleteAnimNodeEnabled],
+  ];
+  const syncMasterSwitch = () => {
+    masterSwitch.checked = effectSwitches.every(([input]) => input.checked);
+  };
+  syncMasterSwitch();
+  masterSwitch.addEventListener("change", () => {
+    const next = masterSwitch.checked;
+    for (const [input, setter] of effectSwitches) {
+      input.checked = next;
+      setter(next);
+    }
+    setText(status, next ? "通知弹窗、提示条、拖动预览和增删动画已全部开启" : "已全部关闭，提示退回状态栏，动画也不再播放");
+    status.dataset.kind = "ok";
+  });
+  for (const [input] of effectSwitches) input.addEventListener("change", syncMasterSwitch);
+  foldBody.append(masterRow, masterNote, masterNoteTail, popupRow, foldNote, toastRow, toastNote, nodeDragRow, nodeDragNote, tableDragRow, tableDragNote, deleteAnimRow, deleteAnimNote);
+  fold.append(element("summary", "", "通知弹窗及实时动画预览"), foldBody);
   form.appendChild(fold);
   host.appendChild(form);
 
@@ -785,8 +830,7 @@ async function buildAppearanceForm(host, loading) {
 
 // 「跟随选中节点」：试验开关，单独一项设置，不和外观那块混在一起。
 // 存在本机 localStorage 里，不走后端配置——它只管这一台机器上的操作习惯。
-let followSelectionNode = null;
-
+// 开关本体长在「通用」那一项里（见 buildAppearanceForm），这里只管读写状态
 function followSelectionEnabled() {
   try {
     return localStorage.getItem(FOLLOW_SELECTION_KEY) === "1";
@@ -801,30 +845,6 @@ function setFollowSelectionEnabled(enabled) {
   } catch (error) {
     console.warn("[BilingualPromptInspector] Failed to save the follow-selection switch", error);
   }
-}
-
-function followSelectionControl() {
-  if (followSelectionNode) {
-    alignWhenMounted(followSelectionNode);
-    return followSelectionNode;
-  }
-  followSelectionNode = element("div", "bpi-settings-form");
-  // 不自己加标题：设置项的名字由 ComfyUI 渲染（和「语言与外观」「助手设置」两项一样），
-  // 这里再加一个 h3 就会在设置面板里出现两个「跟随选中节点」。
-  // 和「语言与外观」里那几个实验开关同一套样式，别做成裸复选框
-  const row = element("label", "bpi-switch-row bpi-switch-accent");
-  const toggle = element("input", "bpi-switch");
-  toggle.type = "checkbox";
-  toggle.checked = followSelectionEnabled();
-  const track = element("span", "bpi-switch-track");
-  track.appendChild(element("span", "bpi-switch-thumb"));
-  row.append(toggle, track, element("span", "bpi-switch-text", "点击节点时跟随切换"));
-  toggle.addEventListener("change", () => setFollowSelectionEnabled(toggle.checked));
-  const note = element("div", "bpi-config-note", "开：在画布上点一个「双语提示词检查器」节点，侧边栏的「标签管理」就切到它。关：只能在「标签管理」的节点下拉里手动选。");
-  note.style.marginTop = "8px";
-  followSelectionNode.append(row, note);
-  alignWhenMounted(followSelectionNode);
-  return followSelectionNode;
 }
 
 // 助手设置直接长在 ComfyUI「设置」面板里（入口见下方 registerExtension 的 settings），
@@ -1792,10 +1812,10 @@ app.registerExtension({
   settings: [
     {
       id: "BilingualPromptInspector.Appearance",
-      name: "语言与外观",
+      name: "通用",
       type: appearanceControl,
       defaultValue: "",
-      category: ["双语提示词检查器", "语言与外观"],
+      category: ["双语提示词检查器", "通用"],
     },
     {
       id: "BilingualPromptInspector.AssistantSettings",
@@ -1803,13 +1823,6 @@ app.registerExtension({
       type: assistantSettingsControl,
       defaultValue: "",
       category: ["双语提示词检查器", "助手设置"],
-    },
-    {
-      id: "BilingualPromptInspector.FollowSelection",
-      name: "跟随选中节点",
-      type: followSelectionControl,
-      defaultValue: "",
-      category: ["双语提示词检查器", "跟随选中节点"],
     },
   ],
   async setup() {

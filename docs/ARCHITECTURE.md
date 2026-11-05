@@ -62,8 +62,8 @@
 - `js/manager_panel.js`
   - 在 ComfyUI 侧边栏注册「双语提示词管理」面板，包含标签管理、词库、词库包、收藏四个分页。
   - 承担原节点内管理弹窗的全部职责：词条增删改、批量操作、个人词库导入导出、社区包与大型词库管理。
-  - 助手设置不在侧边栏：同一文件的 `registerExtension` 用 `settings` 在 ComfyUI「设置」面板的「双语提示词检查器」分类下注册两项 ——「语言与外观」（`appearanceControl()`）与「助手设置」（`assistantSettingsControl()`），表单都直接内嵌在设置面板右侧，配置仍写入 `assistant_store.py`。面板反复渲染会重建控件容器，所以每项的整块 DOM 只建一次后复用，避免输入到一半被清空。
-  - 语言与外观只提交 `appearance` / `language` 两个字段：`assistant_store.update()` 对 payload 里没给的字段一律取当前值，所以不会动翻译服务与密钥；助手设置的 payload 反过来已经不含这两项。
+  - 助手设置不在侧边栏：同一文件的 `registerExtension` 用 `settings` 在 ComfyUI「设置」面板的「双语提示词检查器」分类下注册两项 ——「通用」（`appearanceControl()`）与「助手设置」（`assistantSettingsControl()`），表单都直接内嵌在设置面板右侧，配置仍写入 `assistant_store.py`。面板反复渲染会重建控件容器，所以每项的整块 DOM 只建一次后复用，避免输入到一半被清空。
+  - 通用只提交 `appearance` / `language` 两个字段：`assistant_store.update()` 对 payload 里没给的字段一律取当前值，所以不会动翻译服务与密钥；助手设置的 payload 反过来已经不含这两项。
   - AI 两个后端各一整套配置（地址 / 模型 / 温度 / 超时 / 三条规则），键名前缀 `openai_` 与 `ollama_`，`ai_provider` 只决定当前读哪一套；切换后端不清空任何一套。地址白名单在 `assistant_store.normalize_ai_base_url()`：OpenAI 远端必须 https、http 仅限本机回环，Ollama 只认本机回环，且 `server.py` 发请求前会再校验一次（防手改配置文件）。
   - “标签管理”分页通过节点下拉列表挂载指定节点的标签翻译与词库搜索界面（DOM 直接移植，逻辑仍归属各节点闭包），节点删除时自动摘下。
   - 修改后通过 `panelSyncHub` 通知当前页面所有节点刷新。

@@ -1471,7 +1471,7 @@ function injectBpiStyles() {
     /* 助手设置在 ComfyUI「设置」面板里：原生那一行是「标签 + 控件」，把标签收掉、控件占满整行 */
     .bpi-settings-form{box-sizing:border-box;width:100%;padding:2px 0 6px}
     /* 设置面板每一项 = 名称列 + 控件列，名称列宽度跟着名字长短走：插件这两项一个叫
-       「语言与外观」一个叫「助手设置」，字数不同，右边的内容就被推得差了一格。
+       「通用」一个叫「助手设置」，字数不同，右边的内容就被推得差了一格。
        让名称列不占位、控件列占满，两块都从最左边开始，标题由各自的 h3 显示。
        只在「我们的块不在第一列」时才生效，结构对不上时不会把内容自己藏掉。 */
     *:has(> :not(:first-child) > .bpi-settings-form){align-items:flex-start}
