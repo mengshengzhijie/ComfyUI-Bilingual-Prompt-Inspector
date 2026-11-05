@@ -33,7 +33,7 @@ import { notify } from "./bpi_notify.js";
 import { showToast } from "./bpi_toast.js";
 import { dragPreviewNodeEnabled, dragPreviewTableEnabled } from "./bpi_drag_preview.js";
 import { deleteAnimNodeEnabled, playDeleteAnim } from "./bpi_delete_anim.js";
-import { playInsertAnim } from "./bpi_insert_anim.js";
+import { INSERT_MS, playInsertAnim } from "./bpi_insert_anim.js";
 import {
   buildTagFields,
   button,
@@ -939,42 +939,66 @@ function createPanel(node, textWidget) {
     if (!showToast(deletedMsg, { type: "edit" })) setStatus(deletedMsg, "ok");
   };
 
-  // 卡片擦掉之后其余标签是 flex 重排，会瞬间跳到新位置，看着硬。
-  // 删除前拍一张「内容坐标」（不受滚动影响），重排后按旧位置→新位置补一段
-  // FLIP 让位动画，手感和拖动预览那套一致。
+  // 卡片擦掉/插入后其余标签是 flex 重排，会瞬间跳到新位置，看着硬。
+  // 变化前后各拍一张「内容坐标」（相对标签区 + 滚动量，滚动过也不跑偏），
+  // 再按旧位置→新位置补一段 FLIP 让位动画，和拖动预览那套手感一致。
+  // 这里不能按 token.id 配对：id 是 parsePrompt 里按数组下标生成的，插一张或删一张
+  // 后面全部错位。改成按 DOM 顺序对齐，变化点由调用方给（insertedAt / removedAt）。
+  const cardText = (card) => card.querySelector(".bpi-english-token")?.textContent.trim() ?? "";
+
   const cardRects = () => {
     const viewBox = englishTokenView.getBoundingClientRect();
-    const rects = new Map();
-    for (const card of englishTokenView.querySelectorAll(".bpi-token-card")) {
-      const chip = card.querySelector(".bpi-english-token[data-token-id]");
-      if (!chip) continue;
+    return [...englishTokenView.querySelectorAll(".bpi-token-card")].map((card) => {
       const box = card.getBoundingClientRect();
-      rects.set(chip.dataset.tokenId, {
+      return {
+        text: cardText(card),
         x: box.left - viewBox.left + englishTokenView.scrollLeft,
         y: box.top - viewBox.top + englishTokenView.scrollTop,
-      });
-    }
-    return rects;
+      };
+    });
   };
 
-  const REFLOW_MS = 260;
+  // 新旧两份卡片按顺序比，第一个对不上的位置就是插入点 / 删除点
+  const findInsertedAt = (before, cards) => {
+    for (let i = 0; i < cards.length; i += 1) {
+      if (!before[i] || before[i].text !== cardText(cards[i])) return i;
+    }
+    return cards.length - 1;
+  };
 
-  const animateReflow = (before) => {
-    if (!before.size) return;
+  const findRemovedAt = (before, cards) => {
+    for (let i = 0; i < before.length; i += 1) {
+      const text = cards[i] ? cardText(cards[i]) : "";
+      if (text !== before[i].text) return i;
+    }
+    return before.length - 1;
+  };
+
+  const REFLOW_MS = 320;
+
+  const animateReflow = (before, { insertedAt = -1, removedAt = -1 } = {}) => {
+    if (!before.length) return;
     const viewBox = englishTokenView.getBoundingClientRect();
     const moving = [];
-    for (const card of englishTokenView.querySelectorAll(".bpi-token-card")) {
-      const chip = card.querySelector(".bpi-english-token[data-token-id]");
-      const first = chip ? before.get(chip.dataset.tokenId) : null;
-      if (!first) continue;
+    [...englishTokenView.querySelectorAll(".bpi-token-card")].forEach((card, index) => {
+      // 插入点那张是新卡，它自己会展开，不参与让位
+      if (index === insertedAt) return;
+      // 插入点之后整体后移一位、删除点之后整体前移一位，其余位置一一对应
+      const oldIndex = insertedAt >= 0
+        ? (index < insertedAt ? index : index - 1)
+        : removedAt >= 0
+          ? (index < removedAt ? index : index + 1)
+          : index;
+      const first = before[oldIndex];
+      if (!first) return;
       const box = card.getBoundingClientRect();
       const dx = first.x - (box.left - viewBox.left + englishTokenView.scrollLeft);
       const dy = first.y - (box.top - viewBox.top + englishTokenView.scrollTop);
-      if (!dx && !dy) continue;
+      if (!dx && !dy) return;
       card.style.transition = "none";
       card.style.transform = `translate(${dx}px,${dy}px)`;
       moving.push(card);
-    }
+    });
     if (!moving.length) return;
     void englishTokenView.offsetWidth;
     for (const card of moving) card.style.transition = `transform ${REFLOW_MS}ms cubic-bezier(.2,.8,.2,1)`;
@@ -988,6 +1012,10 @@ function createPanel(node, textWidget) {
     });
   };
 
+  // 正在播插入动画的卡片（按标签原文记，id 会随插入错位不能当 key）：动画中途被
+  // 别的刷新重建 DOM 时，靠它把动画挂回新卡片，否则卡片会先完整出现一帧 = 「跳」
+  const insertingTexts = new Set();
+
   // 添加标签：新卡片自己展开，其余卡片同时滑开让位。开关和删除共用一个；
   // 关掉、或正在文本框里编辑英文（那时没有卡片可播）就直接执行，和以前一样
   const withInsertAnim = (mutate) => {
@@ -999,12 +1027,16 @@ function createPanel(node, textWidget) {
     mutate();
     // 添加走的也是排队渲染，插队立刻刷一次才量得到新布局
     renderNow();
-    const fresh = [];
-    for (const card of englishTokenView.querySelectorAll(".bpi-token-card")) {
-      const chip = card.querySelector(".bpi-english-token[data-token-id]");
-      if (chip && !before.has(chip.dataset.tokenId)) fresh.push(card);
+    const cards = [...englishTokenView.querySelectorAll(".bpi-token-card")];
+    // 一次只加一个标签；张数对不上（比如批量）就不猜插入点，只当没变化
+    const insertedAt = cards.length === before.length + 1 ? findInsertedAt(before, cards) : -1;
+    const fresh = insertedAt >= 0 ? [cards[insertedAt]] : [];
+    for (const card of fresh) {
+      const text = cardText(card);
+      insertingTexts.add(text);
+      window.setTimeout(() => insertingTexts.delete(text), INSERT_MS + 80);
     }
-    animateReflow(before);
+    animateReflow(before, { insertedAt });
     playInsertAnim(fresh);
   };
 
@@ -1024,7 +1056,9 @@ function createPanel(node, textWidget) {
       commitDeleteToken(token);
       // 删除走的是排队渲染（setTimeout 0），这里插队立刻刷一次，才量得到新位置
       renderNow();
-      animateReflow(before);
+      const cards = [...englishTokenView.querySelectorAll(".bpi-token-card")];
+      const removedAt = cards.length === before.length - 1 ? findRemovedAt(before, cards) : -1;
+      animateReflow(before, { removedAt });
     });
   };
 
@@ -2867,6 +2901,11 @@ function createPanel(node, textWidget) {
     const chinese = element("span", "bpi-token-card-zh", tokenChineseLabel(token));
     setTitle(chinese, `“${token.term}” ↔ “${token.chinese}”`);
     const card = element("span", "bpi-token-card");
+    // 插入动画播到一半被别的刷新重建了：把动画挂回新卡片，免得先完整出现一帧再补动画
+    if (insertingTexts.has(label)) {
+      card.classList.add("bpi-inserting");
+      window.setTimeout(() => card.classList.remove("bpi-inserting"), INSERT_MS + 60);
+    }
     // 卡片也要带 token id：拖动挪的是整张卡片（attachChipDrag 抓的就是它），
     // 实时预览按 data-token-id 反查落点，只写在内层 chip 上会查不到
     card.dataset.tokenId = String(token.id);

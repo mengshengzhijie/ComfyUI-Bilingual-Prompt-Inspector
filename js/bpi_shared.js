@@ -1314,9 +1314,10 @@ function injectBpiStyles() {
     .bpi-del-bar{position:absolute;left:0;right:0;height:0;background-color:var(--bpi-del-bar-color);transition:height .1s ease;z-index:5}
     .bpi-del-bar-top{top:0}.bpi-del-bar-bottom{bottom:0}
     .bpi-token-card.bpi-del-wipe .bpi-del-bar{height:var(--bpi-del-bar-h,10px)}
-    /* 添加标签的出场动画：新卡片从左往右展开，旁边的卡片由 FLIP 滑开让位 */
-    @keyframes bpi-card-insert{from{clip-path:inset(0 100% 0 0 round 5px)}to{clip-path:inset(0 0 0 0 round 5px)}}
-    .bpi-token-card.bpi-inserting{animation:bpi-card-insert .28s cubic-bezier(.4,0,.2,1)}
+    /* 添加标签的出场动画：新卡片从左往右展开，旁边的卡片由 FLIP 滑开让位。
+       带宽高一起淡入，纯靠 clip-path 硬揭开会显得突然 */
+    @keyframes bpi-card-insert{from{clip-path:inset(0 100% 0 0 round 5px);opacity:.45}to{clip-path:inset(0 0 0 0 round 5px);opacity:1}}
+    .bpi-token-card.bpi-inserting{animation:bpi-card-insert .42s cubic-bezier(.32,.72,.28,1)}
 .bpi-token-line{display:flex;flex-wrap:wrap;align-items:flex-end;gap:2px 0}
     .bpi-token-card{position:relative;display:inline-flex;flex-direction:column;align-items:flex-start;max-width:100%;border:1px solid var(--bpi-border-3);border-radius:5px;background:var(--bpi-surface-3);padding:1px 5px;margin:2px 3px 2px 0;vertical-align:top;cursor:pointer}
     .bpi-token-card:hover{border-color:var(--bpi-border-2)}
