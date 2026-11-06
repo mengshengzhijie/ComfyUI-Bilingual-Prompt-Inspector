@@ -114,17 +114,23 @@ export function removePromptToken(text, token) {
     return { text: value, cursor: start, changed: false };
   }
 
-  if (end < value.length && (value[end] === "," || isLineBreak(value[end]))) {
-    const separator = value[end];
+  if (end < value.length && value[end] === ",") {
+    // 逗号是标签之间的分隔，跟着标签一起删；逗号后面紧跟的换行也算同一处分隔
+    // （前面已经有一个换行在分段了，再留一个就多出空行）
     end += 1;
-    if (separator === "\r" && value[end] === "\n") end += 1;
     while (end < value.length && /[ \t]/.test(value[end])) end += 1;
-    if (separator === "," && isLineBreak(value[end])) {
-      const firstBreak = value[end];
+    if (isLineBreak(value[end])) {
+      const separator = value[end];
       end += 1;
-      if (firstBreak === "\r" && value[end] === "\n") end += 1;
+      if (separator === "\r" && value[end] === "\n") end += 1;
       while (end < value.length && /[ \t]/.test(value[end])) end += 1;
     }
+  } else if (end < value.length && isLineBreak(value[end])) {
+    // 标签正好在行尾、后面直接是换行：换行是分段标记，不能跟着删掉，
+    // 否则下一行会被拽上来、两段并成一段。只把标签前面那个逗号清掉
+    let probe = start - 1;
+    while (probe >= 0 && /[ \t]/.test(value[probe])) probe -= 1;
+    if (probe >= 0 && value[probe] === ",") start = probe;
   } else {
     let probe = start - 1;
     while (probe >= 0 && /[ \t]/.test(value[probe])) probe -= 1;
@@ -141,6 +147,10 @@ export function removePromptToken(text, token) {
 
   let left = value.slice(0, start);
   let right = value.slice(end);
+  // 标签自己独占一行时前后各有一个换行，留两个就会空出一行；合成一个
+  if (/[\r\n]$/.test(left) && /^[\r\n]/.test(right)) {
+    right = right.replace(/^(\r\n|\n|\r)/, "");
+  }
   if (!left.trim()) {
     right = right.replace(/^[\s,]+/, "");
     left = "";
@@ -240,7 +250,7 @@ export function replacePromptSpan(text, start, end, replacement) {
  * present at the drop boundary.  Duplicate tags are moved by occurrence via
  * their start/end offsets, matching removePromptToken.
  */
-export function movePromptToken(text, tokens, token, targetIndex) {
+export function movePromptToken(text, tokens, token, targetIndex, options = {}) {
   const value = String(text ?? "");
   const list = Array.isArray(tokens) ? tokens : [];
   const fromIndex = list.findIndex((item) =>
@@ -254,6 +264,45 @@ export function movePromptToken(text, tokens, token, targetIndex) {
   if (!Number.isFinite(target)) target = fromIndex;
   target = Math.max(0, Math.min(count, target));
   const newIndex = target > fromIndex ? target - 1 : target;
+  // afterBreak：落点是「自己后面那一格」（把行尾标签拖到下一行开头）。
+  // token 顺序没有变化，要把自己后面的换行挪到前面 —— 效果是下移一行。
+  if (options.afterBreak && fromIndex < count - 1) {
+    const tokenEnd = list[fromIndex].end;
+    const nextStart = list[fromIndex + 1].start;
+    const brk = value.slice(tokenEnd, nextStart).match(/[\r\n]+/);
+    const head = value.slice(0, list[fromIndex].start).replace(/[\s,]+$/, "");
+    if (brk && head) {
+      const core = value.slice(list[fromIndex].start, tokenEnd).trim();
+      const rest = value.slice(nextStart).replace(/^[\s,]+/, "");
+      const nextText = `${head}${brk[0]}${core}, ${rest}`;
+      return {
+        text: nextText,
+        cursor: head.length + brk[0].length + core.length,
+        changed: nextText !== value,
+        index: fromIndex,
+      };
+    }
+  }
+  // beforeBreak：落点其实是「上一行末尾」（换行块前面）。被拖的标签自己就站在
+  // 某个行首时，token 顺序并没有变化，但要把挡在它前面的那个换行挪到它后面 ——
+  // 效果就是它上移一行。没有这一条，这种拖动会被当成「没变化」直接吞掉。
+  if (options.beforeBreak && fromIndex > 0) {
+    const prevEnd = list[fromIndex - 1].end;
+    const tokenStart = list[fromIndex].start;
+    const brk = value.slice(prevEnd, tokenStart).match(/[\r\n]+/);
+    if (brk) {
+      const head = value.slice(0, prevEnd).replace(/[\s,]+$/, "");
+      const core = value.slice(tokenStart, list[fromIndex].end).trim();
+      const rest = value.slice(list[fromIndex].end).replace(/^[\s,]+/, "");
+      const nextText = `${head}, ${core}${brk[0]}${rest}`;
+      return {
+        text: nextText,
+        cursor: head.length + 2 + core.length,
+        changed: nextText !== value,
+        index: fromIndex,
+      };
+    }
+  }
   if (newIndex === fromIndex) {
     return { text: value, cursor: token.start, changed: false, index: fromIndex };
   }
@@ -315,10 +364,18 @@ export function movePromptToken(text, tokens, token, targetIndex) {
   for (let p = 0; p < survivorCount; p += 1) {
     const idx = order[p];
     if (p === newIndex) {
-      const edge = p === 0 ? prefix : normGap(inEdge(p));
-      out += edge + movedCore;
-      cursor = out.length;
-      out += ", " + coreOf(idx) + trailOf(idx);
+      const gap = p === 0 ? prefix : inEdge(p);
+      if (p > 0 && options.beforeBreak && hasBreak(gap)) {
+        // 这一格的分隔符里带换行：换行是「行尾」，要留在被移过来的标签后面。
+        // 放在它前面的话，拖到行尾（换行块前面）的标签会直接掉到下一行去
+        out += ", " + movedCore + (gap.match(/[\r\n]+/) ?? ["\n"])[0];
+        cursor = out.length;
+        out += coreOf(idx) + trailOf(idx);
+      } else {
+        out += (p === 0 ? prefix : normGap(gap)) + movedCore;
+        cursor = out.length;
+        out += ", " + coreOf(idx) + trailOf(idx);
+      }
     } else {
       const lead = keepsLead(p) ? leadOf(idx) : "";
       out += inEdge(p) + lead + coreOf(idx) + trailOf(idx);

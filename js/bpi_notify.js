@@ -71,7 +71,7 @@ const CSS = `
 .bpi-notif-content{display:flex;flex-direction:column;gap:10px;position:relative;z-index:0}
 .bpi-notif-head{padding-right:24px}
 .bpi-notif-title{font-size:15px;font-weight:600;color:var(--bpi-text,#e6edf7);letter-spacing:.3px;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.bpi-notif-extra{font-size:13px;color:var(--bpi-text-muted,#aab5c5);line-height:1.65;letter-spacing:.2px;opacity:0;transition:opacity .4s ease .1s;padding-bottom:6px;word-break:break-word}
+.bpi-notif-extra{font-size:13px;color:var(--bpi-text-muted,#aab5c5);line-height:1.65;letter-spacing:.2px;opacity:0;transition:opacity .4s ease .1s;padding-bottom:6px;word-break:break-word;white-space:pre-wrap}
 .bpi-notif.bpi-expand .bpi-notif-extra{opacity:1}
 .bpi-notif-logo{position:absolute;left:22px;top:50%;transform:translateY(-50%);line-height:0;color:#fff;pointer-events:none;user-select:none;filter:drop-shadow(var(--bpi-notif-logo-shadow,0 2px 14px rgba(0,0,0,.55)))}
 .bpi-notif-logo svg{display:block;height:var(--bpi-notif-logo-size,36px);width:auto}

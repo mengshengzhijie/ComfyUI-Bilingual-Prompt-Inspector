@@ -39,3 +39,6 @@ tag.sqlite
 /output/
 *.zip
 *.log
+
+#userinfo
+bug.md

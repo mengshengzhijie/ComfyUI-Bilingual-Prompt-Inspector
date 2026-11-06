@@ -944,14 +944,18 @@ function createPanel(node, textWidget) {
   // 再按旧位置→新位置补一段 FLIP 让位动画，和拖动预览那套手感一致。
   // 这里不能按 token.id 配对：id 是 parsePrompt 里按数组下标生成的，插一张或删一张
   // 后面全部错位。改成按 DOM 顺序对齐，变化点由调用方给（insertedAt / removedAt）。
-  const cardText = (card) => card.querySelector(".bpi-english-token")?.textContent.trim() ?? "";
+  // 让位要连行尾的换行块（↵）一起算：它也是行里占位的一块，
+  // 漏掉它就会出现「换行块先跳到新位置、标签还在半路上」的错觉
+  const reflowItems = () => [...englishTokenView.querySelectorAll(".bpi-token-card, .bpi-break-chip")];
+
+  const cardText = (item) => item.querySelector(".bpi-english-token")?.textContent.trim() ?? item.textContent.trim();
 
   const cardRects = () => {
     const viewBox = englishTokenView.getBoundingClientRect();
-    return [...englishTokenView.querySelectorAll(".bpi-token-card")].map((card) => {
-      const box = card.getBoundingClientRect();
+    return reflowItems().map((item) => {
+      const box = item.getBoundingClientRect();
       return {
-        text: cardText(card),
+        text: cardText(item),
         x: box.left - viewBox.left + englishTokenView.scrollLeft,
         y: box.top - viewBox.top + englishTokenView.scrollTop,
       };
@@ -980,7 +984,7 @@ function createPanel(node, textWidget) {
     if (!before.length) return;
     const viewBox = englishTokenView.getBoundingClientRect();
     const moving = [];
-    [...englishTokenView.querySelectorAll(".bpi-token-card")].forEach((card, index) => {
+    reflowItems().forEach((card, index) => {
       // 插入点那张是新卡，它自己会展开，不参与让位
       if (index === insertedAt) return;
       // 插入点之后整体后移一位、删除点之后整体前移一位，其余位置一一对应
@@ -1027,10 +1031,10 @@ function createPanel(node, textWidget) {
     mutate();
     // 添加走的也是排队渲染，插队立刻刷一次才量得到新布局
     renderNow();
-    const cards = [...englishTokenView.querySelectorAll(".bpi-token-card")];
+    const items = reflowItems();
     // 一次只加一个标签；张数对不上（比如批量）就不猜插入点，只当没变化
-    const insertedAt = cards.length === before.length + 1 ? findInsertedAt(before, cards) : -1;
-    const fresh = insertedAt >= 0 ? [cards[insertedAt]] : [];
+    const insertedAt = items.length === before.length + 1 ? findInsertedAt(before, items) : -1;
+    const fresh = insertedAt >= 0 ? [items[insertedAt]] : [];
     for (const card of fresh) {
       const text = cardText(card);
       insertingTexts.add(text);
@@ -1056,8 +1060,8 @@ function createPanel(node, textWidget) {
       commitDeleteToken(token);
       // 删除走的是排队渲染（setTimeout 0），这里插队立刻刷一次，才量得到新位置
       renderNow();
-      const cards = [...englishTokenView.querySelectorAll(".bpi-token-card")];
-      const removedAt = cards.length === before.length - 1 ? findRemovedAt(before, cards) : -1;
+      const items = reflowItems();
+      const removedAt = items.length === before.length - 1 ? findRemovedAt(before, items) : -1;
       animateReflow(before, { removedAt });
     });
   };
@@ -1092,10 +1096,10 @@ function createPanel(node, textWidget) {
   const canReorderTokens = () =>
     ["tags", "mixed"].includes(state.modeInfo.mode) && state.tokens.length > 1;
 
-  const moveTokenTo = (token, targetIndex) => {
+  const moveTokenTo = (token, targetIndex, options = {}) => {
     if (!token || !canReorderTokens()) return false;
     const before = String(textWidget.value ?? "");
-    const result = movePromptToken(before, state.tokens, token, targetIndex);
+    const result = movePromptToken(before, state.tokens, token, targetIndex, options);
     if (!result.changed) return false;
     state.undoStack.push({
       before,
@@ -1501,8 +1505,17 @@ function createPanel(node, textWidget) {
     let pendingY = 0;
     let appliedX = null;
     let appliedY = null;
+    // 这次落点是不是「上一行末尾（换行块前面）」：拖拽层算好传进来，预览层不自己猜
+    let pendingBreak = false;
+    // 调试用（localStorage bpi.debug=1）：落点每次变化打一行，方便看它到底算到哪张卡
+    let debugLastKey = "";
     const flip = (mutate) => {
-      const before = tracked.map((el) => [el, el.getBoundingClientRect()]);
+      // 被拖的那张（透明空位）不参与 FLIP：它要「啪」地挪到落点，
+      // 只有旁边的元素需要平滑让开。要是连空位一起做过渡，眼睛就会看到
+      // 原位还留着一块、落点又多出一块，像是「原位凭空挤出一个空间」。
+      const before = tracked
+        .filter((el) => el !== dragged)
+        .map((el) => [el, el.getBoundingClientRect()]);
       mutate();
       const shifted = [];
       for (const [el, first] of before) {
@@ -1559,6 +1572,24 @@ function createPanel(node, textWidget) {
         const found = byTokenId.get(state.tokens[i].id);
         if (found && found !== dragged) ref = found;
       }
+      if (window.localStorage.getItem("bpi.debug") === "1") {
+        const key = `${targetIndex}|${ref?.textContent ?? "null"}`;
+        if (key !== debugLastKey) {
+          debugLastKey = key;
+          console.log("[bpi] run", {
+            targetIndex,
+            ref: ref?.textContent?.slice(0, 24) ?? null,
+            dragged: dragged.textContent?.slice(0, 24),
+          });
+        }
+      }
+      // 落点其实是「上一行末尾」时，浮层要停到那一行的 ↵ 前面：
+      // 每行是独立的 .bpi-token-line，↵ 挂在上一行末尾，不是下一张卡的兄弟
+      if (ref && pendingBreak) {
+        const prevLine = ref.parentElement?.previousElementSibling;
+        const prevLast = prevLine?.lastElementChild;
+        if (prevLast?.classList?.contains("bpi-break-chip")) ref = prevLast;
+      }
       const tail = candidates[candidates.length - 1];
       const parent = ref ? ref.parentNode : tail?.parentNode;
       if (!parent?.isConnected) return;
@@ -1566,7 +1597,8 @@ function createPanel(node, textWidget) {
       // 少了它相邻两个槽位会来回跳。
       // 注意别再补「落点等于原位就 return」那种判断——DOM 可能已经被前面几次
       // 移动挪走了，这时恰恰需要真的移回原位，预览才会挤开。
-      if (dragged.parentNode === parent && nextCandidate(dragged) === ref) return;
+      if (dragged.parentNode === parent
+        && (dragged.nextElementSibling === ref || nextCandidate(dragged) === ref)) return;
       flip(() => parent.insertBefore(dragged, ref));
     };
 
@@ -1624,11 +1656,12 @@ function createPanel(node, textWidget) {
       lift,
       // 跟手 + 让位：让位动画播到一半时只攒着落点，等落地那刻再判。
       // 这样最后一次移动不会被丢，也不会因为读到半路坐标而来回翻
-      track(pointerX, pointerY, resolveIndex) {
+      track(pointerX, pointerY, resolveIndex, beforeBreak = false) {
         if (!enabled) return;
         follow(pointerX, pointerY);
         pendingX = pointerX;
         pendingY = pointerY;
+        pendingBreak = Boolean(beforeBreak);
         wanted = resolveIndex;
         run();
       },
@@ -1709,6 +1742,9 @@ function createPanel(node, textWidget) {
       const preview = createDragPreview(chip, homeList, previewEnabled);
       let active = false;
       let targetIndex = null;
+      // 落点是不是「上一行末尾」（换行块前面）：被拖的标签本身就在行首时
+      // token 顺序不会变，得靠这个标记把前面的换行挪到它后面
+      let beforeBreak = false;
       let hoverChip = null;
       const clearHover = () => {
         if (hoverChip) hoverChip.classList.remove("bpi-drop-before", "bpi-drop-after");
@@ -1750,10 +1786,23 @@ function createPanel(node, textWidget) {
           const index = anchor ? homeList.indexOf(anchor) : -1;
           return index >= 0 ? index : state.tokens.length;
         };
+        // 这张卡是不是「某行第一个、上一行以换行块结尾、而且指针确实在上一行的高度里」。
+        // 最后那条不能少：光看结构的话，在同一行里往左拖一点、落点正好是行首那张卡，
+        // 就会被当成要跨行，浮层一下子飞到上一行的回车前面去
+        const landsBeforeBreak = (card, clientY) => {
+          if (!card) return false;
+          const prevLine = card.parentElement?.previousElementSibling;
+          if (!prevLine?.lastElementChild?.classList?.contains("bpi-break-chip")) return false;
+          // 用上一行容器的矩形来判：卡片自己带着 FLIP 的 transform，量出来不准
+          const box = prevLine.getBoundingClientRect();
+          return clientY >= box.top && clientY <= box.bottom;
+        };
         if (hitChip && !onSelf) {
           const rect = hitChip.getBoundingClientRect();
           const before = moveEvent.clientX < rect.left + rect.width / 2;
-          targetIndex = resolve(before ? hitChip : nextVisible(hitChip));
+          const anchorCard = before ? hitChip : nextVisible(hitChip);
+          targetIndex = resolve(anchorCard);
+          beforeBreak = !before && landsBeforeBreak(anchorCard, moveEvent.clientY);
           hoverChip = hitChip;
           hoverChip.classList.add(before ? "bpi-drop-before" : "bpi-drop-after");
         } else {
@@ -1768,8 +1817,9 @@ function createPanel(node, textWidget) {
           }
           const anchor = lastCard ? nextVisible(lastCard) : live.find((item) => item !== chip) || null;
           targetIndex = resolve(anchor);
+          beforeBreak = landsBeforeBreak(anchor, moveEvent.clientY);
         }
-        preview.track(moveEvent.clientX, moveEvent.clientY, targetIndex);
+        preview.track(moveEvent.clientX, moveEvent.clientY, targetIndex, beforeBreak);
       };
       const finish = () => {
         unbindDragTrackers(onMove, finish);
@@ -1780,7 +1830,14 @@ function createPanel(node, textWidget) {
           // 先收口：把攒着的那一步落到 DOM 上，让「眼前的顺序」正好等于
           // 「马上要写进文本的顺序」，再清掉让位动画残留
           preview.settle();
-          const committed = targetIndex !== null ? moveTokenTo(token, targetIndex) : false;
+          // 落点正好是自己后面那一格、而自己后面就是换行：这是「下移一行」，
+          // token 顺序没变，得让 parser 把换行挪到前面
+          const afterBreak = !beforeBreak && targetIndex === token.id + 1
+            && token.id + 1 < state.tokens.length
+            && gapHasBreak(token.id);
+          const committed = targetIndex !== null
+            ? moveTokenTo(token, targetIndex, { beforeBreak, afterBreak })
+            : false;
           // 没搬动（原地放下 / 目标被筛掉了）：把预览挪出来的错位收回去
           if (!committed) preview.restore();
           // 有浮层时 land() 会等它落地再刷 DOM（提前刷会把落点上那一张显示出来，看着是重影）
@@ -1804,7 +1861,21 @@ function createPanel(node, textWidget) {
     remove.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      if (removeBreakAt(gapIndex)) setStatus("Deleted a line break", "ok");
+      // 和删标签同一套动画：开关打开就先划掉擦走，擦完那一下才真正把两行合并
+      if (!deleteAnimNodeEnabled() || !chip.isConnected) {
+        if (removeBreakAt(gapIndex)) setStatus("已删除一个换行", "ok");
+        return;
+      }
+      playDeleteAnim(chip, () => {
+        const before = cardRects();
+        // 擦除这一秒里文本可能被改过，换行已经不在了就什么都不做
+        if (!removeBreakAt(gapIndex)) return;
+        renderNow();
+        const items = reflowItems();
+        const removedAt = items.length === before.length - 1 ? findRemovedAt(before, items) : -1;
+        animateReflow(before, { removedAt });
+        setStatus("已删除一个换行", "ok");
+      });
     });
     chip.appendChild(remove);
     chip.addEventListener("pointerdown", (event) => {
@@ -1857,72 +1928,11 @@ function createPanel(node, textWidget) {
     return chip;
   };
 
-  // 明细表里的换行行：整行青绿色，只放一个拖拽手柄和"换行"两字，其余一律不显示。
-  // 拖 ⠿ 到某个 token 行上 = 把这条换行从当前 gap 移到那个 token 后面的 gap，
-  // 复用 moveBreakTo；命中目标从标签 chip 换成带 data-token-id 的明细表行。
-  // 跟标签拖拽一样必须挂 document 捕获阶段，否则 Nodes 2.0 下收不到事件。
-  const buildBreakRow = (gapIndex) => {
+  // 明细表里的换行行：整行青绿色，只写「换行」两个字。
+  // 以前这里有个 ⠿ 手柄可以拖动换行，实际用不上：想挪换行就到节点里拖 ↵，或者直接改文本。
+  const buildBreakRow = () => {
     const row = element("div", "bpi-row bpi-break-row");
-    const handle = element("span", "bpi-drag-handle", "⠿");
-    setTitle(handle, "Drag onto a tag row to move this line break");
-    row.appendChild(handle);
     row.appendChild(element("span", "bpi-break-row-label", "换行"));
-    handle.addEventListener("click", (event) => event.stopPropagation());
-    handle.addEventListener("pointerdown", (event) => {
-      if (event.button !== 0) return;
-      event.preventDefault();
-      event.stopPropagation();
-      const startX = event.clientX;
-      const startY = event.clientY;
-      let active = false;
-      let targetGap = null;
-      let indicator = null;
-      const orderedRows = () => [...table.querySelectorAll(".bpi-row[data-token-id]")];
-      const finish = () => {
-        unbindDragTrackers(onMove, finish);
-        row.classList.remove("bpi-dragging");
-        if (indicator) { indicator.remove(); indicator = null; }
-        if (active && targetGap !== null && row.isConnected) {
-          if (moveBreakTo(gapIndex, targetGap)) setStatus("Moved the line break", "ok");
-        }
-      };
-      const onMove = (moveEvent) => {
-        if (!row.isConnected) { finish(); return; }
-        if (!active) {
-          if (Math.abs(moveEvent.clientX - startX) < 3 && Math.abs(moveEvent.clientY - startY) < 3) return;
-          active = true;
-          row.classList.add("bpi-dragging");
-          indicator = element("div", "bpi-drop-indicator");
-          table.appendChild(indicator);
-        }
-        moveEvent.preventDefault();
-        const tableRect = table.getBoundingClientRect();
-        if (moveEvent.clientY < tableRect.top + 28) table.scrollTop -= 9;
-        else if (moveEvent.clientY > tableRect.bottom - 28) table.scrollTop += 9;
-        const rows = orderedRows();
-        let anchorRow = null;
-        for (const candidate of rows) {
-          const rect = candidate.getBoundingClientRect();
-          if (moveEvent.clientY < rect.top + rect.height / 2) { anchorRow = candidate; break; }
-        }
-        if (anchorRow) {
-          const tokenId = Number(anchorRow.dataset.tokenId);
-          const index = state.tokens.findIndex((item) => item.id === tokenId);
-          targetGap = index >= 0 ? Math.min(index, breakGapCount() - 1) : null;
-        } else {
-          targetGap = breakGapCount() - 1;
-        }
-        let y;
-        if (anchorRow) {
-          y = anchorRow.getBoundingClientRect().top - tableRect.top + table.scrollTop;
-        } else {
-          const lastRow = rows[rows.length - 1];
-          y = (lastRow ? lastRow.getBoundingClientRect().bottom - tableRect.top : 0) + table.scrollTop;
-        }
-        indicator.style.top = `${Math.max(0, y - 1)}px`;
-      };
-      bindDragTrackers(onMove, finish);
-    });
     return row;
   };
 
@@ -1983,6 +1993,9 @@ function createPanel(node, textWidget) {
     input.max = "3";
     input.step = "0.05";
     input.value = token.weight === null ? "1" : String(token.weight);
+    // 打开弹窗时这个数字是多少：只有它变了才写回权重，
+    // 否则「只想换个颜色」会被顺手落成 (标签:1)
+    const initialWeight = token.weight === null ? 1 : token.weight;
     form.append(element("label", "", "Weight"), input);
     weightBlock.appendChild(form);
 
@@ -2156,8 +2169,8 @@ function createPanel(node, textWidget) {
       }
       const colorChanged = saveColor();
       if (colorChanged === null) return;
-      // 原来没写权重时留着 1 也算改动，跟合并前的行为一致（会落成 (标签:1)）
-      const weightDirty = token.weight === null || Math.abs(numeric - token.weight) > 1e-9;
+      // 打开时是 1（原标签没写权重）就不算改过：光改颜色的不应该被写成 (标签:1)
+      const weightDirty = Math.abs(numeric - initialWeight) > 1e-9;
       if (weightDirty) {
         // 改文本会顺带重绘，配色不用再刷一次
         if (applyTokenWeight(token, numeric)) close();
@@ -3750,7 +3763,7 @@ function createPanel(node, textWidget) {
         // 只在"全部"过滤下显示——别的过滤会把 token 打散，gap 下标对不上。
         // tableFilter==='all' 时 visibleIndex 就是 state.tokens 里的下标，两者一致。
         if (state.tableFilter === "all" && canReorderTokens() && gapHasBreak(visibleIndex)) {
-          table.appendChild(buildBreakRow(visibleIndex));
+          table.appendChild(buildBreakRow());
         }
       });
     }
@@ -4083,31 +4096,40 @@ function createPanel(node, textWidget) {
   async function submitQuickInput(mode = "translate") {
     if (quickBusy) return;
     const raw = quickInput.value.trim();
+    // 快捷添加全程只走右下角提示条：这里没有需要逐条盯的结果，
+    // 动不动作右上角弹窗都只是白占一块屏幕
+    const warn = (message) => {
+      if (!showToast(message, { type: "error" })) setStatusQuiet(message, "error");
+    };
     if (!raw) {
-      setStatus("Enter Chinese or an English tag first", "error");
+      warn("先输入中文或英文标签");
       return;
     }
     if (!containsChinese(raw)) {
       appendToPrompt(raw);
       quickInput.value = "";
       const addedMsg = `已添加「${raw}」`;
-      if (!showToast(addedMsg, { type: "insert" })) setStatus(addedMsg, "ok");
+      if (!showToast(addedMsg, { type: "insert" })) setStatusQuiet(addedMsg, "ok");
       quickInput.focus({ preventScroll: true });
       return;
     }
     quickBusy = true;
     quickButton.disabled = true;
-    setStatus(`Translating “${raw}”…`, "busy");
+    // 翻译过程只写状态栏：右上角那张「处理中」是常驻卡，用完没人收
+    setStatusQuiet(`正在翻译「${raw}」…`, "busy");
     try {
       const translated = await runInspectorAssistant(mode === "optimize" ? "translate_optimize" : "translate", raw);
       const validation = validateTranslationResult(raw, translated, {});
       if (!validation.ok) {
-        setStatus(`Rejected abnormal translation: “${validation.reason}”`, "error");
+        warn(`翻译结果异常，已拒绝：「${validation.reason}」`);
+        // 被拒这一种另外开一张右上角弹窗，把模型原样返回的内容贴出来：
+        // 判断是翻译跑偏了，还是校验规则太严，光看 reason 看不出来
+        notify(`「${raw}」的翻译结果被拒绝：${validation.reason}\n模型返回：${translated}`, "error", { hold: 8000 });
         return;
       }
       const english = validation.text.replace(/[\s,，]+$/u, "").trim();
       if (!english) {
-        setStatus("Translation result is empty", "error");
+        warn("翻译结果为空");
         return;
       }
       appendToPrompt(english);
@@ -4120,10 +4142,10 @@ function createPanel(node, textWidget) {
       });
       quickInput.value = "";
       const addedMsg = `已添加「${english}」`;
-      if (!showToast(addedMsg, { type: "insert" })) setStatus(addedMsg, "ok");
+      if (!showToast(addedMsg, { type: "insert" })) setStatusQuiet(addedMsg, "ok");
       quickInput.focus({ preventScroll: true });
     } catch (error) {
-      setStatus(error.message, "error");
+      warn(error.message);
     } finally {
       quickBusy = false;
       quickButton.disabled = false;

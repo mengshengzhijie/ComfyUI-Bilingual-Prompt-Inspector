@@ -31,3 +31,4 @@ data/packs/community_*.json
 __pycache__/
 *.pyc
 .gitattributes
+bug.md

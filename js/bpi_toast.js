@@ -50,6 +50,7 @@ export const TOAST_ACCENTS = {
   history: "#94a3b8",
   translate: "#34d399",
   duplicate: "#fbbf24",
+  error: "#e06c75",
 };
 
 // 图标是塞进 24×24 viewBox 的内联 SVG 片段，颜色靠 currentColor 吃 --bpi-toast-accent
@@ -64,6 +65,7 @@ const ICONS = {
   remove: '<path d="M4 7h16M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/>',
   move: '<path d="M4 12h16"/><path d="M8 8l-4 4 4 4M16 8l4 4-4 4"/>',
   history: '<path d="M3.5 12a8.5 8.5 0 1 1 2.6 6.1"/><path d="M3 5v5h5"/><path d="M12 8v4l3 2"/>',
+  error: '<circle cx="12" cy="12" r="9"/><path d="M15 9l-6 6M9 9l6 6"/>',
 };
 
 const CLOSE_SVG =
