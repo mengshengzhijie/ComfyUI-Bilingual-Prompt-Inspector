@@ -232,3 +232,23 @@ ComfyUI 原生 text 控件（工作流真值）
 - 前端依赖 ComfyUI DOM Widget/PrimeVue 文本控件结构，升级 ComfyUI 后应重点回归空节点、旧工作流、文本编辑和标签联动。
 - `panel_sync` 只解决同一页面多节点同步；跨标签页、跨浏览器和跨设备不是当前承诺。
 - 任何解析增强都要同时测试末尾逗号、权重、重复标签、自然语言多逗号和夹心结构。
+
+## 9. 已知工程债
+
+- **单文件过大（已拆六块 + 显式 store + render 函数化）**：`js/bilingual_prompt.js` 从 4546 行降到 3218 行。
+  - `js/bpi_store.js`（129 行）—— 节点状态与偏好：`createStore({ node, textWidget })` 返回 `{ node, textWidget, state, hooks, storedMode, storedFillHeight }`。每个面板（每个节点）一份，多节点互不共享。主文件在 `renderNow` 之后调 `bindStoreHooks(store, {...})` 把 `render / updateText / setStatus / applyTokenWeight` 等填进 `hooks`；三个高度常量也在这里导出，供主文件与尺寸模块共用。
+  - 功能模块统一收 `{ store }`（个别还需要一两个额外依赖），内部 `const { state, textWidget } = store` 取稳定引用，回调一律 `store.hooks.xxx()`（**不能提前解构**，bind 发生在后面）。
+  - 已拆出的功能模块：
+    | 文件 | 行数 | 职责 | 额外依赖 |
+    |---|---|---|---|
+    | `bpi_line_breaks.js` | 123 | 换行块数据层（gap 读写、插入/删除/移动）| — |
+    | `bpi_editor_modal.js` | 365 | 标签编辑弹窗（权重与颜色 / 编辑原文 / 词条信息）| — |
+    | `bpi_chip_drag.js` | 412 | 拖拽与实时预览（含明细表行）| `englishTokenView`、`clickGuard` |
+    | `bpi_hidden.js` | 224 | 隐藏标签、「唯一」开关、输出管道（effective_text）| `buildTokenCard`（惰性）|
+    | `bpi_shortcut.js` | 74 | 撤销/重做、顺序微调 | `setHiddenTags`、`setUniqueKeys` |
+    | `bpi_node_size.js` | 208 | 节点尺寸与高度（自动高度、手动拉伸、适应高度，共 12 个函数）| `refs`（6 个 DOM）、`persistPreferences` |
+  - 这样以后拆新块时参数表不再随功能膨胀，一个 `store` 就够；要新增能力就往 `hooks` 里加一项。
+  - 剩下的候选：翻译批处理、卡片渲染、明细表、字典搜索（与 `render` 咬得紧，风险最高）。`render` 已把明细表与问题面板抽成同文件内的具名函数（306 → 57 行），不再作为候选；继续拆的前提是先把这些 DOM 收进 `store.refs`。实测主文件 0 个疑似死代码、连续 6 行重复只有 2 处，行数主要来自 172 次 `element()` 与 76 处 `addEventListener` —— 再搬模块的收益低于风险。
+- **UI 层没有自动化测试**：`tests/` 覆盖的是 `parser`（100+ 断言）和几个纯逻辑模块。拆模块后有 `tests/test_module_deps.mjs` 的静态体检（漏 import、漏传参、import→export 链接），能抓到浏览器模块链接失败这类 `node --check` 查不出的问题；DOM 初始化顺序、拖拽落点与节点高度仍只能手测。
+- **拖拽落点的历史坑**：`targetIndex` 表达不了「换行之前 / 之后」，必须配合 `beforeBreak` / `afterBreak` 两个标记；动这块之前先读 `js/parser.js` 里 `movePromptToken` 的注释，以及仓库根目录 `bug.md` 的复盘记录。
+- **动画与无障碍**：系统开了 `prefers-reduced-motion` 时，首次进入会把拖动预览与增删动画关掉（标记 `bpi.reducedMotion.v1`，只做一次）；弹窗与提示条的入场动画由各自的 `@media` 规则压成瞬时，不靠开关。

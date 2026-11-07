@@ -8,7 +8,6 @@ import {
   normalizeKey,
   parsePrompt,
   removePromptToken,
-  replacePromptSpan,
   replacePromptTokenWeight,
   restorePromptToken,
   UNKNOWN_CHINESE,
@@ -21,21 +20,28 @@ import {
   inspectorNodeTargetHeight,
   preservedSearchScroll,
   rankDictionaryMatches,
-  rankDictionaryTags,
   recordRecent,
   suggestedTags,
   toggleFavorite,
 } from "./dictionary_tools.js";
 import { classifyAnimaToken, groupAnimaTokensForDisplay, sortAnimaPrompt } from "./anima_sorter.js";
+import { createLineBreaks } from "./bpi_line_breaks.js";
+import { createWeightEditor } from "./bpi_editor_modal.js";
+import { createHiddenTags } from "./bpi_hidden.js";
+import { createShortcuts } from "./bpi_shortcut.js";
+import { createChipDrag } from "./bpi_chip_drag.js";
+import {
+  bindStoreHooks, COLLAPSED_NODE_MIN_HEIGHT, createStore,
+} from "./bpi_store.js";
+import { createNodeSize } from "./bpi_node_size.js";
 import { panelSyncHub } from "./panel_sync.js";
 import { installBpiWheelGuard } from "./wheel_guard.js";
 import { notify } from "./bpi_notify.js";
 import { showToast } from "./bpi_toast.js";
-import { dragPreviewNodeEnabled, dragPreviewTableEnabled } from "./bpi_drag_preview.js";
+import { dragPreviewTableEnabled } from "./bpi_drag_preview.js";
 import { deleteAnimNodeEnabled, playDeleteAnim } from "./bpi_delete_anim.js";
 import { INSERT_MS, playInsertAnim } from "./bpi_insert_anim.js";
 import {
-  buildTagFields,
   button,
   deletePersonalTag,
   element,
@@ -64,13 +70,9 @@ import {
 const NODE_NAME = "BilingualPromptInspector";
 const EXTENSION_VERSION = "v2.2.1";
 const PROJECT_URL = "https://github.com/mengshengzhijie/ComfyUI-Bilingual-Prompt-Inspector";
-const COLLAPSED_WIDGET_FALLBACK_HEIGHT = 390;
 // 「适应高度」打开后面板能长到的上限。ComfyUI 按 min/max 分配空间，max 必须明显高于 min，
 // 否则手动拉大节点多出来的高度全变成空白（distributeSpace 只会在 min..max 之间给）。
 const EXPANDED_WIDGET_MAX_HEIGHT = 1600;
-// 打开开关时至少给节点加这么高，保证「点了有反应」；内容被压掉更多时按实际差值撑
-const FILL_HEIGHT_MIN_GROWTH = 200;
-const COLLAPSED_NODE_MIN_HEIGHT = 360;
 const IMPORT_POLICIES = [
   { value: "changed", label: "Import: on content change" },
   { value: "always", label: "Import: every run" },
@@ -130,6 +132,7 @@ function animaPunctuationError(value) {
   return invalid.length ? `Contains characters not allowed by Anima rules: ${invalid.join(" ")}` : "";
 }
 
+// ==== 面板骨架：DOM 与控件 ====
 function createPanel(node, textWidget) {
   const panel = element("div", "bpi-panel");
   const englishSection = element("section", "bpi-english-section");
@@ -292,94 +295,12 @@ function createPanel(node, textWidget) {
     option.value = value;
     modeSelect.appendChild(option);
   }
-  // 模式跟着节点存：工作流保存后重开仍是上次选的那一档，没存过就回到自动检测
-  const storedMode = () => {
-    const value = node.properties?.bpiMode;
-    return ["tags", "natural"].includes(value) ? value : "auto";
-  };
-  // 「适应高度」也跟着节点存：工作流重开后仍是上次那个状态
-  const storedFillHeight = () => node.properties?.bpiFillHeight === true;
 
-  const state = {
-    data: { tags: [], builtin: [], user: [], packs: [] },
-    index: new Map(),
-    tokens: [],
-    machine: panelSyncHub.machineTranslations,
-    translating: new Set(),
-    pinned: null,
-    // Ctrl+点出来的多选，存 token.id；pinned 那一个恒在其中
-    selected: new Set(),
-    lastText: null,
-    renderTimer: null,
-    modePreference: storedMode(),
-    fillHeight: storedFillHeight(),
-    modeInfo: { mode: "tags", reason: "Empty input", confidence: "high" },
-    issues: [],
-    localOverrides: new Map(),
-    editing: null,
-    preferences: loadPreferences(),
-    tableFilter: "all",
-    // 明细表查找词：只筛视图，不进任何持久化数据
-    tableQuery: "",
-    filterButtons: new Map(),
-    // 表格里勾选待入库的机器翻译词条，只存 token.key
-    batchSelected: new Set(),
-    // 重复分组（render 里重算）与每个 token 在组里的次序：token.id → { rank, total }
-    duplicateGroups: [],
-    duplicateRanks: new Map(),
-    // 重复栏当前定位到的那一处：{ key, index }；-1 表示还没定位过
-    dupFocus: null,
-    dupFocusId: null,
-    searchMatches: [],
-    searchIndex: -1,
-    largeCache: new Map(),
-    largeMisses: new Set(),
-    largePending: new Set(),
-    largeLookupTimer: null,
-    largeLookupGeneration: 0,
-    largeSearchMatches: [],
-    largeSearchQuery: "",
-    largeSearchLoading: false,
-    largeSearchTimer: null,
-    largeSearchGeneration: 0,
-    largeSearchOffset: 0,
-    largeSearchHasMore: false,
-    largeSearchExpandedTerms: [],
-    searchVisibleLimit: 40,
-    lastRenderedSearchQuery: "",
-    categoryView: false,
-    // 「按 Anima 顺序排序」写入后留一份快照 { before, after }，按钮据此变成「取消排序」；
-    // 用户又手动改了文本就作废（见 render），避免回退把他后来的改动一起吞掉
-    animaSortSnapshot: null,
-    // 节点标签卡颜色模式：default（不着色）| status（按收录：未收录淡橙、机器翻译淡紫、已收录不变）
-    // | random（从 token_colors.json 摇色）| by_pack（按标签所在词库取 pack_colors）
-    colorMode: localStorage.getItem("bpi.colorMode") || "default",
-    // 从后端读到的 { presets, random_pool, pack_colors }
-    tokenColors: { presets: [], random_pool: [], pack_colors: {} },
-    // 每个卡的双击自定义色，key = token.key；切到非默认模式时被模式覆盖
-    customColors: new Map(),
-    // 随机模式下每个 token.key 摇到的颜色
-    randomColors: new Map(),
-    englishEditing: !String(textWidget.value ?? "").trim(),
-    englishEditingExplicit: false,
-    englishEditorDirty: false,
-    englishClearState: "idle",
-    clearedEnglishEntry: null,
-    assistantBusy: false,
-    undoStack: [],
-    redoStack: [],
-    boundTextarea: null,
-    textareaListeners: null,
-    nodeBaseHeight: null,
-    collapsedWidgetHeight: COLLAPSED_WIDGET_FALLBACK_HEIGHT,
-    resizeFrame: null,
-    manualResize: null,
-    windowPointerUp: null,
-    // 上游输入：是否正在等待用户确认，以及上次渲染时的连线状态
-    upstreamWaiting: false,
-    upstreamConnectedCache: null,
-    syncSource: Symbol(`bpi-node-${node.id ?? "unknown"}`),
-  };
+// ==== 状态、尺寸与偏好 ====
+  // 状态与偏好都放进显式 store（js/bpi_store.js）：以后拆功能模块从这里取，
+  // 不必再往参数表里塞一长串闭包变量
+  const store = createStore({ node, textWidget });
+  const { state, storedMode, storedFillHeight } = store;
 
   // notifyOptions：给右上角弹窗的附加参数（group/hold），需要「连点就刷新并重计停留时间」时用
   const setStatus = (message, kind = "", notifyOptions = null) => {
@@ -400,194 +321,15 @@ function createPanel(node, textWidget) {
     savePreferences(state.preferences);
     panelSyncHub.notify("preferences", state.syncSource);
   };
-  const autoFitGreenArea = (target, minimum) => {
-    if (!target || target.classList.contains("bpi-hidden")) return;
-    // 适应高度模式下高度交给 flex；这里再写死 height 会把刚放开的上限又按回去
-    if (state.fillHeight) {
-      target.style.height = "";
-      target.style.overflowY = "auto";
-      return;
-    }
-    const maximum = 360;
-    target.style.height = "auto";
-    const height = Math.max(minimum, Math.min(maximum, Math.ceil(target.scrollHeight + 2)));
-    target.style.height = `${height}px`;
-    target.style.overflowY = target.scrollHeight > height + 1 ? "auto" : "hidden";
-  };
-  const hasNodeSize = () => Number.isFinite(Number(node.size?.[0])) && Number.isFinite(Number(node.size?.[1]));
-  const resizeCornerHit = (elementValue, event) => {
-    const bounds = elementValue.getBoundingClientRect();
-    return bounds.right - event.clientX <= 24 && bounds.bottom - event.clientY <= 24;
-  };
-  const resolveDeepestWidget = (widget) => {
-    if (typeof widget?.resolveDeepest !== "function") return widget ?? null;
-    try {
-      return widget.resolveDeepest()?.widget ?? widget;
-    } catch {
-      return widget;
-    }
-  };
-  const applyEnglishEditorHeight = (height) => {
-    const value = Math.max(84, Math.min(420, Math.round(Number(height) || 0)));
-    englishEditor.style.height = `${value}px`;
-    return value;
-  };
-  const startManualResize = (kind, target, event) => {
-    if (event.button !== 0 || !resizeCornerHit(target, event)) return;
-    state.manualResize = {
-      kind,
-      target,
-      startHeight: target.offsetHeight,
-      startNodeHeight: Number(node.size?.[1]) || 0,
-    };
-  };
-  const finishManualResize = () => {
-    const resize = state.manualResize;
-    if (!resize) return;
-    state.manualResize = null;
-    requestAnimationFrame(() => {
-      if (!resize.target?.isConnected) return;
-      if (resize.kind === "english") {
-        const height = applyEnglishEditorHeight(resize.target.offsetHeight);
-        const delta = height - resize.startHeight;
-        state.preferences = { ...state.preferences, englishInputHeight: height };
-        persistPreferences();
-        if (hasNodeSize() && Math.abs(delta) > 0.5) {
-          node.setSize?.([node.size[0], Math.max(COLLAPSED_NODE_MIN_HEIGHT, resize.startNodeHeight + delta)]);
-        }
-      }
-      node.graph?.change?.();
-      node.graph?.setDirtyCanvas?.(true, true);
-      app.graph?.setDirtyCanvas?.(true, true);
-    });
-  };
-  state.windowPointerUp = finishManualResize;
-  window.addEventListener("pointerup", state.windowPointerUp, true);
-  const measureCollapsedWidgetHeight = () => {
-    const styles = getComputedStyle(panel);
-    const pixels = (name) => Number.parseFloat(styles.getPropertyValue(name)) || 0;
-    // 底部快捷输入区是后加的，这里用选择器取高度，避免引用尚未初始化的常量
-    const quickHeight = panel.querySelector(".bpi-quick-section")?.offsetHeight ?? 0;
-    const height = englishSection.offsetHeight
-      + quickHeight
-      + pixels("padding-top")
-      + pixels("padding-bottom")
-      + pixels("border-top-width")
-      + pixels("border-bottom-width")
-      + pixels("row-gap");
-    return Math.max(280, Math.min(620, Math.ceil(height + 1)));
-  };
-  const requestNodeResize = () => {
-    if (state.resizeFrame !== null) cancelAnimationFrame(state.resizeFrame);
-    state.resizeFrame = requestAnimationFrame(() => {
-      state.resizeFrame = null;
-      const width = Math.max(node.size?.[0] ?? 0, 590);
-      // 适应高度模式：高度归用户，只同步宽度。这里绝不能按内容重算——
-      // 英文区一变高就会推高自动高度、再推高节点、英文区又更高，越滚越大。
-      if (state.fillHeight) {
-        if (Math.abs((node.size?.[0] ?? 0) - width) > 0.5) {
-          node.setSize?.([width, Number(node.size?.[1]) || COLLAPSED_NODE_MIN_HEIGHT]);
-          node.graph?.change?.();
-        }
-        node.graph?.setDirtyCanvas?.(true, true);
-        app.graph?.setDirtyCanvas?.(true, true);
-        return;
-      }
-      state.collapsedWidgetHeight = measureCollapsedWidgetHeight();
-      panel.style.setProperty("--bpi-collapsed-height", `${state.collapsedWidgetHeight}px`);
-      // 稳定基线 = 标题栏 + 原生 text 控件的真实内容高度。
-      // 绝不能读 inspectorWidget().y（= bilingual_inspector.y）——那是 ComfyUI arrange
-      // 从 text.computedHeight 派生的，而 text.computedHeight 在「setSize 变高 → 文本框
-      // 可用空间变大 → scrollHeight 变大 → computedHeight 再涨」的反馈里只增不减
-      // （实测每写一次值节点 +10px、永不回缩）。这里临时把 text 控件设成 auto 量
-      // scrollHeight，得到与 setSize 无关的真实内容高，再恢复，从源头断开反馈环。
-      const textWidget = node.widgets?.find((widget) => widget.name === "text");
-      let baseHeight = state.nodeBaseHeight ?? 96;
-      if (textWidget?.element) {
-        const element = textWidget.element;
-        const previousHeight = element.style.height;
-        element.style.height = "auto";
-        const natural = element.scrollHeight;
-        element.style.height = previousHeight;
-        const top = Number.isFinite(textWidget.y) && textWidget.y >= 0 ? textWidget.y : 26;
-        const margin = Math.max(0, Number(textWidget.margin) || 0);
-        if (Number.isFinite(natural) && natural > 0) baseHeight = top + natural + margin * 2;
-        state.nodeBaseHeight = baseHeight;
-      }
-      const targetHeight = inspectorNodeTargetHeight({
-        baseHeight,
-        targetWidgetHeight: state.collapsedWidgetHeight,
-        fallbackBaseHeight: state.nodeBaseHeight ?? 96,
-        minimumHeight: COLLAPSED_NODE_MIN_HEIGHT,
-      });
-      // 高度只补不缩：用户把节点拉大之后，任何一次 render 都不该把它拽回自动高度，
-      // 否则「拉大 → 改一个字 → 被打回原形」，拉大等于白拉。宽度仍按最小可用宽度收敛。
-      const currentHeight = Number(node.size?.[1]) || 0;
-      const nextHeight = Math.max(targetHeight, currentHeight);
-      const sizeChanged = Math.abs((node.size?.[0] ?? 0) - width) > 0.5
-        || Math.abs(currentHeight - nextHeight) > 0.5;
-      if (sizeChanged) {
-        node.setSize?.([width, nextHeight]);
-        node.graph?.change?.();
-      }
-      node.graph?.setDirtyCanvas?.(true, true);
-      app.graph?.setDirtyCanvas?.(true, true);
-    });
-  };
-
-  // 量出英文标签区「没被 360 压住时」的真实高度：临时解除上限读 scrollHeight 再恢复
-  const measureNaturalEnglishHeight = () => {
-    const previousHeight = englishTokenView.style.height;
-    const previousMax = englishTokenView.style.maxHeight;
-    englishTokenView.style.height = "auto";
-    englishTokenView.style.maxHeight = "none";
-    const natural = englishTokenView.scrollHeight;
-    englishTokenView.style.height = previousHeight;
-    englishTokenView.style.maxHeight = previousMax;
-    return natural;
-  };
-
-  // 打开开关时把节点撑高一次，撑的量 = 被压掉的内容高度，但至少给一个看得出变化的量
-  const growNodeForFill = () => {
-    if (!hasNodeSize()) return;
-    const natural = measureNaturalEnglishHeight();
-    const extra = Math.max(FILL_HEIGHT_MIN_GROWTH, Math.ceil(natural - englishTokenView.offsetHeight));
-    const height = Math.min((Number(node.size?.[1]) || COLLAPSED_NODE_MIN_HEIGHT) + extra, 2400);
-    node.setSize?.([Math.max(node.size?.[0] ?? 0, 590), height]);
-    node.graph?.change?.();
-  };
-
-  const setFillHeight = (next) => {
-    const fill = Boolean(next);
-    if (fill === state.fillHeight) return;
-    state.fillHeight = fill;
-    if (!node.properties || typeof node.properties !== "object") node.properties = {};
-    node.properties.bpiFillHeight = fill;
-    panel.classList.toggle("bpi-fill", fill);
-    fillSwitch.checked = fill;
-    setTitle(fillSwitchRow, fill
-      ? "Back to the automatic height; the prompt area stops following the node"
-      : "Let the prompt area grow with the node instead of being capped");
-    if (fill) {
-      // 先放开限制再撑高，撑完重排一次让英文区吃到新空间
-      growNodeForFill();
-      requestNodeResize();
-    } else {
-      state.collapsedWidgetHeight = measureCollapsedWidgetHeight();
-      panel.style.setProperty("--bpi-collapsed-height", `${state.collapsedWidgetHeight}px`);
-      if (hasNodeSize()) {
-        const baseHeight = state.nodeBaseHeight ?? 96;
-        node.setSize?.([Math.max(node.size?.[0] ?? 0, 590), Math.max(inspectorNodeTargetHeight({
-          baseHeight,
-          targetWidgetHeight: state.collapsedWidgetHeight,
-          fallbackBaseHeight: state.nodeBaseHeight ?? 96,
-          minimumHeight: COLLAPSED_NODE_MIN_HEIGHT,
-        }), COLLAPSED_NODE_MIN_HEIGHT)]);
-        node.graph?.change?.();
-      }
-    }
-    render();
-  };
+  const {
+    applyEnglishEditorHeight, autoFitGreenArea, finishManualResize, growNodeForFill,
+    hasNodeSize, measureCollapsedWidgetHeight, measureNaturalEnglishHeight, requestNodeResize,
+    resizeCornerHit, resolveDeepestWidget, setFillHeight, startManualResize,
+  } = createNodeSize({
+    store,
+    refs: { panel, englishSection, englishEditor, englishTokenView, fillSwitch, fillSwitchRow },
+    persistPreferences,
+  });
   const isFavorite = (english) => state.preferences.favorites.includes(normalizeKey(english));
   const changeFavorite = (english) => {
     state.preferences = toggleFavorite(state.preferences, english);
@@ -668,6 +410,8 @@ function createPanel(node, textWidget) {
     state.clearedEnglishEntry = null;
     updateEnglishClearButton();
   };
+
+// ==== 文本入口与撤销栈 ====
   const updateText = (nextText, cursorPosition = null, { preserveClearState = false } = {}) => {
     if (!preserveClearState && state.englishClearState !== "idle") resetEnglishClearState();
     textWidget.value = nextText;
@@ -1118,326 +862,26 @@ function createPanel(node, textWidget) {
     return true;
   };
 
-  // ---- Line breaks --------------------------------------------------------
-  // 换行在原文里就是真正的 \n：parser 只把它当分隔符丢掉，所以它既不是 token
-  // 也进不了撤销栈。这里给两个可视化区补一层「换行块」，让它和标签一样看得见、
-  // 拖得动、删得掉。换行唯一能待的位置是第 n 个标签与第 n+1 个标签之间的原文
-  // 片段（下面叫 gap），所以换行块一律用 gap 下标定位，parser 与数据格式不动。
-  const breakGapCount = () => Math.max(0, state.tokens.length - 1);
-
-  const gapSource = (gapIndex) => {
-    const source = String(textWidget.value ?? "");
-    const left = state.tokens[gapIndex];
-    const right = state.tokens[gapIndex + 1];
-    if (!left || !right) return "";
-    return source.slice(left.end, right.start);
-  };
-
-  const gapHasBreak = (gapIndex) => /[\r\n]/.test(gapSource(gapIndex));
-
-  const currentBreakGaps = () => {
-    const gaps = new Set();
-    for (let index = 0; index < breakGapCount(); index += 1) if (gapHasBreak(index)) gaps.add(index);
-    return gaps;
-  };
-
-  // 只改写 gap：标签原文（权重、括号、自然语言整段）一个字符都不动。
-  // 注意 parser 把分隔符后面的空格算进下一个 token（token.start 在空格前），
-  // 所以 gap 里本来就只有 "," / "\n" 这类分隔符——去掉换行时补一个逗号就够，
-  // 再补空格会出现 "a,  b" 这种双空格。
-  const rebuildTextWithBreaks = (breakGaps) => {
-    const source = String(textWidget.value ?? "");
-    if (state.tokens.length < 2) return source;
-    const first = state.tokens[0];
-    const last = state.tokens[state.tokens.length - 1];
-    let out = source.slice(0, first.start);
-    for (const [index, token] of state.tokens.entries()) {
-      out += source.slice(token.start, token.end);
-      const next = state.tokens[index + 1];
-      if (!next) break;
-      const gap = source.slice(token.end, next.start);
-      if (!/[\r\n]/.test(gap)) {
-        out += breakGaps.has(index) ? "\n" : gap;
-        continue;
-      }
-      if (breakGaps.has(index)) {
-        out += gap;
-        continue;
-      }
-      const flat = gap.replace(/[\r\n]+/g, "").trim();
-      out += flat || ",";
-    }
-    return out + source.slice(last.end);
-  };
-
-  const replacePromptText = (nextText, label) => {
-    const before = String(textWidget.value ?? "");
-    if (nextText === before) return false;
-    state.undoStack.push({
-      before,
-      after: nextText,
-      beforeStart: before.length,
-      beforeEnd: null,
-      afterCursor: nextText.length,
-      label,
-    });
-    if (state.undoStack.length > 50) state.undoStack.shift();
-    state.redoStack = [];
-    updateText(nextText);
-    return true;
-  };
-
-  const applyBreakGaps = (breakGaps, label) => replacePromptText(rebuildTextWithBreaks(breakGaps), label);
-
-  const removeBreakAt = (gapIndex) => {
-    const gaps = currentBreakGaps();
-    if (!gaps.delete(gapIndex)) return false;
-    return applyBreakGaps(gaps, "删除换行");
-  };
-
-  const moveBreakTo = (fromGap, toGap) => {
-    const gaps = currentBreakGaps();
-    if (!gaps.has(fromGap)) return false;
-    const target = Math.max(0, Math.min(breakGapCount() - 1, toGap));
-    if (target === fromGap) return false;
-    gaps.delete(fromGap);
-    gaps.add(target);
-    return applyBreakGaps(gaps, "移动换行");
-  };
-
-  const insertBreakFromToolbar = () => {
-    if (state.englishEditing) {
-      setEnglishEditing(false, true);
-      render(); // setEnglishEditing 只排了个异步渲染，这里同步跑一遍拿最新的 token 偏移
-    }
-    if (!state.tokens.length) {
-      setStatus("Enter tags first, then insert a line break", "");
-      return;
-    }
-    const pinnedIndex = state.tokens.findIndex((item) => item.id === state.pinned);
-    if (pinnedIndex >= 0 && pinnedIndex < breakGapCount()) {
-      const gaps = currentBreakGaps();
-      gaps.add(pinnedIndex);
-      if (applyBreakGaps(gaps, "插入换行")) setStatus("Inserted a line break", "ok");
-      return;
-    }
-    // 没选中标签，或选中的是最后一个标签（它后面没有 gap）：换行加在整段末尾。
-    const source = String(textWidget.value ?? "");
-    if (replacePromptText(`${source.replace(/[ \t]+$/, "")}\n`, "插入换行")) {
-      setStatus("Inserted a line break", "ok");
-    }
-  };
+  // 换行块的数据层在 bpi_line_breaks.js：只读写文本与撤销栈，不碰 DOM
+  const {
+    breakGapCount, gapSource, gapHasBreak, currentBreakGaps, rebuildTextWithBreaks,
+    replacePromptText, applyBreakGaps, removeBreakAt, moveBreakTo, insertBreakFromToolbar,
+  } = createLineBreaks({ store });
   insertBreakButton.addEventListener("click", () => insertBreakFromToolbar());
 
-  // ---- Hidden tags ---------------------------------------------------------
-  // A hidden tag STAYS in the text (the views draw it with a strikethrough and
-  // it can still be dragged / recolored / re-weighted); it is only stripped
-  // from the actual output, via the effective_text/use_effective widgets that
-  // syncEffectiveOutput keeps up to date.  The list lives in
-  // properties.bpiHiddenTags so it survives workflow save/load, and every undo
-  // entry snapshots the list so undo rolls mark and text back together.
-  // Entries from older saves (whose tags were physically removed from the text
-  // back then) are re-inserted at their old anchor on restore.
-  const getHiddenTags = () => {
-    if (!node.properties || typeof node.properties !== "object") node.properties = {};
-    if (!Array.isArray(node.properties.bpiHiddenTags)) node.properties.bpiHiddenTags = [];
-    return node.properties.bpiHiddenTags;
-  };
-  const setHiddenTags = (nextList) => {
-    if (!node.properties || typeof node.properties !== "object") node.properties = {};
-    node.properties.bpiHiddenTags = Array.isArray(nextList) ? nextList : [];
-  };
-
-  const canHideTokens = () => ["tags", "mixed"].includes(state.modeInfo.mode);
-
-  // 隐藏条目 ↔ 当前 token 的匹配：优先按 key（normalizeKey(term)，改权重不影响），
-  // 旧存档的条目没有 key，退回按 raw 匹配。
-  const hiddenEntryMatches = (item, token) =>
-    (item.key && token.key === item.key) || (!item.key && token.raw === item.raw);
-  const hiddenIndexOf = (token) => getHiddenTags().findIndex((item) => hiddenEntryMatches(item, token));
-  const isTokenHidden = (token) => hiddenIndexOf(token) >= 0;
-
-  // ---- Duplicate tags ------------------------------------------------------
-  // 重复标签走两条互不干扰的线路：
-  //   1. 「唯一」开关（问题行里）：按 key 记进 node.properties.bpiUniqueKeys，
-  //      打开后第 2 次及以后出现的那几次不进实际输出，界面照常显示（划线）。
-  //      和隐藏标记一样按节点存，跟着工作流一起保存/读取。
-  //   2. 英文标签区下面的「重复」栏：单击依次跳到每一次出现（标红 + 联动选中），
-  //      已经定位过再双击就删掉当前这一处。
-  const getUniqueKeys = () => {
-    if (!node.properties || typeof node.properties !== "object") node.properties = {};
-    if (!Array.isArray(node.properties.bpiUniqueKeys)) node.properties.bpiUniqueKeys = [];
-    return node.properties.bpiUniqueKeys;
-  };
-  const setUniqueKeys = (nextList) => {
-    if (!node.properties || typeof node.properties !== "object") node.properties = {};
-    node.properties.bpiUniqueKeys = Array.isArray(nextList) ? nextList : [];
-  };
-  const isUniqueKey = (key) => Boolean(key) && getUniqueKeys().includes(key);
-
-  // 同一个标签的第 2 次及以后出现，被「唯一」开关排除在输出之外
-  const isTokenSuppressed = (token) => {
-    const rank = state.duplicateRanks.get(token.id);
-    return Boolean(rank && rank.rank > 0 && isUniqueKey(token.key));
-  };
-
-  // 重复栏当前标红的那一处所在的 token（跨 render 只记 key + 第几次，够稳）
-  const dupFocusToken = () => {
-    if (!state.dupFocus) return null;
-    const group = state.duplicateGroups.find((item) => item.key === state.dupFocus.key);
-    return group?.tokens[state.dupFocus.index] ?? null;
-  };
-
-  // ---- 输出管道 ------------------------------------------------------------
-  // 隐藏的标签留在 text 里（界面上划线显示，照常拖动/改色/改权重），真正输出
-  // 走两个隐藏 widget：effective_text = 剔除隐藏标签后的文本，use_effective = true。
-  // 旧工作流没有它们，Python 默认直通 text，行为不变。
-  const effectiveWidget = node.widgets?.find((widget) => widget.name === "effective_text") || null;
-  const useEffectiveWidget = node.widgets?.find((widget) => widget.name === "use_effective") || null;
-  const syncEffectiveOutput = () => {
-    if (!effectiveWidget) return;
-    const hidden = getHiddenTags();
-    let out = String(textWidget.value ?? "");
-    if (hidden.length) {
-      // 每次删完重新解析，偏移才不会错；隐藏条目通常很少，代价可忽略
-      for (;;) {
-        const tokens = parsePrompt(out, state.index, state.machine, { mode: state.modePreference });
-        const target = tokens.find((token) => hidden.some((item) => hiddenEntryMatches(item, token)));
-        if (!target) break;
-        const step = removePromptToken(out, target);
-        if (!step.changed) break;
-        out = step.text;
-      }
-    }
-    // 「唯一」再去重：同一个 key 只留第一次出现的那一次
-    const unique = getUniqueKeys();
-    if (unique.length) {
-      for (;;) {
-        const tokens = parsePrompt(out, state.index, state.machine, { mode: state.modePreference });
-        const target = duplicateGroups(tokens)
-          .filter((group) => unique.includes(group.key))
-          .flatMap((group) => group.tokens.slice(1))[0];
-        if (!target) break;
-        const step = removePromptToken(out, target);
-        if (!step.changed) break;
-        out = step.text;
-      }
-    }
-    effectiveWidget.value = out;
-    if (useEffectiveWidget) useEffectiveWidget.value = true;
-  };
-
-  const pushHistoryWithHidden = (entry) => {
-    state.undoStack.push(entry);
-    if (state.undoStack.length > 50) state.undoStack.shift();
-    state.redoStack = [];
-  };
-
-  // 隐藏只是"打标记"：标签留在文本里，界面上划线显示，照常拖动/改色/改权重，
-  // 只是 syncEffectiveOutput 会把它从实际输出里剔除。所以隐藏/恢复的 undo 条目
-  // before === after（文本没变），撤销只回滚隐藏列表。
-  const hideToken = (token) => {
-    if (!token || !canHideTokens()) return false;
-    if (isTokenHidden(token)) return false;
-    const hidden = getHiddenTags();
-    const before = String(textWidget.value ?? "");
-    const entry = {
-      before,
-      after: before,
-      beforeStart: token.start,
-      beforeEnd: token.end,
-      afterCursor: token.start,
-      label: `隐藏「${token.term}」`,
-      hiddenBefore: hidden.slice(),
-      hiddenAfter: hidden.concat([{
-        raw: token.raw,
-        chinese: token.chinese ?? "",
-        after: null,
-        key: token.key,
-      }]),
-    };
-    pushHistoryWithHidden(entry);
-    setHiddenTags(entry.hiddenAfter);
-    state.pinned = null;
-    updateText(before, token.start);
-    // 有了右下角提示条就不用再写「点眼睛斜线图标取消隐藏」这种操作说明了
-    const hiddenMsg = `已隐藏「${token.term}」`;
-    if (!showToast(hiddenMsg, { type: "edit" })) setStatus(hiddenMsg, "ok");
-    return true;
-  };
-
-  // 取消隐藏 = 把条目从隐藏列表里摘掉。两种形态都兼容：
-  // 标签还在文本里（新模型）→ 只摘标记；旧版工作流当时把标签从文本删了 → 按旧锚点插回去。
-  const restoreHiddenTag = (index) => {
-    const hidden = getHiddenTags();
-    const item = hidden[index];
-    if (!item) return false;
-    const before = String(textWidget.value ?? "");
-    const inText = state.tokens.some((token) => hiddenEntryMatches(item, token));
-    let after = before;
-    let cursor = before.length;
-    if (!inText) {
-      const result = restorePromptToken(before, state.tokens, item.raw, item.after);
-      if (!result.changed) return false;
-      after = result.text;
-      cursor = result.cursor;
-    }
-    const entry = {
-      before,
-      after,
-      beforeStart: 0,
-      beforeEnd: before.length,
-      afterCursor: cursor,
-      label: `恢复「${item.raw}」`,
-      hiddenBefore: hidden.slice(),
-      hiddenAfter: hidden.filter((_, i) => i !== index),
-    };
-    pushHistoryWithHidden(entry);
-    setHiddenTags(entry.hiddenAfter);
-    updateText(after, cursor);
-    const restoreMsg = inText ? `已取消隐藏「${item.raw}」` : `已把「${item.raw}」恢复到原位置`;
-    if (!showToast(restoreMsg, { type: "edit" })) setStatus(restoreMsg, "ok");
-    return true;
-  };
-
-  const unhideToken = (token) => {
-    const index = hiddenIndexOf(token);
-    return index >= 0 ? restoreHiddenTag(index) : false;
-  };
-
-  const restoreAllHiddenTags = () => {
-    const hidden = getHiddenTags();
-    if (!hidden.length) return false;
-    const before = String(textWidget.value ?? "");
-    let text = before;
-    let tokens = state.tokens;
-    for (const item of hidden) {
-      if (tokens.some((token) => hiddenEntryMatches(item, token))) continue; // 还在文本里，只摘标记
-      const step = restorePromptToken(text, tokens, item.raw, item.after);
-      if (!step.changed) continue;
-      text = step.text;
-      tokens = parsePrompt(text, state.index, state.machine, { mode: state.modePreference });
-    }
-    const entry = {
-      before,
-      after: text,
-      beforeStart: 0,
-      beforeEnd: before.length,
-      afterCursor: text.length,
-      label: `恢复全部隐藏标签（${hidden.length}）`,
-      hiddenBefore: hidden.slice(),
-      hiddenAfter: [],
-    };
-    pushHistoryWithHidden(entry);
-    setHiddenTags([]);
-    state.pinned = null;
-    updateText(text, text.length);
-    const restoreAllMsg = `已恢复 ${hidden.length} 个隐藏标签`;
-    if (!showToast(restoreAllMsg, { type: "edit" })) setStatus(restoreAllMsg, "ok");
-    return true;
-  };
-
-  let chipClickSuppressed = false;
+  // 隐藏标签 / 唯一开关 / 输出管道都在 bpi_hidden.js：那里只改数据与 effective_text，
+  // 界面渲染仍旧回调主文件的 buildTokenCard
+  const {
+    canHideTokens, dupFocusToken, effectiveWidget, getHiddenTags, getUniqueKeys, hiddenEntryMatches, hiddenIndexOf, hideToken, isTokenHidden, isTokenSuppressed,
+    isUniqueKey, pushHistoryWithHidden, restoreAllHiddenTags, restoreHiddenTag, setHiddenTags, setUniqueKeys, syncEffectiveOutput, unhideToken, useEffectiveWidget,
+  } = createHiddenTags({
+    store,
+    // buildTokenCard 定义在文件后半段，包一层等运行时再取，避免 TDZ
+    buildTokenCard: (...args) => buildTokenCard(...args),
+  });
+  // 拖动超过阈值时压掉紧随其后的 click：拖拽层要用对象包一层，
+  // 拆出去之后两边共享的是同一个引用，不是各拿一份拷贝
+  const clickGuard = { suppressed: false };
   // 上一次点的是哪张卡、什么时候点的：双击靠这两个自己判断（见 buildTokenCard）
   let lastCardClickAt = 0;
   let lastCardClickId = null;
@@ -1448,407 +892,8 @@ function createPanel(node, textWidget) {
   // during the capture phase the event never reaches the target and never
   // bubbles back, so bubble-phase listeners on document would never fire and
   // the drag would silently die.  document capture always runs first.
-  const bindDragTrackers = (onMove, finish) => {
-    document.addEventListener("pointermove", onMove, true);
-    document.addEventListener("pointerup", finish, true);
-    document.addEventListener("pointercancel", finish, true);
-  };
-  const unbindDragTrackers = (onMove, finish) => {
-    document.removeEventListener("pointermove", onMove, true);
-    document.removeEventListener("pointerup", finish, true);
-    document.removeEventListener("pointercancel", finish, true);
-  };
-
-  // 拖动实时预览（设置里两个开关，默认关）：把被拖的那一项复制成浮层跟着光标走，
-  // 原位留一个等大的空位，其余标签用 FLIP 动画平移让位——手感接近手机桌面拖图标。
-  // 全程只动 DOM，文本不动；松手才由 moveTokenTo 统一改文本，只留一条撤销记录。
-  //
-  // 落点 targetIndex 是 state.tokens 的下标（movePromptToken 的「先摘出来再插进去」语义），
-  // 实际要插到哪个 DOM 元素前面由 data-token-id 反查；那一项被筛掉了就往后找最近的可见项。
-  // 注意：一旦动了 DOM，它的顺序就不再等于 state.tokens，落点下标必须一直按拖动前
-  // 那份快照算（这两个拖拽的实现都已经在 pointerdown 时把候选列表存好了）。
-  // options.raise：默认抬起（浮层跟光标走，原位留空位）；明细表传 false —— 不要抬起效果，
-  // 行自己留在原位，只在换位时跟着大家一起滑过去（像列表重排，不像手机挪图标）。
-  // FLIP_MS：让位动画时长，同时充当落点更新的节流窗口（动画播完才判下一次）。
-  // 拖着划过一长串标签时，落点会在相邻两个槽位之间反复抖动；窗口太短就会
-  // 不断打断重启动画，看上去就是疯狂左右闪。
-  const FLIP_MS = 160;
-  // 落点滞回：指针从上一次生效的位置挪出这么多像素才重新判定
-  const MOVE_EPSILON = 10;
-  const createDragPreview = (dragged, candidates, enabled, options = {}) => {
-    const homeParent = dragged.parentNode;
-    const homeNext = dragged.nextSibling;
-    const tracked = candidates.slice();
-    if (!tracked.includes(dragged)) tracked.push(dragged);
-    const byTokenId = new Map();
-    for (const item of candidates) {
-      const id = Number(item.dataset?.tokenId);
-      if (Number.isFinite(id)) byTokenId.set(id, item);
-    }
-    const candidateSet = new Set(candidates);
-    // 下一个「同类」兄弟：中间的分隔符、换行块、落点提示线一律跳过
-    const nextCandidate = (from) => {
-      let node = from?.nextElementSibling ?? null;
-      while (node && !candidateSet.has(node)) node = node.nextElementSibling;
-      return node;
-    };
-    // FLIP：改 DOM 前先量一遍「看起来的位置」，改完把每个动过的元素用 transform
-    // 拉回旧位，下一帧把 transform 清成空，浏览器自己去补这段位移 —— 平滑滑过去。
-    // 量「改完之后的位置」之前必须先清掉上一次动画留下的 transform —— 否则量到的是
-    // 动画中途的坐标，算出来的补偿位移是错的，下一次判定又会往回翻，来回振荡 = 疯狂闪。
-    let animating = false;
-    // 让位动画还没落地时攒着的落点，落地那一刻接着挪：最后一次移动不会被丢掉
-    let wanted = null;
-    let unlockTimer = null;
-    // 指针位置：每次 track 更新，run 真正执行时才拿它算落点
-    let pendingX = 0;
-    let pendingY = 0;
-    let appliedX = null;
-    let appliedY = null;
-    // 这次落点是不是「上一行末尾（换行块前面）」：拖拽层算好传进来，预览层不自己猜
-    let pendingBreak = false;
-    // 调试用（localStorage bpi.debug=1）：落点每次变化打一行，方便看它到底算到哪张卡
-    let debugLastKey = "";
-    const flip = (mutate) => {
-      // 被拖的那张（透明空位）不参与 FLIP：它要「啪」地挪到落点，
-      // 只有旁边的元素需要平滑让开。要是连空位一起做过渡，眼睛就会看到
-      // 原位还留着一块、落点又多出一块，像是「原位凭空挤出一个空间」。
-      const before = tracked
-        .filter((el) => el !== dragged)
-        .map((el) => [el, el.getBoundingClientRect()]);
-      mutate();
-      const shifted = [];
-      for (const [el, first] of before) {
-        if (!el.isConnected) continue;
-        el.style.transition = "none";
-        el.style.transform = "";
-        const last = el.getBoundingClientRect();
-        const dx = first.left - last.left;
-        const dy = first.top - last.top;
-        if (!dx && !dy) {
-          // 它压根没动：临时关掉的 transition 要还回去，否则后面就不再有动画了
-          el.style.transition = "";
-          continue;
-        }
-        el.style.transform = `translate(${dx}px,${dy}px)`;
-        shifted.push(el);
-      }
-      if (!shifted.length) return;
-      void dragged.offsetWidth;
-      for (const el of shifted) el.style.transition = `transform ${FLIP_MS}ms cubic-bezier(.2,.8,.2,1)`;
-      animating = true;
-      requestAnimationFrame(() => {
-        for (const el of shifted) el.style.transform = "";
-        // 关键：等让位动画真正播完再解锁。早于一帧解除的话，动画还在半路，
-        // 下一次 pointermove 量到的是中间坐标 → 落点算错 → 又挪回去 → 来回闪
-        if (unlockTimer) clearTimeout(unlockTimer);
-        unlockTimer = setTimeout(() => {
-          unlockTimer = null;
-          animating = false;
-          // 动画期间攒下的新落点，这一刻再挪
-          run();
-        }, FLIP_MS);
-      });
-    };
-    // 让位：把攒着的落点真正落到 DOM 上，其余标签用 FLIP 滑过去
-    const run = (force = false) => {
-      if (wanted === null || !dragged.isConnected) return;
-      // 让位动画还在半路就只攒着：这时候 getBoundingClientRect / elementFromPoint
-      // 拿到的都是「半路坐标」，拿它判定会立刻往回翻，来回振荡 = 疯狂闪。
-      // force 是松手那一下的强制收口，此时必须把最后一次落点落实。
-      if (animating && !force) return;
-      // 指针停在两个槽位的分界线上时，一两像素的抖动也会让落点反复横跳，
-      // 所以要求它从上一次生效的位置挪出 MOVE_EPSILON 才重新判定（滞回）。
-      if (!force && appliedX !== null
-        && Math.hypot(pendingX - appliedX, pendingY - appliedY) < MOVE_EPSILON) return;
-      appliedX = pendingX;
-      appliedY = pendingY;
-      // 落点在这里才算：此刻让位动画已播完，量到的是稳定的最终排版位置，
-      // 不会像「边挪边量」那样读到半路坐标、判定完立刻翻回去
-      const targetIndex = typeof wanted === "function" ? wanted() : wanted;
-      wanted = null;
-      let ref = null;
-      for (let i = targetIndex; i < state.tokens.length && !ref; i += 1) {
-        const found = byTokenId.get(state.tokens[i].id);
-        if (found && found !== dragged) ref = found;
-      }
-      if (window.localStorage.getItem("bpi.debug") === "1") {
-        const key = `${targetIndex}|${ref?.textContent ?? "null"}`;
-        if (key !== debugLastKey) {
-          debugLastKey = key;
-          console.log("[bpi] run", {
-            targetIndex,
-            ref: ref?.textContent?.slice(0, 24) ?? null,
-            dragged: dragged.textContent?.slice(0, 24),
-          });
-        }
-      }
-      // 落点其实是「上一行末尾」时，浮层要停到那一行的 ↵ 前面：
-      // 每行是独立的 .bpi-token-line，↵ 挂在上一行末尾，不是下一张卡的兄弟
-      if (ref && pendingBreak) {
-        const prevLine = ref.parentElement?.previousElementSibling;
-        const prevLast = prevLine?.lastElementChild;
-        if (prevLast?.classList?.contains("bpi-break-chip")) ref = prevLast;
-      }
-      const tail = candidates[candidates.length - 1];
-      const parent = ref ? ref.parentNode : tail?.parentNode;
-      if (!parent?.isConnected) return;
-      // 幂等检查：已经在目标位置就别再挪。这条同时也是防抖的关键，
-      // 少了它相邻两个槽位会来回跳。
-      // 注意别再补「落点等于原位就 return」那种判断——DOM 可能已经被前面几次
-      // 移动挪走了，这时恰恰需要真的移回原位，预览才会挤开。
-      if (dragged.parentNode === parent
-        && (dragged.nextElementSibling === ref || nextCandidate(dragged) === ref)) return;
-      flip(() => parent.insertBefore(dragged, ref));
-    };
-
-    let clone = null;
-    let grabX = 0;
-    let grabY = 0;
-    let baseLeft = 0;
-    let baseTop = 0;
-    // 抬起：复制一份当浮层跟着光标走，原元素留在原位当空位（透明但仍参与命中测试）。
-    // options.raise===false（明细表）：根本不复制 —— 行自己在原地，换位置的时候跟着
-    // 大家一起滑过去就行，不需要「拿起来」这回事。
-    const lift = (pointerX, pointerY) => {
-      if (!enabled || options.raise === false || clone) return;
-      const rect = dragged.getBoundingClientRect();
-      if (!rect.width || !rect.height) return;
-      grabX = pointerX - rect.left;
-      grabY = pointerY - rect.top;
-      baseLeft = rect.left;
-      baseTop = rect.top;
-      clone = dragged.cloneNode(true);
-      clone.classList.add("bpi-drag-float");
-      clone.removeAttribute("id");
-      // 拖起来的这份要看着就跟原物一模一样：原元素身上的「拖拽中」半透明状态（.bpi-dragging）
-      // 不能带到浮层上，否则整块发灰，像隔着一层毛玻璃
-      clone.classList.remove("bpi-dragging");
-      clone.style.position = "fixed";
-      clone.style.left = `${rect.left}px`;
-      clone.style.top = `${rect.top}px`;
-      // 必须按 border-box 算：行/卡片自带 padding 和边框，rect 是含这些的总尺寸，
-      // 用默认的 content-box 会把浮层撑大一圈，看着像被放大了
-      clone.style.boxSizing = "border-box";
-      clone.style.width = `${rect.width}px`;
-      clone.style.height = `${rect.height}px`;
-      clone.style.margin = "0";
-      clone.style.zIndex = "10050";
-      clone.style.pointerEvents = "none";
-      document.body.appendChild(clone);
-      dragged.classList.add("bpi-drag-source");
-      follow(pointerX, pointerY);
-    };
-    // 节点里：浮层跟着光标二维移动（抬起感）。不放大的，跟原物一样大，
-    // 抬起感全靠 .bpi-drag-float 的投影；明细表传了 raise:false，这一步直接空转
-    const follow = (pointerX, pointerY) => {
-      if (!clone) return;
-      clone.style.transform = `translate3d(${pointerX - grabX - baseLeft}px,${pointerY - grabY - baseTop}px,0)`;
-    };
-    // 只清 FLIP 留在被跟踪元素上的内联样式（transition / transform）
-    const clearInline = () => {
-      for (const el of tracked) {
-        el.style.transition = "";
-        el.style.transform = "";
-      }
-    };
-    return {
-      lift,
-      // 跟手 + 让位：让位动画播到一半时只攒着落点，等落地那刻再判。
-      // 这样最后一次移动不会被丢，也不会因为读到半路坐标而来回翻
-      track(pointerX, pointerY, resolveIndex, beforeBreak = false) {
-        if (!enabled) return;
-        follow(pointerX, pointerY);
-        pendingX = pointerX;
-        pendingY = pointerY;
-        pendingBreak = Boolean(beforeBreak);
-        wanted = resolveIndex;
-        run();
-      },
-      // 松手前收口：把攒着的那一步**强制**补上（不受让位动画节流限制），
-      // 让「眼前的顺序」正好等于「马上要写进文本的顺序」，再清掉动画残留
-      // （内联 transition / transform）。少了这一步，松手后排队中的重渲染
-      // 会把「拖动前的旧顺序」画出来一帧 —— 那正是闪回起点
-      settle() {
-        run(true);
-        clearInline();
-      },
-      // 浮层落地：对准传进来的落点（松手前量好的最终位置）飞过去，落地那一刻才消失。
-      // 期间真实那一张一直是透明的空位，所以中间不会看到两张。
-      // 落点量不到就直接删掉浮层 —— 无论如何不留残影
-      land() {
-        const dying = clone;
-        clone = null;
-        clearInline();
-        // 排队中的重渲染先撤掉：它会马上重建 DOM，把落点上那一张提前显示出来（重影），
-        // 等浮层落地再补刷一次
-        const pending = Boolean(state.renderTimer);
-        if (pending) {
-          clearTimeout(state.renderTimer);
-          state.renderTimer = null;
-        }
-        const reveal = () => {
-          dragged.classList.remove("bpi-drag-source");
-          if (pending) render();
-        };
-        if (!dying) {
-          reveal();
-          return;
-        }
-        // 上面 clearInline() 已经把让位动画的 transform 清掉了，
-        // 所以此刻量到的就是真正的排版位置 —— 浮层该去的落点
-        const rect = dragged.isConnected ? dragged.getBoundingClientRect() : null;
-        if (rect && (rect.width || rect.height)) {
-          dying.style.transition = "transform .18s cubic-bezier(.2,.8,.2,1)";
-          dying.style.transform = `translate3d(${rect.left - baseLeft}px,${rect.top - baseTop}px,0) scale(1)`;
-          window.setTimeout(() => {
-            dying.remove();
-            reveal();
-          }, 200);
-          return;
-        }
-        dying.remove();
-        reveal();
-      },
-      // 放回原位：移动没生效时（原地放下 / 目标被筛掉了）把预览挪出来的错位收回去
-      restore() {
-        if (!dragged.isConnected || !homeParent?.isConnected) return;
-        // 原来的下一个节点可能已经被重渲染换掉了，那就直接放到父节点末尾
-        const before = homeNext && homeNext.parentNode === homeParent ? homeNext : null;
-        if (dragged.parentNode === homeParent && dragged.nextSibling === before) return;
-        homeParent.insertBefore(dragged, before);
-      },
-    };
-  };
-
-  // Drag-to-reorder on the English token chips: pointerdown arms a possible
-  // drag, moving past a small threshold activates it (so plain clicks and
-  // double-clicks keep working), and releasing applies a structured move
-  // through the shared undo stack.
-  // view / selector 让英文标签区与中文对照区可以共用这套拖拽逻辑：
-  // 两处 chip 一一对应同一批 token，拖动任何一个都是重排同一份文本。
-  // selector 必须指到整张卡片（.bpi-token-card）而不是里面的英文行：卡片上
-  // 半是英文、下半是中文小块，只认英文行的话，指针落在中文小块上就判定不到
-  // 目标，插入提示不出现、落点还会被几何兜底算到列表末尾去。
-  const attachChipDrag = (chip, token, view = englishTokenView, selector = ".bpi-token-card") => {
-    chip.addEventListener("pointerdown", (event) => {
-      if (event.button !== 0 || !canReorderTokens()) return;
-      const startX = event.clientX;
-      const startY = event.clientY;
-      // 实时预览打开后卡片会被挪走，DOM 顺序就不等于 token 顺序了；
-      // 落点下标一律按拖动前这份顺序算（关掉预览时两者本来就是一样的）
-      const homeList = [...view.querySelectorAll(selector)];
-      const previewEnabled = dragPreviewNodeEnabled();
-      const preview = createDragPreview(chip, homeList, previewEnabled);
-      let active = false;
-      let targetIndex = null;
-      // 落点是不是「上一行末尾」（换行块前面）：被拖的标签本身就在行首时
-      // token 顺序不会变，得靠这个标记把前面的换行挪到它后面
-      let beforeBreak = false;
-      let hoverChip = null;
-      const clearHover = () => {
-        if (hoverChip) hoverChip.classList.remove("bpi-drop-before", "bpi-drop-after");
-        hoverChip = null;
-      };
-      const onMove = (moveEvent) => {
-        if (!chip.isConnected) {
-          finish();
-          return;
-        }
-        if (!active) {
-          // 阈值调高一点：手抖 / 点着不动不会误触发拖动（顺带也让「让位」
-          // 不会在起手那一瞬间来回跳）
-          if (Math.abs(moveEvent.clientX - startX) < 7 && Math.abs(moveEvent.clientY - startY) < 7) return;
-          active = true;
-          chipClickSuppressed = true;
-          chip.classList.add("bpi-dragging");
-          preview.lift(moveEvent.clientX, moveEvent.clientY);
-        }
-        moveEvent.preventDefault();
-        clearHover();
-        targetIndex = null;
-        const hit = document.elementFromPoint(moveEvent.clientX, moveEvent.clientY);
-        const hitChip = hit?.closest?.(selector);
-        // 拖拽元素现在可能是整张卡片：命中它内部的 chip 也算「拖到自己身上」，跳过
-        const onSelf = Boolean(hitChip) && (hitChip === chip || chip.contains(hitChip));
-        // 界面上真正排在后面的那张（跳过被拖的这张——它就是要插进来的那个）
-        const live = [...view.querySelectorAll(selector)];
-        const nextVisible = (from) => {
-          const start = live.indexOf(from);
-          for (let i = start + 1; i < live.length; i += 1) {
-            if (live[i] !== chip) return live[i];
-          }
-          return null;
-        };
-        // 落点一律换算成「插到哪张卡前面」，再变回 state.tokens 的下标；
-        // 这样即使预览已经把卡片挪过的位置串了，结果也跟 movePromptToken 一致
-        const resolve = (anchor) => {
-          const index = anchor ? homeList.indexOf(anchor) : -1;
-          return index >= 0 ? index : state.tokens.length;
-        };
-        // 这张卡是不是「某行第一个、上一行以换行块结尾、而且指针确实在上一行的高度里」。
-        // 最后那条不能少：光看结构的话，在同一行里往左拖一点、落点正好是行首那张卡，
-        // 就会被当成要跨行，浮层一下子飞到上一行的回车前面去
-        const landsBeforeBreak = (card, clientY) => {
-          if (!card) return false;
-          const prevLine = card.parentElement?.previousElementSibling;
-          if (!prevLine?.lastElementChild?.classList?.contains("bpi-break-chip")) return false;
-          // 用上一行容器的矩形来判：卡片自己带着 FLIP 的 transform，量出来不准
-          const box = prevLine.getBoundingClientRect();
-          return clientY >= box.top && clientY <= box.bottom;
-        };
-        if (hitChip && !onSelf) {
-          const rect = hitChip.getBoundingClientRect();
-          const before = moveEvent.clientX < rect.left + rect.width / 2;
-          const anchorCard = before ? hitChip : nextVisible(hitChip);
-          targetIndex = resolve(anchorCard);
-          beforeBreak = !before && landsBeforeBreak(anchorCard, moveEvent.clientY);
-          hoverChip = hitChip;
-          hoverChip.classList.add(before ? "bpi-drop-before" : "bpi-drop-after");
-        } else {
-          // 空白处、或光标停在自己浮起来的那份身上：按当前画出来的顺序做几何兜底。
-          // 少了后半句，卡片一旦挪到指针下面就再也算不出新落点，拖着就不让位了
-          let lastCard = null;
-          for (const other of live) {
-            if (other === chip) continue;
-            const rect = other.getBoundingClientRect();
-            if (rect.bottom <= moveEvent.clientY) lastCard = other;
-            else if (moveEvent.clientY >= rect.top && moveEvent.clientX >= rect.right) lastCard = other;
-          }
-          const anchor = lastCard ? nextVisible(lastCard) : live.find((item) => item !== chip) || null;
-          targetIndex = resolve(anchor);
-          beforeBreak = landsBeforeBreak(anchor, moveEvent.clientY);
-        }
-        preview.track(moveEvent.clientX, moveEvent.clientY, targetIndex, beforeBreak);
-      };
-      const finish = () => {
-        unbindDragTrackers(onMove, finish);
-        chip.classList.remove("bpi-dragging");
-        clearHover();
-        if (active) {
-          setTimeout(() => { chipClickSuppressed = false; }, 0);
-          // 先收口：把攒着的那一步落到 DOM 上，让「眼前的顺序」正好等于
-          // 「马上要写进文本的顺序」，再清掉让位动画残留
-          preview.settle();
-          // 落点正好是自己后面那一格、而自己后面就是换行：这是「下移一行」，
-          // token 顺序没变，得让 parser 把换行挪到前面
-          const afterBreak = !beforeBreak && targetIndex === token.id + 1
-            && token.id + 1 < state.tokens.length
-            && gapHasBreak(token.id);
-          const committed = targetIndex !== null
-            ? moveTokenTo(token, targetIndex, { beforeBreak, afterBreak })
-            : false;
-          // 没搬动（原地放下 / 目标被筛掉了）：把预览挪出来的错位收回去
-          if (!committed) preview.restore();
-          // 有浮层时 land() 会等它落地再刷 DOM（提前刷会把落点上那一张显示出来，看着是重影）
-          preview.land();
-          if (committed) requestAnimationFrame(() => view.focus({ preventScroll: true }));
-        }
-      };
-      bindDragTrackers(onMove, finish);
-    });
-  };
-
+  // 拖拽层在 bpi_chip_drag.js：这里只算落点下标，文本改动仍由 parser 负责
+  const { attachChipDrag, createDragPreview, bindDragTrackers, unbindDragTrackers } = createChipDrag({ store, englishTokenView, clickGuard });
   // 换行块：原文里的 \n 在两个可视化区里渲染成 ↵，和标签一样看得见、拖得动、
   // 删得掉。拖到某个标签上 = 换行走这个标签后面的 gap。与标签拖拽一样必须挂
   // document 捕获阶段，否则 Nodes 2.0 下收不到事件。
@@ -1936,418 +981,12 @@ function createPanel(node, textWidget) {
     return row;
   };
 
-  // Alt+ArrowUp / Alt+ArrowDown nudge the pinned token one slot.  Returns
-  // true when the key was consumed.
-  const handleTokenReorderShortcut = (event) => {
-    if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return false;
-    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return false;
-    const token = state.tokens.find((item) => item.id === state.pinned);
-    if (!token) return false;
-    const index = state.tokens.indexOf(token);
-    if (index < 0) return false;
-    event.preventDefault();
-    event.stopPropagation();
-    const upward = event.key === "ArrowUp";
-    const moved = moveTokenTo(token, upward ? index - 1 : index + 2);
-    if (!moved) setStatus(upward ? `“${token.term}” is already at the front` : `“${token.term}” is already at the back`, "");
-    return true;
-  };
-
-  const openWeightEditor = (token) => {
-    if (!token) return;
-    // 自然语言片段（以及 BREAK、<lora:…> 这类特殊语法）没有独立权重、也没有词条，
-    // 所以这两个页签按 token 形态收起来，但弹窗照开：配色和整段编辑对它们一样有用
-    const isPlainTag = token.syntax === "tag" && token.segmentKind !== "natural";
-    const canWeight = isPlainTag && ["tags", "mixed"].includes(state.modeInfo.mode);
-    const shade = element("div", "bpi-modal-shade");
-    const modal = element("div", "bpi-modal");
-    // 这句直接写中文：带变量 + 固定术语，走翻译层反而匹配不上，界面必须中文
-    // 自然语言片段 / BREAK 这类不叫「标签」，标题换个说法免得看着别扭
-    modal.appendChild(element("h3", "", isPlainTag ? `编辑标签：${token.term}` : `编辑片段：${token.term}`));
-
-    // 多选着进来、或者双击的不是普通标签（自然语言片段）→ 直接停在编辑页：
-    // 权重只对单个标签有意义，而自然语言片段本来就是整段改的
-    const startOnRaw = state.selected.size > 1 || !isPlainTag;
-    // Tab 切换：权重与颜色（一页管两样）/ 编辑（改这行原文）/ 词条信息（改的是整条词条）
-    // 自然语言片段没有权重也没有词条，顺序改成 编辑 → 颜色
-    const tabs = element("div", "bpi-editor-tabs");
-    // 没有权重可改时这页只剩配色，标签也就只写「颜色」
-    const tabWeight = element("button", `bpi-editor-tab${startOnRaw ? "" : " bpi-editor-tab-active"}`, canWeight ? t("Weight / color") : t("Colors"));
-    const tabRaw = element("button", `bpi-editor-tab${startOnRaw ? " bpi-editor-tab-active" : ""}`, t("Edit"));
-    const tabEdit = element("button", "bpi-editor-tab", t("Entry info"));
-    tabWeight.type = tabRaw.type = tabEdit.type = "button";
-    if (isPlainTag) tabs.append(tabWeight, tabRaw, tabEdit);
-    else tabs.append(tabRaw, tabWeight);
-    modal.appendChild(tabs);
-
-    const weightPanel = element("div", `bpi-editor-panel${startOnRaw ? " bpi-hidden" : ""}`);
-    // 权重那三块（说明 / 输入框 / 预设）单独装一个盒子，不能改权重时整盒收起，
-    // 下半部分的配色照旧留着 —— 自然语言片段也要能上色
-    const weightBlock = element("div");
-    // 这句直接写中文：固定术语，走翻译层反而匹配不上
-    weightBlock.appendChild(element("div", "bpi-config-note", "Anima 格式：(标签:权重)"));
-    const form = element("div", "bpi-form");
-    const input = element("input", "");
-    input.type = "number";
-    input.min = "0";
-    input.max = "3";
-    input.step = "0.05";
-    input.value = token.weight === null ? "1" : String(token.weight);
-    // 打开弹窗时这个数字是多少：只有它变了才写回权重，
-    // 否则「只想换个颜色」会被顺手落成 (标签:1)
-    const initialWeight = token.weight === null ? 1 : token.weight;
-    form.append(element("label", "", "Weight"), input);
-    weightBlock.appendChild(form);
-
-    const presets = element("div", "bpi-weight-presets");
-    for (const value of [0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.5]) {
-      presets.appendChild(button(String(value), () => {
-        input.value = String(value);
-        input.focus();
-      }, "bpi-mini"));
-    }
-    weightBlock.appendChild(presets);
-    weightPanel.appendChild(weightBlock);
-
-    // 同一页下半部分是配色：预设色块 + 自定义输入框；只在 default 模式下才看得见效果
-    // 说明跟上方的「Anima 格式」一样放在控件上面
-    const colorDivider = element("div", "bpi-editor-divider");
-    weightPanel.appendChild(colorDivider);
-    weightBlock.hidden = !canWeight;
-    colorDivider.hidden = !canWeight;
-    // 双击设的自定义色优先级最低：只有「默认」模式才轮到它显示，其它模式会盖住
-    weightPanel.appendChild(element("div", "bpi-color-note", t("This color has the lowest priority: it only shows in Default mode; other color modes override it.")));
-    const presetsRow = element("div", "bpi-color-presets");
-    let pickedColor = state.customColors.get(token.key) || "";
-    const customInput = element("input", "");
-    customInput.value = pickedColor;
-    // 统一选中态：值相同才高亮，「无」用空串，所以点它能直接清掉自定义色
-    const markPicked = (value, keepInput) => {
-      pickedColor = value;
-      if (!keepInput) customInput.value = value;
-      presetsRow.querySelectorAll(".bpi-color-swatch").forEach((s) => {
-        s.classList.toggle("bpi-color-swatch-active", (s.dataset.color || "") === value);
-      });
-    };
-    // 「无」= 不着色、跟随主题，放在预设色块最前面，一键回到默认
-    const noneSwatch = element("span", "bpi-color-swatch bpi-color-swatch-none", t("None"));
-    noneSwatch.dataset.color = "";
-    setTitle(noneSwatch, t("None"));
-    noneSwatch.addEventListener("click", () => markPicked(""));
-    presetsRow.appendChild(noneSwatch);
-    const presetsPool = (state.tokenColors.presets && state.tokenColors.presets.length) ? state.tokenColors.presets : ["#6b9b78"];
-    for (const hex of presetsPool) {
-      const swatch = element("span", "bpi-color-swatch");
-      swatch.dataset.color = hex;
-      if (hex === pickedColor) swatch.classList.add("bpi-color-swatch-active");
-      swatch.style.background = hex;
-      swatch.title = hex;
-      swatch.addEventListener("click", () => markPicked(hex));
-      presetsRow.appendChild(swatch);
-    }
-    if (!pickedColor) noneSwatch.classList.add("bpi-color-swatch-active");
-    weightPanel.appendChild(presetsRow);
-    const customRow = element("div", "bpi-color-custom");
-    customRow.appendChild(element("span", "", t("Custom")));
-    setPlaceholder(customInput, "#5b8a72 or rgb(91,138,114)");
-    customInput.addEventListener("input", () => {
-      // keepInput：正在打字就不要回写输入框，否则光标会被拉到末尾
-      markPicked(customInput.value.trim(), true);
-    });
-    customInput.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") { event.preventDefault(); apply(); }
-    });
-    customRow.appendChild(customInput);
-    weightPanel.appendChild(customRow);
-
-    // 编辑 Tab：把选中那段原文原样搬进输入框，怎么改都行，应用时整段写回提示词
-    const rawPanel = element("div", `bpi-editor-panel${startOnRaw ? "" : " bpi-hidden"}`);
-    const rawSpan = spanForEdit(token);
-    const originalSlice = String(textWidget.value ?? "").slice(rawSpan.start, rawSpan.end).trim();
-    // 这三句直接写中文：本页专属说明，走翻译层反而匹配不上，界面必须中文
-    rawPanel.appendChild(element("div", "bpi-config-note", rawSpan.tokens.length > 1
-      ? `已选中 ${rawSpan.tokens.length} 个标签，下面是它们在原文里的整段（含中间的标签）`
-      : isPlainTag ? "下面是这个标签在原文里的那段文字" : "下面是这段文字在原文里的整段"));
-    const rawEditor = element("textarea", "bpi-raw-editor");
-    rawEditor.value = originalSlice;
-    rawPanel.appendChild(rawEditor);
-    rawPanel.appendChild(element("div", "bpi-config-note", "怎么改都行：逗号会被重新切成标签，清空等于删除这一段；Ctrl+Enter 应用"));
-
-    // 编辑 Tab：整套词条字段（含分类下拉），跟「新增／编辑个人标签」弹窗同一份构件。
-    // 命中词库就整条带过来改；没命中就按这条标签卡起个头，存进去即新建。
-    const editPanel = element("div", "bpi-editor-panel bpi-hidden");
-    // 两句说明收进同一个盒子：应用时若发现还是「未收录」，整盒换成红色警告，
-    // 并先把盒子按当前高度钉住，换文案就不会把下面的表单顶上去
-    const editNotes = element("div", "bpi-editor-notes");
-    // 这两句是原文（英文的走翻译层，中文那句本页专属、不进译表），来回切换时都按原文重新渲染
-    const noteSavedSource = "Edits go to the personal dictionary and override same-name entries.";
-    const noteReadonlySource = "英文标签在这里只读；要改提示词里的文字，请用「编辑」页。";
-    const noteSaved = element("div", "bpi-config-note", noteSavedSource);
-    const noteReadonly = element("div", "bpi-config-note", noteReadonlySource);
-    editNotes.append(noteSaved, noteReadonly);
-    editPanel.appendChild(editNotes);
-    const editForm = element("div", "bpi-form");
-    const editFields = buildTagFields(editForm, state.index.get(token.key) ?? {
-      english: token.term,
-      // 未收录的中文名只是占位，这里预填成空：想存就得自己写一个，
-      // 下面的「还是未收录就拦掉」只是兜底（防手动敲回这三个字）
-      chinese: token.chinese === UNKNOWN_CHINESE ? "" : token.chinese ?? "",
-      models: ["general", "anima"],
-      source: "user",
-      verified: true,
-      // 英文只读：改它只会另存一条词条，不会动提示词；改文字请去「编辑」页
-    }, { withTarget: false, readonlyEnglish: true });
-    editPanel.appendChild(editForm);
-
-    // 保护性占位：未收录标签的中文名只是提示文案，原样存进个人词库会得到
-    // 一条中文名是「未收录」的残词条，标签从此显示成已收录却看不出是什么。
-    // 所以「词条信息」页点应用时先比对中文名，还是占位就不保存、只把说明换成红色警告。
-    let warnTimer = 0;
-    const restoreEditNotes = () => {
-      clearTimeout(warnTimer);
-      editNotes.style.minHeight = "";
-      setText(noteSaved, noteSavedSource);
-      setText(noteReadonly, noteReadonlySource);
-      noteSaved.classList.remove("bpi-config-note-warn");
-      noteReadonly.classList.remove("bpi-config-note-warn");
-    };
-    const warnUnknownChinese = () => {
-      // 先按现在的高度钉住：警告比原文短也不会缩，下面的表单一动不动
-      const height = editNotes.getBoundingClientRect().height;
-      if (height > 0) editNotes.style.minHeight = `${height}px`;
-      setText(noteSaved, "Nothing was saved: the Chinese name is still the unknown placeholder.");
-      setText(noteReadonly, "Enter a real Chinese name, then apply again.");
-      noteSaved.classList.add("bpi-config-note-warn");
-      noteReadonly.classList.add("bpi-config-note-warn");
-      clearTimeout(warnTimer);
-      warnTimer = setTimeout(restoreEditNotes, 2000);
-      // 光标直接落到中文名那一格，省得再去找
-      editFields.focus();
-    };
-
-    modal.append(weightPanel, rawPanel, editPanel);
-
-    const close = () => {
-      clearTimeout(warnTimer);
-      editFields.destroy();
-      shade.remove();
-    };
-    // 配色跟权重在同一页，所以 Apply 一次存两样；改动与否各自判断，
-    // 只想改颜色的人不会被「权重没有变化」挡住
-    const saveColor = () => {
-      const value = String(customInput.value || "").trim();
-      const previous = state.customColors.get(token.key) || "";
-      // 任何模式下都允许设置（切回 default 就显示）；显示与否由 tokenCardColor 按模式决定
-      if (!value) state.customColors.delete(token.key);
-      else {
-        const okHex = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value);
-        const okRgb = /^rgb\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\)$/.test(value);
-        if (!okHex && !okRgb) {
-          setStatus("Invalid color; use #hex or rgb(r,g,b)", "error");
-          customInput.focus();
-          return null;
-        }
-        state.customColors.set(token.key, value);
-      }
-      return value !== previous;
-    };
-    const apply = () => {
-      // 不能改权重时这一页只剩配色，直接存色走人
-      if (!canWeight) {
-        const colorOnly = saveColor();
-        if (colorOnly === null) return;
-        if (colorOnly) render();
-        close();
-        return;
-      }
-      const raw = String(input.value ?? "").trim();
-      const numeric = Number(raw);
-      if (!raw || !Number.isFinite(numeric) || numeric < 0 || numeric > 3) {
-        setStatus("Weight must be between 0 and 3", "error");
-        input.focus();
-        return;
-      }
-      const colorChanged = saveColor();
-      if (colorChanged === null) return;
-      // 打开时是 1（原标签没写权重）就不算改过：光改颜色的不应该被写成 (标签:1)
-      const weightDirty = Math.abs(numeric - initialWeight) > 1e-9;
-      if (weightDirty) {
-        // 改文本会顺带重绘，配色不用再刷一次
-        if (applyTokenWeight(token, numeric)) close();
-        return;
-      }
-      if (colorChanged) render();
-      close();
-    };
-    // 编辑页：整段写回当前节点的提示词原文，跟手改原文一样进撤销栈
-    const applyRawEdit = () => {
-      const before = String(textWidget.value ?? "");
-      const result = replacePromptSpan(before, rawSpan.start, rawSpan.end, rawEditor.value);
-      if (!result.changed) {
-        setStatus("No content change", "ok");
-        close();
-        return;
-      }
-      const multi = rawSpan.tokens.length > 1;
-      const label = multi ? `Edit ${rawSpan.tokens.length} tags` : `Edit “${rawSpan.tokens[0].term}”`;
-      state.undoStack.push({
-        before,
-        after: result.text,
-        beforeStart: rawSpan.start,
-        beforeEnd: rawSpan.end,
-        afterCursor: result.cursor,
-        label,
-      });
-      if (state.undoStack.length > 50) state.undoStack.shift();
-      state.redoStack = [];
-      state.pinned = null;
-      updateText(result.text, result.cursor);
-      close();
-      // 状态栏这两句分开写：套一层「“…”」再塞带引号的 label 会打乱变量折叠
-      const rewroteMsg = multi
-        ? `rewrote ${rawSpan.tokens.length} tags`
-        : `rewrote “${rawSpan.tokens[0].term}”`;
-      if (!showToast(rewroteMsg, { type: "edit" })) setStatus(rewroteMsg, "ok");
-    };
-    // 词条页：只改词条，不动当前这行提示词文本，所以不进撤销栈
-    const applyEdit = async () => {
-      const payload = editFields.collect();
-      // 中文名还是「未收录」占位：存下去只会得到一条残词条，直接拦掉不保存
-      if (String(payload.chinese ?? "").trim() === UNKNOWN_CHINESE) {
-        warnUnknownChinese();
-        return;
-      }
-      try {
-        await saveTag(payload);
-        await refreshDictionary();
-        close();
-        setStatus(t("Tag saved"), "ok");
-      } catch (saveError) {
-        setStatus(saveError.message, "error");
-      }
-    };
-    const actions = element("div", "bpi-modal-actions");
-    // 「清除权重」只对权重页有意义，切到别的页就收起来；先存配色再清，别丢改动
-    let clearWeightButton = null;
-    if (canWeight && token.weight !== null) {
-      clearWeightButton = button("Clear weight", () => {
-        if (saveColor() === null) return;
-        if (applyTokenWeight(token, null)) close();
-      }, "bpi-danger");
-      clearWeightButton.hidden = startOnRaw;
-      actions.appendChild(clearWeightButton);
-    }
-    actions.append(button("Cancel", close));
-    // 先声明再让 applyButton 引用它：let 有 TDZ，声明放在闭包之后会有隐患
-    let activeTab = startOnRaw ? "raw" : "weight";
-    const applyButton = button(t("Apply"), () => {
-      if (activeTab === "edit") applyEdit();
-      else if (activeTab === "raw") applyRawEdit();
-      else apply();
-    }, "bpi-primary");
-    actions.append(applyButton);
-    modal.appendChild(actions);
-    shade.appendChild(modal);
-    document.body.appendChild(shade);
-    shade.addEventListener("mousedown", (event) => { if (event.target === shade) close(); });
-    modal.addEventListener("mousedown", (event) => event.stopPropagation());
-    input.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") {
-        event.preventDefault();
-        apply();
-      } else if (event.key === "Escape") {
-        event.preventDefault();
-        close();
-      }
-    });
-    // 编辑框要能打换行，所以 Enter 不提交，只有 Ctrl/Cmd+Enter 才应用
-    rawEditor.addEventListener("keydown", (event) => {
-      if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
-        event.preventDefault();
-        applyRawEdit();
-      } else if (event.key === "Escape") {
-        event.preventDefault();
-        close();
-      }
-    });
-    // Tab 切换：共用底部那个 Apply 按钮，按 activeTab 分派到三个动作
-    const showPanel = (tab) => {
-      tabWeight.classList.toggle("bpi-editor-tab-active", tab === "weight");
-      tabRaw.classList.toggle("bpi-editor-tab-active", tab === "raw");
-      tabEdit.classList.toggle("bpi-editor-tab-active", tab === "edit");
-      weightPanel.classList.toggle("bpi-hidden", tab !== "weight");
-      rawPanel.classList.toggle("bpi-hidden", tab !== "raw");
-      editPanel.classList.toggle("bpi-hidden", tab !== "edit");
-      // 离开词条页就把红色警告收回去，别等 2 秒后回来还挂着
-      if (tab !== "edit") restoreEditNotes();
-      if (clearWeightButton) clearWeightButton.hidden = tab !== "weight";
-    };
-    tabWeight.addEventListener("click", () => {
-      activeTab = "weight";
-      showPanel("weight");
-      // 不能改权重时这一页只有配色，光标落到颜色输入框
-      setTimeout(() => {
-        if (canWeight) { input.focus(); input.select(); }
-        else { customInput.focus(); customInput.select(); }
-      }, 0);
-    });
-    tabRaw.addEventListener("click", () => {
-      activeTab = "raw";
-      showPanel("raw");
-      setTimeout(() => { rawEditor.focus(); rawEditor.select(); }, 0);
-    });
-    tabEdit.addEventListener("click", () => {
-      activeTab = "edit";
-      showPanel("edit");
-      setTimeout(() => editFields.focus(), 0);
-    });
-    if (startOnRaw) setTimeout(() => { rawEditor.focus(); rawEditor.select(); }, 0);
-    else if (canWeight) setTimeout(() => { input.focus(); input.select(); }, 0);
-    else setTimeout(() => { customInput.focus(); customInput.select(); }, 0);
-  };
-
-  const undoStructuredEdit = () => {
-    const entry = state.undoStack.at(-1);
-    if (!entry || String(textWidget.value ?? "") !== entry.after) return false;
-    state.undoStack.pop();
-    state.redoStack.push(entry);
-    state.pinned = null;
-    if (typeof entry.beforeCategoryView === "boolean") state.categoryView = entry.beforeCategoryView;
-    if (Array.isArray(entry.hiddenBefore)) setHiddenTags(entry.hiddenBefore);
-    if (Array.isArray(entry.uniqueBefore)) setUniqueKeys(entry.uniqueBefore);
-    updateText(entry.before, entry.beforeStart);
-    const undoneMsg = `已撤销：${entry.label}`;
-    if (!showToast(undoneMsg, { type: "history" })) setStatus(undoneMsg, "ok");
-    return true;
-  };
-
-  const redoStructuredEdit = () => {
-    const entry = state.redoStack.at(-1);
-    if (!entry || String(textWidget.value ?? "") !== entry.before) return false;
-    state.redoStack.pop();
-    state.undoStack.push(entry);
-    state.pinned = null;
-    if (typeof entry.afterCategoryView === "boolean") state.categoryView = entry.afterCategoryView;
-    if (Array.isArray(entry.hiddenAfter)) setHiddenTags(entry.hiddenAfter);
-    if (Array.isArray(entry.uniqueAfter)) setUniqueKeys(entry.uniqueAfter);
-    updateText(entry.after, entry.afterCursor);
-    const redoneMsg = `已重做：${entry.label}`;
-    if (!showToast(redoneMsg, { type: "history" })) setStatus(redoneMsg, "ok");
-    return true;
-  };
-
-  // 撤销/重做用 Shift+Alt+Z / Shift+Alt+Y：
-  // Ctrl+Z 在 ComfyUI 里被画布自己的撤销吃掉（焦点不在文本框时甚至根本到不了这里），
-  // 与其抢一个抢不过的键，不如整个让给它，换一个没人占的组合。
-  const handleHistoryShortcut = (event) => {
-    if (!event.altKey || !event.shiftKey || event.ctrlKey || event.metaKey) return;
-    const key = event.key.toLowerCase();
-    const handled = key === "y" ? redoStructuredEdit() : key === "z" ? undoStructuredEdit() : false;
-    if (handled) {
-      event.preventDefault();
-      event.stopPropagation();
-    }
-  };
+  // 撤销/重做与顺序微调在 bpi_shortcut.js：撤销栈的条目仍由各处自己 push
+  const {
+    handleTokenReorderShortcut, undoStructuredEdit, redoStructuredEdit, handleHistoryShortcut,
+  } = createShortcuts({ store, setHiddenTags, setUniqueKeys });
+  // 编辑弹窗搬到了 bpi_editor_modal.js：DOM 与交互在那边，改文本/存词条仍走这里的钩子
+  const openWeightEditor = createWeightEditor({ store });
 
   const bindTextareaEvents = () => {
     const textarea = findTextarea();
@@ -2869,6 +1508,7 @@ function createPanel(node, textWidget) {
     return state.customColors.get(token.key) || null;
   };
 
+// ==== 卡片渲染与重复栏 ====
   // 一张双语小卡 = 上面英文标签 chip（拖拽 / 权重 / 隐藏 / 删除都挂在它身上）+ 下面对应中文。
   // chip 的结构与交互完全沿用原来的英文标签，只是外面多包一层卡片，
   // 所以 attachChipDrag 那套按 .bpi-english-token 命中的逻辑不用改。
@@ -2949,7 +1589,7 @@ function createPanel(node, textWidget) {
     // 所以按「两次点击同一张卡 + 间隔够短」来判断，不依赖元素身份。
     card.addEventListener("click", (event) => {
       event.stopPropagation();
-      if (chipClickSuppressed) return;
+      if (clickGuard.suppressed) return;
       const now = Date.now();
       if (now - lastCardClickAt < 320 && lastCardClickId === token.id) {
         lastCardClickAt = 0;
@@ -3474,49 +2114,26 @@ function createPanel(node, textWidget) {
     fragment.appendChild(document.createTextNode(source.slice(cursor)));
     return fragment;
   };
-  const render = () => {
-    renderSourceBar();
-    // 输出管道跟着视图一起刷：任何文本/隐藏列表变化最后都会走到 render，
-    // 在这里统一同步，漏不了（updateText / 隐藏 / 恢复 / 加载工作流都会触发 render）
-    syncEffectiveOutput();
-    const text = String(textWidget.value ?? "");
-    state.lastText = text;
-    // 排序完又手动改了文本，「回到排序前」会把这些改动一起吞掉，取消入口随之失效
-    if (state.animaSortSnapshot && text.trim() !== state.animaSortSnapshot.after) state.animaSortSnapshot = null;
-    state.modeInfo = detectInputMode(text, state.modePreference);
-    // 按钮显隐依赖 modeInfo，必须排在它更新之后
-    updateSortButton();
-    state.tokens = parseTokens(text);
-    queueLargeLookup(state.tokens);
-    // 重复分组要在渲染两个视图之前算好，标签区和明细表都吃这份数据
-    state.duplicateGroups = duplicateGroups(state.tokens);
-    state.duplicateRanks = new Map();
-    for (const group of state.duplicateGroups) {
-      group.tokens.forEach((token, index) => state.duplicateRanks.set(token.id, { rank: index, total: group.tokens.length }));
-    }
-    // 定位过的那一处被删了 / 文本换了不够那么多处了，就把定位作废
-    if (state.dupFocus) {
-      const group = state.duplicateGroups.find((item) => item.key === state.dupFocus.key);
-      if (!group || state.dupFocus.index >= group.tokens.length) state.dupFocus = null;
-    }
-    state.dupFocusId = dupFocusToken()?.id ?? null;
-    state.issues = analyzePromptSyntax(text, state.tokens, state.modeInfo);
-    if (state.pinned !== null && !state.tokens.some((token) => token.id === state.pinned)) state.pinned = null;
-    // 多选跟着 pinned 走：没有当前标签就整组清空（改文本、撤销等路径都是这么清的），
-    // 否则顺手丢掉已经不存在的 id，并保证 pinned 一定在名单里
-    if (state.pinned === null) {
-      state.selected.clear();
-    } else {
-      const liveIds = new Set(state.tokens.map((token) => token.id));
-      for (const id of [...state.selected]) if (!liveIds.has(id)) state.selected.delete(id);
-      if (!state.selected.has(state.pinned)) {
-        state.selected.clear();
-        state.selected.add(state.pinned);
+  // 问题清单：重复标签要带「唯一」开关，不能被 12 条上限挤掉，所以排在最前。
+  const renderIssuePanel = () => {
+    issuesPanel.replaceChildren();
+    // 重复标签要带「唯一」开关，不能被 12 条的显示上限挤掉，所以排到最前面
+    const duplicateIssues = state.issues.filter((item) => item.code === "duplicate");
+    const otherIssues = state.issues.filter((item) => item.code !== "duplicate");
+    for (const item of [...duplicateIssues, ...otherIssues].slice(0, Math.max(12, duplicateIssues.length))) {
+      const issueRow = element("div", "bpi-issue", item.message);
+      issueRow.dataset.severity = item.severity;
+      const duplicateKey = item.code === "duplicate" ? item.tokenKeys?.[0] : null;
+      if (duplicateKey) {
+        issueRow.appendChild(buildUniqueToggle(duplicateKey, state.duplicateGroups.find((group) => group.key === duplicateKey)));
       }
+      issuesPanel.appendChild(issueRow);
     }
-    updateQuickTarget?.();
-    renderEnglishTokenView(text);
-    if (hasNodeSize()) requestNodeResize();
+    issuesPanel.classList.toggle("bpi-visible", state.issues.length > 0);
+  };
+
+  // 明细表：筛选 → 搜索计数 → 批量栏 → 逐行构建（一行一个标签，含拖拽手柄与行内按钮）。
+  const renderDetailTable = () => {
     const personalKeys = new Set(state.data.user.map((tag) => normalizeKey(tag.english)));
     // 勾选跟着当前提示词走：换了文本后旧 key 留着没意义，顺手清掉
     const machineKeys = new Set(state.tokens.filter((token) => token.status === "machine").map((token) => token.key));
@@ -3536,6 +2153,7 @@ function createPanel(node, textWidget) {
     tableSearchCount.textContent = query ? `${searchedTokens.length} / ${visibleTokens.length}` : "";
     tableSearchClear.classList.toggle("bpi-visible", Boolean(query));
     renderMachineBatchBar(searchedTokens.filter((token) => token.status === "machine"));
+
     const errorsByKey = new Map();
     for (const item of state.issues) {
       for (const key of item.tokenKeys ?? []) {
@@ -3543,20 +2161,7 @@ function createPanel(node, textWidget) {
         if (current !== "error") errorsByKey.set(key, item.severity);
       }
     }
-    issuesPanel.replaceChildren();
-    // 重复标签要带「唯一」开关，不能被 12 条的显示上限挤掉，所以排到最前面
-    const duplicateIssues = state.issues.filter((item) => item.code === "duplicate");
-    const otherIssues = state.issues.filter((item) => item.code !== "duplicate");
-    for (const item of [...duplicateIssues, ...otherIssues].slice(0, Math.max(12, duplicateIssues.length))) {
-      const issueRow = element("div", "bpi-issue", item.message);
-      issueRow.dataset.severity = item.severity;
-      const duplicateKey = item.code === "duplicate" ? item.tokenKeys?.[0] : null;
-      if (duplicateKey) {
-        issueRow.appendChild(buildUniqueToggle(duplicateKey, state.duplicateGroups.find((group) => group.key === duplicateKey)));
-      }
-      issuesPanel.appendChild(issueRow);
-    }
-    issuesPanel.classList.toggle("bpi-visible", state.issues.length > 0);
+
     while (table.children.length > 1) table.lastChild.remove();
     if (!state.tokens.length) {
       table.appendChild(element("div", "bpi-empty", "Enter a prompt in the English text box above; per-tag bilingual mapping will appear here."));
@@ -3767,6 +2372,54 @@ function createPanel(node, textWidget) {
         }
       });
     }
+  };
+
+// ==== 主渲染（编排层）====
+  const render = () => {
+    renderSourceBar();
+    // 输出管道跟着视图一起刷：任何文本/隐藏列表变化最后都会走到 render，
+    // 在这里统一同步，漏不了（updateText / 隐藏 / 恢复 / 加载工作流都会触发 render）
+    syncEffectiveOutput();
+    const text = String(textWidget.value ?? "");
+    state.lastText = text;
+    // 排序完又手动改了文本，「回到排序前」会把这些改动一起吞掉，取消入口随之失效
+    if (state.animaSortSnapshot && text.trim() !== state.animaSortSnapshot.after) state.animaSortSnapshot = null;
+    state.modeInfo = detectInputMode(text, state.modePreference);
+    // 按钮显隐依赖 modeInfo，必须排在它更新之后
+    updateSortButton();
+    state.tokens = parseTokens(text);
+    queueLargeLookup(state.tokens);
+    // 重复分组要在渲染两个视图之前算好，标签区和明细表都吃这份数据
+    state.duplicateGroups = duplicateGroups(state.tokens);
+    state.duplicateRanks = new Map();
+    for (const group of state.duplicateGroups) {
+      group.tokens.forEach((token, index) => state.duplicateRanks.set(token.id, { rank: index, total: group.tokens.length }));
+    }
+    // 定位过的那一处被删了 / 文本换了不够那么多处了，就把定位作废
+    if (state.dupFocus) {
+      const group = state.duplicateGroups.find((item) => item.key === state.dupFocus.key);
+      if (!group || state.dupFocus.index >= group.tokens.length) state.dupFocus = null;
+    }
+    state.dupFocusId = dupFocusToken()?.id ?? null;
+    state.issues = analyzePromptSyntax(text, state.tokens, state.modeInfo);
+    if (state.pinned !== null && !state.tokens.some((token) => token.id === state.pinned)) state.pinned = null;
+    // 多选跟着 pinned 走：没有当前标签就整组清空（改文本、撤销等路径都是这么清的），
+    // 否则顺手丢掉已经不存在的 id，并保证 pinned 一定在名单里
+    if (state.pinned === null) {
+      state.selected.clear();
+    } else {
+      const liveIds = new Set(state.tokens.map((token) => token.id));
+      for (const id of [...state.selected]) if (!liveIds.has(id)) state.selected.delete(id);
+      if (!state.selected.has(state.pinned)) {
+        state.selected.clear();
+        state.selected.add(state.pinned);
+      }
+    }
+    updateQuickTarget?.();
+    renderEnglishTokenView(text);
+    if (hasNodeSize()) requestNodeResize();
+    renderIssuePanel();
+    renderDetailTable();
     const known = state.tokens.filter((token) => ["verified", "unverified", "special", "session"].includes(token.status)).length;
     const unknown = state.tokens.filter((token) => token.status === "unknown").length;
     const machine = state.tokens.filter((token) => token.status === "machine").length;
@@ -3795,6 +2448,21 @@ function createPanel(node, textWidget) {
     }
     render();
   };
+
+  // 把常用回调交给 store：拆出去的功能模块从 store.hooks 取，不必再走参数表。
+  // 必须放在这些函数都定义完之后，否则 bind 进去的还是占位函数。
+  bindStoreHooks(store, {
+    render,
+    updateText,
+    setStatus,
+    applyTokenWeight,
+    spanForEdit,
+    refreshDictionary,
+    setEnglishEditing,
+    moveTokenTo,
+    canReorderTokens,
+    gapHasBreak,
+  });
 
   const requestLargeSearchPage = (rawQuery, append = false) => {
     if (!largeDictionaryReady() || state.largeSearchLoading) return;
@@ -3828,6 +2496,7 @@ function createPanel(node, textWidget) {
     }, append ? 0 : 260);
   };
 
+// ==== 词库搜索与明细表 ====
   const renderSearch = () => {
     const rawQuery = search.value.trim();
     const previousScrollTop = preservedSearchScroll(
@@ -4353,6 +3022,8 @@ function createPanel(node, textWidget) {
       render();
     }
   };
+
+// ==== 事件绑定与对外接口 ====
   const unsubscribePanelSync = panelSyncHub.subscribe(syncFromPeer);
 
   refreshDictionary(false);
@@ -4445,6 +3116,19 @@ const findInspectorByNodeId = (nodeId) => {
   return target?._bilingualPromptInspector ?? null;
 };
 
+// ── 这个文件怎么读 ─────────────────────────────────────────────────────────
+// 界面逻辑都在 createPanel 这一个闭包里（DOM 构建 + 事件绑定 + 渲染编排）。
+// 搜 "====" 跳段；纯逻辑与独立功能已经拆到 js/ 下的 7 个模块：
+//   bpi_store.js        每节点一份 state / 偏好 / hooks；回调一律 store.hooks.xxx()
+//   bpi_node_size.js    节点尺寸与高度（12 个函数，refs 收 6 个 DOM）
+//   bpi_line_breaks.js  换行块数据层
+//   bpi_editor_modal.js 标签编辑弹窗（权重与颜色 / 编辑 / 词条信息）
+//   bpi_chip_drag.js    拖拽与实时预览
+//   bpi_hidden.js       隐藏标签 /「唯一」开关 / 输出管道（effective_text）
+//   bpi_shortcut.js     撤销重做与顺序微调
+// 主文件留下的：面板骨架 DOM、文本入口（updateText / render / renderNow）、
+//   卡片与明细表渲染、词库搜索、事件绑定、registerExtension。
+// 改之前先看 tests/：parser 层有断言，UI 层只能手测（拖拽落点尤其容易改坏）。
 app.registerExtension({
   name: "ComfyUI.BilingualPromptInspector",
   async setup() {

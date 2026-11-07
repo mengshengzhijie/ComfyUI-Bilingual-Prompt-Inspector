@@ -7,6 +7,7 @@ import {
   detectInputMode,
   extractInstructionBody,
   looksSuspiciousNatural,
+  movePromptToken,
   parsePrompt,
   removePromptToken,
   replacePromptSpan,
@@ -219,5 +220,31 @@ const unverified = buildDictionaryIndex([{ english: "masterpiece", chinese: "杰
 assert.equal(parsePrompt("masterpiece", unverified)[0].confidence, "medium");
 const machineToken = parsePrompt("cinematic", dictionary, new Map([["cinematic", { text: "电影感", source: "prompt-assistant" }]]))[0];
 assert.equal(machineToken.confidence, "low");
+
+
+// ── 换行相关的删 / 移（2026-11-07 修的一批问题，这里把行为钉死）─────────────
+const wrapText = "a, b\nc, d";
+const wrapTokens = parsePrompt(wrapText, dictionary);
+const term = (name) => wrapTokens.find((item) => item.term === name);
+
+// 删行尾标签：换行留着，下一行不被拽上来
+assert.equal(removePromptToken(wrapText, term("b")).text, "a\nc, d");
+// 删独占一行的标签：前后换行合成一个，不留空行
+assert.equal(removePromptToken("a\nb\nc", parsePrompt("a\nb\nc", dictionary)[1]).text, "a\nc");
+// 删末行标签：结尾不留空行
+assert.equal(removePromptToken("a\nb", parsePrompt("a\nb", dictionary)[1]).text, "a");
+
+// 拖到行尾（换行块前面）：落在第一行末尾，换行跟着到标签后面
+assert.equal(movePromptToken(wrapText, wrapTokens, term("d"), 2, { beforeBreak: true }).text, "a, b, d\nc");
+// 拖到下一行开头：落在换行后面
+assert.equal(movePromptToken(wrapText, wrapTokens, term("d"), 2).text, "a, b\nd, c");
+// 行首标签上移到上一行末尾
+assert.equal(movePromptToken(wrapText, wrapTokens, term("c"), 2, { beforeBreak: true }).text, "a, b, c\nd");
+// 行尾标签下移到下一行开头
+assert.equal(movePromptToken(wrapText, wrapTokens, term("b"), 2, { afterBreak: true }).text, "a\nb, c, d");
+// 落点就是自己后面但不给标记：视为没变化
+assert.equal(movePromptToken(wrapText, wrapTokens, term("b"), 2).changed, false);
+// 移动不应改变标签数量
+assert.equal(parsePrompt(movePromptToken(wrapText, wrapTokens, term("d"), 2, { beforeBreak: true }).text, dictionary).length, wrapTokens.length);
 
 console.log("parser tests: OK");
