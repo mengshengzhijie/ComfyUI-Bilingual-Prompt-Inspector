@@ -3,7 +3,7 @@ import { normalizeKey, validateTranslationResult } from "./parser.js";
 import { mergeImportAsAliases, previewImport, toggleFavorite } from "./dictionary_tools.js";
 import { panelSyncHub } from "./panel_sync.js";
 import { installBpiWheelGuard } from "./wheel_guard.js";
-import { notifyEnabled, setNotifyEnabled } from "./bpi_notify.js";
+import { notify, notifyEnabled, setNotifyEnabled } from "./bpi_notify.js";
 import { setToastEnabled, toastEnabled } from "./bpi_toast.js";
 import {
   dragPreviewNodeEnabled,
@@ -63,6 +63,8 @@ const SECTIONS = [
 
 // 「跟随选中节点」的开关状态：默认关，关着就是原来只能在下拉里选节点的行为
 const FOLLOW_SELECTION_KEY = "bpi.followSelection.v1";
+// 系统「减少动态效果」已经处理过一次的标记：只做一次，之后用户手动打开就不再覆盖
+const REDUCED_MOTION_KEY = "bpi.reducedMotion.v1";
 
 const manager = {
   data: { tags: [], builtin: [], user: [], packs: [] },
@@ -1795,6 +1797,29 @@ function destroyTab() {
   refs.tagManagerHost?.replaceChildren?.();
 }
 
+// 系统开了「减少动态效果」：第一次进 ComfyUI 时把这几套「纯装饰」动画关掉，只做一次。
+// 右上角弹窗和右下角提示条不动 —— 它们的入场在 CSS 的 reduced-motion 媒体查询里已经
+// 压成瞬时了，等于没有动画；关掉开关反而会连操作回执一起消失。
+function applyReducedMotionDefaults() {
+  if (typeof window.matchMedia !== "function") return;
+  if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  try {
+    if (window.localStorage.getItem(REDUCED_MOTION_KEY) === "1") return;
+    window.localStorage.setItem(REDUCED_MOTION_KEY, "1");
+  } catch (error) {
+    return;
+  }
+  const dragNode = dragPreviewNodeEnabled();
+  const dragTable = dragPreviewTableEnabled();
+  const deleteAnim = deleteAnimNodeEnabled();
+  setDragPreviewNodeEnabled(false);
+  setDragPreviewTableEnabled(false);
+  setDeleteAnimNodeEnabled(false);
+  if ((dragNode || dragTable || deleteAnim) && document.body) {
+    notify("检测到系统开启了「减少动态效果」，拖动预览和增删动画已经关掉；需要的话可以在「设置 → 通用」里重新打开。", "notice", { hold: 9000 });
+  }
+}
+applyReducedMotionDefaults();
 injectBpiStyles();
 installBpiWheelGuard();
 // 启动时把后端保存的外观 / 语言设置拉下来；语言还会顺带整树重刷一次已渲染的面板

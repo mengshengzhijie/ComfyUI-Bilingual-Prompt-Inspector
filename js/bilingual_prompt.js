@@ -2684,7 +2684,7 @@ function createPanel(node, textWidget) {
         return false;
       }
       say(`translated “${token.term}”; can save after confirming`, "ok");
-      showToast(`Translated “${token.term}”`, { type: "translate" });
+      showToast(`已翻译「${token.term}」`, { type: "translate" });
       return true;
     } catch (error) {
       say(error.message, "error");
