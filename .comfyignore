@@ -5,6 +5,9 @@
 #   assets/  —— README 里引用的截图与演示动图
 #   locales/ —— 节点中文名/描述（ComfyUI 界面切中文时用到）
 
+# 用户收藏库（个人提示词与参考图，不进发布包）
+data/saved/
+
 # 测试
 tests/
 pnpm-lock.yaml

@@ -40,6 +40,7 @@ from .saved_prompt_store import (
     MAX_IMAGE_BYTES,
     SavedPromptStore,
 )
+from .library_store import LibraryStore
 from .token_color_store import TokenColorStore
 
 
@@ -779,6 +780,7 @@ async def cancel_upstream(request):
 # ---------------------------------------------------------------------------
 
 saved_prompt_store = SavedPromptStore()
+library_store = LibraryStore()
 # multipart 正文 = 文本字段 + 一张可选图片（图片本身最大 5 MB）
 _MAX_SAVED_PROMPT_BYTES = MAX_IMAGE_BYTES + 512 * 1024
 
@@ -861,6 +863,138 @@ async def saved_prompt_image(request):
         path = saved_prompt_store.image_path(request.match_info["prompt_id"])
     except ValueError as error:
         return error_response(error, 404)
+    return web.FileResponse(path, headers={"Cache-Control": "private, max-age=3600"})
+
+
+# ---------------------------------------------------------------------------
+# 收藏库（树结构）：一个条目一个目录，目录名 = 名称，缩略图与目录同名。
+# 顺序与父子关系由 library/index.json 当缓存，打开面板不扫目录。
+# ---------------------------------------------------------------------------
+
+_LIBRARY_MAX_BYTES = MAX_IMAGE_BYTES + 512 * 1024
+
+
+async def _read_library_form(request):
+    form = {"kind": None, "name": None, "text": None, "note": None, "parent": None,
+            "image_bytes": None, "remove_image": False, "models": [], "color": None}
+    reader = await request.multipart()
+    async for part in reader:
+        if part.name == "image":
+            form["image_bytes"] = await part.read(decode=False)
+        elif part.name == "kind":
+            form["kind"] = await part.text()
+        elif part.name == "name":
+            form["name"] = await part.text()
+        elif part.name == "text":
+            form["text"] = await part.text()
+        elif part.name == "note":
+            form["note"] = await part.text()
+        elif part.name == "parent":
+            value = (await part.text()).strip()
+            form["parent"] = value or None
+        elif part.name == "remove_image":
+            form["remove_image"] = (await part.text()).strip() == "1"
+        elif part.name == "color":
+            form["color"] = await part.text()
+        elif part.name == "models":
+            form["models"].append(await part.text())
+    return form
+
+
+@protected_route("get", "/bpi/library")
+async def list_library(_request):
+    return web.json_response({"success": True, "data": library_store.tree()})
+
+
+@protected_route("post", "/bpi/library")
+async def create_library_item(request):
+    if request.content_length is not None and request.content_length > _LIBRARY_MAX_BYTES:
+        return error_response("收藏内容过大（图片最大 5 MB）", 413)
+    try:
+        form = await _read_library_form(request)
+    except (ValueError, web.HTTPException) as error:
+        return error_response(f"读取表单失败：{error}")
+    try:
+        item = library_store.create(
+            form["kind"], form["name"], text=form["text"], note=form["note"],
+            models=form["models"], image_bytes=form["image_bytes"], parent=form["parent"],
+            color=form["color"],
+        )
+        return web.json_response({"success": True, "data": item})
+    except ValueError as error:
+        return error_response(error)
+
+
+# 放在 {item_id} 之前注册，否则 "rebuild" 会被当成条目 id
+@protected_route("post", "/bpi/library/rebuild")
+async def rebuild_library(_request):
+    return web.json_response({"success": True, "data": {"items": library_store.rebuild()}})
+
+
+@protected_route("post", "/bpi/library/import-legacy")
+async def import_legacy_library(_request):
+    result = library_store.import_legacy(saved_prompt_store.list_prompts(), saved_prompt_store.store_dir)
+    return web.json_response({"success": True, "data": result})
+
+
+@protected_route("post", "/bpi/library/{item_id}")
+async def update_library_item(request):
+    if request.content_length is not None and request.content_length > _LIBRARY_MAX_BYTES:
+        return error_response("收藏内容过大（图片最大 5 MB）", 413)
+    try:
+        form = await _read_library_form(request)
+    except (ValueError, web.HTTPException) as error:
+        return error_response(f"读取表单失败：{error}")
+    try:
+        item = library_store.update(
+            request.match_info["item_id"], name=form["name"], text=form["text"],
+            note=form["note"], models=form["models"], image_bytes=form["image_bytes"],
+            remove_image=form["remove_image"], color=form["color"],
+        )
+        return web.json_response({"success": True, "data": item})
+    except KeyError:
+        return error_response("条目不存在", 404)
+    except ValueError as error:
+        return error_response(error)
+
+
+@protected_route("delete", "/bpi/library/{item_id}")
+async def delete_library_item(request):
+    try:
+        remaining = library_store.delete(request.match_info["item_id"])
+        return web.json_response({"success": True, "data": {"remaining": remaining}})
+    except KeyError:
+        return error_response("条目不存在", 404)
+
+
+@protected_route("post", "/bpi/library/{item_id}/move")
+async def move_library_item(request):
+    try:
+        payload = await request.json()
+    except (ValueError, web.HTTPException):
+        return error_response("请求体必须是 JSON")
+    try:
+        item = library_store.move(
+            request.match_info["item_id"],
+            parent=(payload.get("parent") or None),
+            index=payload.get("index"),
+        )
+        return web.json_response({"success": True, "data": item})
+    except KeyError:
+        return error_response("条目不存在", 404)
+    except ValueError as error:
+        return error_response(error)
+
+
+# 图片用 <img> 加载，自定义请求头带不进去，所以只做同源检查、不走会话令牌。
+@PromptServer.instance.routes.get("/bpi/library/{item_id}/image")
+async def library_item_image(request):
+    if not _same_origin(request):
+        return error_response("拒绝跨源请求", 403)
+    try:
+        path = library_store.image_path(request.match_info["item_id"])
+    except (KeyError, ValueError):
+        return error_response("配图不存在", 404)
     return web.FileResponse(path, headers={"Cache-Control": "private, max-age=3600"})
 
 

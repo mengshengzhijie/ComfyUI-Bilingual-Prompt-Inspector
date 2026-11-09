@@ -18,28 +18,22 @@ import {
   button,
   deleteCommunityPack,
   deletePersonalTag,
-  deleteSavedPrompt,
   downloadJson,
   element,
   exportDictionaryPack,
   exportPersonalDictionary,
-  exportSavedPrompts,
   field,
   getAssistantConfig,
   helpMark,
   importCommunityPack,
-  importSavedPrompts,
   importTags,
   bulkUpdateTags,
   applyBpiAppearance,
   injectBpiStyles,
   listAssistantModels,
-  listSavedPrompts,
   loadDictionary,
   loadPreferences,
-  openSavePromptDialog,
   openTagDialog,
-  savedPromptImageUrl,
   runInspectorAssistant,
   saveAssistantConfig,
   savePreferences,
@@ -53,6 +47,7 @@ import {
   t,
   testAssistantConnection,
 } from "./bpi_shared.js";
+import { createLibraryView, openLibraryItemDialog } from "./bpi_library.js";
 
 const SECTIONS = [
   ["tag-manager", "Tag Manager"],
@@ -73,8 +68,6 @@ const manager = {
   section: "tags",
   loaded: false,
   favoritesLoaded: false,
-  favorites: [],
-  favoritesChangeHandler: null,
   tagManagerNodeId: null,
   largeMatches: [],
   largeQuery: "",
@@ -1261,21 +1254,13 @@ function setSection(section) {
   if (section === "favorites" && !manager.favoritesLoaded) {
     manager.favoritesLoaded = true;
     refs.sections.appendChild(buildFavoritesSection());
-    refreshFavorites();
+    refs.libraryView?.refresh();
   }
 }
 
 // ---------------------------------------------------------------------------
 // 收藏：提示词 + 可选配图，落在 ComfyUI 用户目录
 // ---------------------------------------------------------------------------
-
-function favoriteDate(value) {
-  const stamp = Number(value ?? 0);
-  if (!stamp) return "";
-  const date = new Date(stamp * 1000);
-  const pad = (item) => String(item).padStart(2, "0");
-  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
 
 function targetInspectorNode() {
   const nodes = inspectorNodes();
@@ -1340,84 +1325,6 @@ async function pickInspectorNode() {
   });
 }
 
-function favoriteCard(item) {
-  const card = element("div", "bpi-fav-card");
-  const thumb = element("div", "bpi-fav-thumb");
-  if (item.image) thumb.style.backgroundImage = `url("${savedPromptImageUrl(item.id)}")`;
-  else setText(thumb, "No image");
-  const info = element("div", "bpi-fav-info");
-  const name = element("span", "bpi-fav-name", item.name ?? "Untitled");
-  name.appendChild(element("span", "bpi-fav-date", favoriteDate(item.created_at)));
-  const actions = element("div", "bpi-fav-actions");
-  actions.append(
-    button("Load to Node", () => loadFavoriteIntoNode(item), "bpi-primary"),
-    button("Edit", () => editFavorite(item)),
-    button("Copy", () => copyFavorite(item)),
-    button("Delete", () => removeFavorite(item), "bpi-danger"),
-  );
-  const meta = element("div", "bpi-fav-meta");
-  // 模型名是用户数据，直接写进 textContent，不进翻译层
-  const models = Array.isArray(item.models) ? item.models.filter((value) => typeof value === "string" && value.trim()) : [];
-  if (models.length) {
-    const tags = element("div", "bpi-model-tags");
-    for (const model of models) {
-      const tag = element("span", "bpi-model-tag");
-      tag.textContent = model;
-      tags.appendChild(tag);
-    }
-    meta.appendChild(tags);
-  }
-  const note = element("span", "bpi-fav-note", item.note ? "" : "No note");
-  if (item.note) note.textContent = item.note;
-  meta.appendChild(note);
-
-  info.append(
-    name,
-    element("div", "bpi-fav-text", item.text ?? ""),
-    meta,
-    actions,
-  );
-  card.append(thumb, info);
-  return card;
-}
-
-function renderFavorites() {
-  const list = refs.favoritesList;
-  if (!list) return;
-  const query = String(refs.favoritesSearch?.value ?? "").trim().toLowerCase();
-  const items = manager.favorites.filter((item) => !query
-    || String(item.name ?? "").toLowerCase().includes(query)
-    || String(item.text ?? "").toLowerCase().includes(query)
-    || (Array.isArray(item.models) && item.models.some((model) => String(model ?? "").toLowerCase().includes(query))));
-  list.replaceChildren();
-  if (!items.length) {
-    list.appendChild(element("div", "bpi-empty", manager.favorites.length
-      ? "No matching favorites."
-      : "No favorites yet. Click the star button on a node to save the current prompt."));
-    return;
-  }
-  for (const item of items) list.appendChild(favoriteCard(item));
-}
-
-async function refreshFavorites() {
-  try {
-    manager.favorites = await listSavedPrompts();
-  } catch (error) {
-    setStatus(error.message, "error");
-    manager.favorites = [];
-  }
-  renderFavorites();
-}
-
-async function copyFavorite(item) {
-  try {
-    await navigator.clipboard.writeText(item.text ?? "");
-    setStatus("Prompt copied to clipboard", "ok");
-  } catch {
-    setStatus("Browser denied clipboard access", "error");
-  }
-}
-
 async function loadFavoriteIntoNode(item) {
   const target = targetInspectorNode();
   if (!target) {
@@ -1433,59 +1340,16 @@ async function loadFavoriteIntoNode(item) {
   setStatus(`Loaded to node #${target.id}`, "ok");
 }
 
-async function removeFavorite(item) {
-  const confirmed = await confirmDialog("Delete", `Delete “${item.name ?? t("Untitled")}”? Reference image will be deleted too.`);
-  if (!confirmed) return;
-  try {
-    await deleteSavedPrompt(item.id);
-    await refreshFavorites();
-    setStatus("Deleted", "ok");
-  } catch (error) {
-    setStatus(error.message, "error");
-  }
-}
-
-async function createFavoriteFromNode() {
+// 保存当前节点的提示词到收藏库：和节点上的「收藏」按钮等价，只是入口在侧边栏
+async function saveCurrentPromptToLibrary() {
   const node = await pickInspectorNode();
   if (!node) return;
   const text = String(node.widgets?.find((widget) => widget.name === "text")?.value ?? "");
-  openSavePromptDialog({ text }, async () => {
-    await refreshFavorites();
-    setStatus("Saved", "ok");
-  });
-}
-
-function editFavorite(item) {
-  openSavePromptDialog({
-    name: item.name ?? "",
-    text: item.text ?? "",
-    note: item.note ?? null,
-    models: Array.isArray(item.models) ? item.models : [],
-    editing: item,
-  }, async () => {
-    await refreshFavorites();
-    setStatus("Saved", "ok");
-  });
-}
-
-async function exportFavorites() {
-  try {
-    const bundle = await exportSavedPrompts();
-    downloadJson(bundle, `saved-prompts-${new Date().toISOString().slice(0, 10)}.json`);
-    setStatus("Exported", "ok");
-  } catch (error) {
-    setStatus(error.message, "error");
+  if (!text.trim()) {
+    setStatus("这个节点的提示词是空的", "error");
+    return;
   }
-}
-
-async function importFavoritesFile(file) {
-  try {
-    const result = await importSavedPrompts(JSON.parse(await file.text()));
-    await refreshFavorites();
-    setStatus(`Import complete: ${result?.imported ?? 0} added`, "ok");
-  } catch (error) {
-    setStatus(error.message, "error");
-  }
+  openLibraryItemDialog({ presetKind: "prompt", presetText: text }, () => setStatus("已保存", "ok"));
 }
 
 function buildFavoritesSection() {
@@ -1495,28 +1359,24 @@ function buildFavoritesSection() {
   refs.favoritesSearch = element("input", "bpi-search");
   refs.favoritesSearch.type = "search";
   setPlaceholder(refs.favoritesSearch, "Search by name or content");
-  refs.favoritesSearch.addEventListener("input", renderFavorites);
-  const importInput = element("input");
-  importInput.type = "file";
-  importInput.accept = ".json,application/json";
-  importInput.style.display = "none";
-  importInput.addEventListener("change", async () => {
-    const file = importInput.files?.[0];
-    importInput.value = "";
-    if (file) await importFavoritesFile(file);
+  refs.favoritesSearch.addEventListener("input", () => {
+    refs.libraryView?.setQuery(refs.favoritesSearch.value);
+  });
+  refs.favoritesList = element("div", "bpm-rows bpi-lib-list");
+  refs.libraryView = createLibraryView({
+    mount: refs.favoritesList,
+    onLoad: (item) => loadFavoriteIntoNode(item),
+    onToast: (message, kind) => setStatus(message, kind ?? ""),
+    confirmDelete: (item) => confirmDialog("删除", `删除“${item.name ?? "未命名"}”？参考图会一起删掉。`),
   });
   toolbar.append(
     refs.favoritesSearch,
-    button("New", () => createFavoriteFromNode(), "bpi-primary"),
-    button("Export", () => exportFavorites()),
-    button("Import", () => importInput.click()),
-    importInput,
+    button("新建", () => refs.libraryView.openCreate(), "bpi-primary"),
+    button("保存", () => saveCurrentPromptToLibrary()),
   );
-  refs.favoritesList = element("div", "bpm-rows");
   section.append(toolbar, refs.favoritesList);
   return section;
 }
-
 function renderAll() {
   renderRows();
   renderPacks();
@@ -1685,13 +1545,6 @@ function build() {
   root.addEventListener("wheel", (event) => event.stopPropagation(), { passive: true });
   // 面板每次都重建，收藏分页也要跟着重新懒加载
   manager.favoritesLoaded = false;
-  if (manager.favoritesChangeHandler) {
-    window.removeEventListener("bpi:saved-prompts-changed", manager.favoritesChangeHandler);
-  }
-  manager.favoritesChangeHandler = () => {
-    if (manager.favoritesLoaded) refreshFavorites();
-  };
-  window.addEventListener("bpi:saved-prompts-changed", manager.favoritesChangeHandler);
 }
 
 function buildTagsSection() {

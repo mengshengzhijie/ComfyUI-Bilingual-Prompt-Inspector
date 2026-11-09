@@ -607,134 +607,6 @@ function buildModelPicker({ initial = [], onError } = {}) {
   return { root, destroy, models: () => values.slice() };
 }
 
-// 保存 / 编辑收藏的弹窗：文本自动带好，图片可拖、可选、可粘贴，不想要就空着。
-// 传了 editing（整条收藏）就是编辑：提示词文本放开手改，不选新图则保留原图。
-function openSavePromptDialog({ name = "", text = "", note = null, models = [], editing = null } = {}, onSaved) {
-  const shade = element("div", "bpi-modal-shade");
-  const modal = element("div", "bpi-modal");
-  const title = element("h3", "", editing ? "Edit Favorite" : "Save Current Prompt");
-  const form = element("form", "bpi-form");
-  const error = element("div", "bpi-status");
-  error.dataset.kind = "error";
-  error.style.gridColumn = "1 / -1";
-  const nameInput = field(form, "Name", "name", (name || text.trim().slice(0, 24)).slice(0, 80), "Defaults to the start of the prompt");
-  const noteInput = field(form, "Note", "note", note ?? "", "Optional");
-  const modelPicker = buildModelPicker({ initial: models, onError: (message) => setText(error, message) });
-  const modelsLabel = element("label", "", "Models");
-  modelsLabel.htmlFor = "bpi-field-models";
-  const modelsHint = element("div", "bpi-form-hint", "Press Enter to add; ↑↓ to choose");
-  modelsHint.style.gridColumn = "1 / -1";
-  form.append(modelsLabel, modelPicker.root, modelsHint);
-  const textLabel = element("label", "", "Prompt");
-  textLabel.htmlFor = "bpi-save-prompt-text";
-  const textPreview = element("textarea", "");
-  textPreview.id = "bpi-save-prompt-text";
-  textPreview.readOnly = !editing; // 新建时文本来自节点，不该手改；编辑时放开
-  textPreview.value = text;
-  form.append(textLabel, textPreview);
-  const imageLabel = element("label", "", "Reference Image");
-  const drop = element("div", "bpi-save-drop");
-  const previewImage = element("img", "bpi-save-preview");
-  const dropText = element("div", "", "Drop an image here, or click to select");
-  const fileInfo = element("div", "bpi-save-file", editing
-    ? "Keep the current image, or pick a new one to replace it"
-    : "Optional; PNG / JPG / WebP, max 5 MB");
-  if (editing?.image) {
-    previewImage.src = savedPromptImageUrl(editing.id);
-    previewImage.style.display = "block";
-  }
-  drop.append(previewImage, dropText, fileInfo);
-  const picker = element("input");
-  picker.type = "file";
-  picker.accept = "image/png,image/jpeg,image/webp";
-  picker.hidden = true;
-  form.append(imageLabel, drop);
-  form.appendChild(error);
-
-  let imageFile = null;
-  const setImage = (file) => {
-    imageFile = file;
-    previewImage.src = URL.createObjectURL(file);
-    previewImage.style.display = "block";
-    setText(fileInfo, `“${file.name || "image"}” · ${Math.max(1, Math.round(file.size / 1024))} KB`);
-  };
-  drop.addEventListener("click", () => picker.click());
-  picker.addEventListener("change", () => {
-    if (picker.files?.[0]) setImage(picker.files[0]);
-  });
-  drop.addEventListener("dragover", (event) => {
-    event.preventDefault();
-    drop.classList.add("bpi-dragover");
-  });
-  drop.addEventListener("dragleave", () => drop.classList.remove("bpi-dragover"));
-  drop.addEventListener("drop", (event) => {
-    event.preventDefault();
-    drop.classList.remove("bpi-dragover");
-    const file = event.dataTransfer?.files?.[0];
-    if (file) setImage(file);
-  });
-  const onPaste = (event) => {
-    const file = event.clipboardData?.files?.[0];
-    if (!file) return;
-    event.preventDefault();
-    setImage(file);
-  };
-  window.addEventListener("paste", onPaste);
-  const close = () => {
-    window.removeEventListener("paste", onPaste);
-    modelPicker.destroy();
-    shade.remove();
-  };
-
-  const actions = element("div", "bpi-modal-actions");
-  const saveButton = button("Save", async () => {
-    const promptText = editing ? textPreview.value : text;
-    if (!promptText.trim()) {
-      setText(error, "Prompt is empty, cannot save");
-      return;
-    }
-    saveButton.disabled = true;
-    try {
-      const entry = editing
-        ? await updateSavedPrompt({
-          id: editing.id,
-          name: nameInput.value,
-          text: promptText,
-          note: noteInput.value.trim() || null,
-          models: modelPicker.models(),
-          imageFile,
-        })
-        : await createSavedPrompt({
-          name: nameInput.value,
-          text: promptText,
-          note: noteInput.value.trim() || null,
-          models: modelPicker.models(),
-          imageFile,
-        });
-      window.dispatchEvent(new CustomEvent("bpi:saved-prompts-changed", { detail: entry }));
-      onSaved?.(entry);
-      close();
-    } catch (failure) {
-      error.textContent = failure.message;
-      saveButton.disabled = false;
-    }
-  }, "bpi-primary");
-  actions.append(button("Cancel", close), saveButton);
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    saveButton.click();
-  });
-  modal.append(title, form, picker, actions);
-  shade.appendChild(modal);
-  document.body.appendChild(shade);
-  shade.addEventListener("mousedown", (event) => {
-    if (event.target === shade) close();
-  });
-  modal.addEventListener("mousedown", (event) => event.stopPropagation());
-  requestAnimationFrame(() => nameInput.focus());
-  return { close };
-}
-
 // 分类候选：只收词库里真实出现过的 category，用得多的排前面。
 // 不预置任何「应该有但还没用过」的分类；中英文混着也不翻译，原样列出。
 function tagCategoryCounts(data) {
@@ -1448,6 +1320,36 @@ function injectBpiStyles() {
 .bpi-model-picks.bpi-hidden{display:none}
 .bpi-model-pick{font:12px/1.5 ui-monospace,Consolas,monospace;padding:4px 10px;border:1px solid var(--bpi-border-2);border-radius:999px;background-color:var(--bpi-button-bg);color:var(--bpi-button-text);cursor:pointer;white-space:nowrap}
 .bpi-model-pick:hover{border-color:var(--bpm-accent);color:var(--bpm-accent)}
+/* 收藏库的树：一行一条，文件夹带展开箭头（放最右），拖动不做任何过渡动画 */
+.bpi-lib-list{display:flex;flex-direction:column;gap:1px;padding:4px 0}
+.bpi-lib-row{position:relative;display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:5px;user-select:none}
+.bpi-lib-row:hover{background-color:var(--bpi-surface-2)}
+.bpi-lib-main{display:flex;align-items:center;gap:6px;min-width:0;flex:1 1 auto}
+.bpi-lib-thumb{flex:none;width:120px;height:80px;border:1px solid var(--bpi-border-3);border-radius:4px;background-size:cover;background-position:center}
+.bpi-lib-thumb.bpi-lib-noimg{border-style:dashed;background-color:var(--bpi-surface-3)}
+.bpi-lib-name{min-width:0;overflow:hidden;color:var(--bpi-text);font-size:20px;white-space:nowrap;text-overflow:ellipsis}
+.bpi-lib-folder .bpi-lib-name{flex:none;max-width:55%;font-weight:600;font-size:20px}
+.bpi-lib-texts{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1 1 auto}
+
+.bpi-lib-summary{min-width:0;overflow:hidden;color:var(--bpi-text-faint);font-size:16px;white-space:nowrap;text-overflow:ellipsis}
+.bpi-lib-count{flex:none;color:var(--bpi-text-faint);font-size:14px}
+.bpi-lib-tools{position:absolute;right:42px;top:15px;display:none;gap:4px}
+/* 树里的行内按钮比全局 .bpi-mini 大一档：不然在放大后的名称旁边小得几乎点不中 */
+.bpi-lib-tools .bpi-mini{font-size:12px;padding:2px 7px;border-radius:4px;line-height:1.4}
+.bpi-lib-row:hover .bpi-lib-tools{display:flex}
+.bpi-lib-arrow{flex:none;width:38px;padding:2px 0;color:var(--bpi-text-muted);font-size:30px;line-height:1;text-align:center;cursor:pointer;border-radius:5px}
+.bpi-lib-arrow:hover{background-color:var(--bpi-surface-3);color:var(--bpi-text)}
+.bpi-lib-folder{cursor:pointer}
+.bpi-lib-row.bpi-lib-dragging{opacity:.5}
+.bpi-lib-row.bpi-lib-drop-before{box-shadow:inset 0 2px 0 var(--bpm-accent)}
+.bpi-lib-row.bpi-lib-drop-after{box-shadow:inset 0 -2px 0 var(--bpm-accent)}
+.bpi-lib-row.bpi-lib-drop-into{background-color:var(--bpi-surface-3);outline:1px solid var(--bpm-accent);outline-offset:-1px}
+.bpi-lib-drop-image{min-height:64px}
+.bpi-lib-colors{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.bpi-lib-color{width:28px;height:28px;padding:0;border:1px solid var(--bpi-border-2);border-radius:6px;background-color:var(--bpi-surface-2);color:var(--bpi-text);cursor:pointer;font-size:12px}
+.bpi-lib-color:hover{border-color:var(--bpm-accent)}
+.bpi-lib-color.bpi-lib-color-on{outline:2px solid var(--bpm-accent);outline-offset:1px}
+.bpi-lib-color-text{width:auto;min-width:46px;padding:0 8px}
 .bpi-help{position:relative;display:inline-flex;align-items:center;justify-content:center;width:13px;height:13px;margin-left:5px;border:1px solid var(--bpi-border);border-radius:50%;color:var(--bpi-text-muted);font:10px/1 Arial,sans-serif;vertical-align:middle;cursor:help;user-select:none}
 .bpi-help:hover,.bpi-help:focus{color:var(--bpi-text);border-color:var(--bpi-border-2)}
 .bpi-help-pop{position:absolute;left:50%;bottom:calc(100% + 6px);transform:translateX(-50%);z-index:80;display:none;box-sizing:border-box;width:290px;max-width:70vw;padding:7px 9px;border:1px solid var(--bpi-border-2);border-radius:6px;background:var(--bpi-surface-modal);color:var(--bpi-text-muted);font:11px/1.65 Arial,sans-serif;white-space:pre-line;text-align:left;cursor:default}
@@ -1582,6 +1484,7 @@ export {
   UNINDEXED_PACK_ID,
   UPSTREAM_ARRIVED_EVENT,
   applyBpiAppearance,
+  bpiFetch,
   applyLanguageToDom,
   buildTagFields,
   button,
@@ -1613,7 +1516,6 @@ export {
   lookupLargeDictionary,
   buildColorPanel,
   openManagerPanel,
-  openSavePromptDialog,
   openTagDialog,
   postUpstreamAction,
   savedPromptImageUrl,

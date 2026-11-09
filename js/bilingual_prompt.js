@@ -30,6 +30,7 @@ import { createWeightEditor } from "./bpi_editor_modal.js";
 import { createHiddenTags } from "./bpi_hidden.js";
 import { createShortcuts } from "./bpi_shortcut.js";
 import { createChipDrag } from "./bpi_chip_drag.js";
+import { openLibraryItemDialog } from "./bpi_library.js";
 import {
   bindStoreHooks, COLLAPSED_NODE_MIN_HEIGHT, createStore,
 } from "./bpi_store.js";
@@ -52,7 +53,6 @@ import {
   loadTokenColors,
   buildColorPanel,
   lookupLargeDictionary,
-  openSavePromptDialog,
   openTagDialog,
   postUpstreamAction,
   runInspectorAssistant,
@@ -2078,7 +2078,7 @@ function createPanel(node, textWidget) {
       setStatus("Prompt is empty; cannot favorite", "error");
       return;
     }
-    openSavePromptDialog({ text });
+    openLibraryItemDialog({ presetKind: "prompt", presetText: text });
   };
 
   sourceToggle.addEventListener("change", () => {
