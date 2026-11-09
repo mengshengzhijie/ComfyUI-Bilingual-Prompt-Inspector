@@ -920,8 +920,9 @@ async function buildAssistantForm(host, loading) {
     list.push(form.querySelector(`label[for="${input.id}"]`), input);
     return input;
   };
-  // 模型名称这一行：输入框照旧可以手写，旁边的按钮去问一次服务端有哪些模型，填进输入框自带的下拉里。
-  // 用原生 datalist 而不是弹窗：助手设置长在 ComfyUI 的「设置」面板里，浮层会被它盖住且点不动。
+  // 模型名称这一行：输入框照旧可以手写，旁边的按钮去问一次服务端有哪些模型。
+  // 候选不放在原生 datalist 里 —— Chrome 只有在输入框里打字时才弹，空着聚焦点不开，
+  // 而 ComfyUI 设置面板里又容易被裁剪。改成行下方内联展开的候选列表，点得到也看得清。
   const addModelRow = (list, name, value, placeholder, options) => {
     const label = element("label", "", "Model Name");
     label.htmlFor = `bpi-field-${name}`;
@@ -930,23 +931,43 @@ async function buildAssistantForm(host, loading) {
     input.name = name;
     input.value = value ?? "";
     setPlaceholder(input, placeholder);
-    // datalist 本身不渲染，挂在 form 里跟着这块设置 DOM 一起活；选项只在本次会话内有效
-    const dataList = element("datalist");
-    dataList.id = `bpi-models-${name}`;
-    input.setAttribute("list", dataList.id);
+    const picks = element("div", "bpi-model-picks bpi-hidden");
+    // 设置表单是两列 grid（标签 78px + 控件），候选列表要横跨整行，否则会缩到左边那一列里
+    picks.style.gridColumn = "1 / -1";
     let models = null;
     const trigger = button("Fetch Models", () => pick());
     const line = element("div", "bpi-model-line");
     line.append(input, trigger);
-    form.append(label, line, dataList);
-    list.push(label, line, dataList);
+    form.append(label, line, picks);
+    list.push(label, line, picks);
     const countLabel = () => (models ? `Fetch Models (${models.length})` : "Fetch Models");
+    const closePicks = () => {
+      picks.replaceChildren();
+      picks.classList.add("bpi-hidden");
+    };
+    const openPicks = () => {
+      picks.replaceChildren();
+      for (const model of models ?? []) {
+        const item = element("button", "bpi-model-pick", model);
+        item.type = "button";
+        setTitle(item, "Use this model");
+        item.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          input.value = model;
+          input.dispatchEvent(new Event("change", { bubbles: true }));
+          picks.classList.add("bpi-hidden");
+        });
+        picks.appendChild(item);
+      }
+      picks.classList.toggle("bpi-hidden", !models?.length);
+    };
     const forget = () => {
       models = null;
-      dataList.textContent = "";
+      closePicks();
       setText(trigger, countLabel());
     };
-    // 地址改了就地作废：下拉里不能留着上一个地址的模型
+    // 地址改了就地作废：候选里不能留着上一个地址的模型
     options.baseUrl().addEventListener("change", forget);
     const pick = async () => {
       trigger.disabled = true;
@@ -959,17 +980,12 @@ async function buildAssistantForm(host, loading) {
           base_url: url,
           api_key: keyInput ? keyInput.value.trim() : "",
         });
-        dataList.textContent = "";
-        for (const model of models) {
-          const option = element("option");
-          option.value = model; // 模型名是服务端原样返回值，不参与翻译
-          dataList.appendChild(option);
-        }
         setText(trigger, countLabel());
-        input.focus();
+        openPicks();
         setText(error, `Fetched ${models.length} models`);
         error.dataset.kind = "ok";
       } catch (fetchError) {
+        closePicks();
         setText(trigger, countLabel());
         setText(error, fetchError.message);
         error.dataset.kind = "error";
