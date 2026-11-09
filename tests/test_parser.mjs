@@ -234,6 +234,20 @@ assert.equal(removePromptToken("a\nb\nc", parsePrompt("a\nb\nc", dictionary)[1])
 // 删末行标签：结尾不留空行
 assert.equal(removePromptToken("a\nb", parsePrompt("a\nb", dictionary)[1]).text, "a");
 
+// 行尾带逗号的情况（真实提示词几乎都这样）：换行是分段标记，不能跟着删
+const commaLine = "a, b,\nc, d";
+assert.equal(removePromptToken(commaLine, parsePrompt(commaLine, dictionary)[1]).text, "a\nc, d");
+
+const commaLineSpaced = "a, b, \nc, d";
+assert.equal(removePromptToken(commaLineSpaced, parsePrompt(commaLineSpaced, dictionary)[1]).text, "a\nc, d");
+
+const realLine = "masterpiece, best quality,\n1girl, solo";
+assert.equal(removePromptToken(realLine, parsePrompt(realLine, dictionary)[1]).text, "masterpiece\n1girl, solo");
+
+// 整行只有这一个标签时，连换行一起删，不留空行
+const soloLine = "b,\nc";
+assert.equal(removePromptToken(soloLine, parsePrompt(soloLine, dictionary)[0]).text, "c");
+
 // 拖到行尾（换行块前面）：落在第一行末尾，换行跟着到标签后面
 assert.equal(movePromptToken(wrapText, wrapTokens, term("d"), 2, { beforeBreak: true }).text, "a, b, d\nc");
 // 拖到下一行开头：落在换行后面

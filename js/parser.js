@@ -115,15 +115,28 @@ export function removePromptToken(text, token) {
   }
 
   if (end < value.length && value[end] === ",") {
-    // 逗号是标签之间的分隔，跟着标签一起删；逗号后面紧跟的换行也算同一处分隔
-    // （前面已经有一个换行在分段了，再留一个就多出空行）
+    // 逗号是标签之间的分隔，跟着标签一起删
     end += 1;
     while (end < value.length && /[ \t]/.test(value[end])) end += 1;
     if (isLineBreak(value[end])) {
-      const separator = value[end];
-      end += 1;
-      if (separator === "\r" && value[end] === "\n") end += 1;
-      while (end < value.length && /[ \t]/.test(value[end])) end += 1;
+      // 行尾标签：这一行前面还有别的标签时，换行是分段标记，必须留着，
+      // 否则下一行会被拽上来、两段并成一段（看起来就是「删标签把换行带走了」）。
+      // 只有整行就剩这一个标签时，才连换行一起删，免得留下空行。
+      const lineStart = Math.max(value.lastIndexOf("\n", start - 1), value.lastIndexOf("\r", start - 1)) + 1;
+      const leftOnLine = value.slice(lineStart, start).replace(/[ \t]/g, "").replace(/,+$/, "");
+      if (leftOnLine) {
+        let probe = start - 1;
+        while (probe >= 0 && /[ \t]/.test(value[probe])) probe -= 1;
+        if (probe >= 0 && value[probe] === ",") {
+          start = probe;
+          while (start > 0 && /[ \t]/.test(value[start - 1])) start -= 1;
+        }
+      } else {
+        const separator = value[end];
+        end += 1;
+        if (separator === "\r" && value[end] === "\n") end += 1;
+        while (end < value.length && /[ \t]/.test(value[end])) end += 1;
+      }
     }
   } else if (end < value.length && isLineBreak(value[end])) {
     // 标签正好在行尾、后面直接是换行：换行是分段标记，不能跟着删掉，

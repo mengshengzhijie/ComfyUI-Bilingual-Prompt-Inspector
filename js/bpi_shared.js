@@ -1521,12 +1521,52 @@ function injectBpiStyles() {
   document.head.appendChild(style);
 }
 
+// 明暗判断不能只看某一个类名：ComfyUI 前端换过好几轮标记
+// （旧版是 body.dark-theme，1.58 之后改成 CSS 变量 + color-scheme），
+// 所以这里三路探测，最后用背景亮度兜底。
+let bpiAppearance = "auto";
+let bpiThemeWatchTimer = null;
+
+function readComfyTheme() {
+  const root = document.documentElement;
+  const body = document.body;
+
+  // 1) color-scheme：新版前端靠 CSS 变量表达主题，这一路最可靠
+  const scheme = `${getComputedStyle(root).colorScheme || ""} ${body ? getComputedStyle(body).colorScheme || "" : ""}`;
+  if (/\bdark\b/.test(scheme)) return "dark";
+  if (/\blight\b/.test(scheme)) return "light";
+
+  // 2) 类名与数据属性：旧版 dark-theme，新版可能是 data-theme / scheme-dark
+  const themeAttr = root.getAttribute("data-theme") || (body ? body.getAttribute("data-theme") || "" : "");
+  const marks = [root.className, body ? body.className : "", themeAttr].join(" ");
+  if (/(^|\s)(dark-theme|dark|scheme-dark)(\s|$)/.test(marks) || /dark/i.test(themeAttr)) return "dark";
+  if (/(^|\s)(light-theme|light)(\s|$)/.test(marks)) return "light";
+
+  // 3) 兜底：看实际背景亮度；取不到就按暗色（ComfyUI 默认是暗的）
+  const bg = getComputedStyle(body || root).backgroundColor || "";
+  const nums = bg.match(/[\d.]+/g);
+  if (!nums || nums.length < 3) return "dark";
+  const [r, g, b] = nums.slice(0, 3).map(Number);
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.5 ? "light" : "dark";
+}
+
+function syncBpiTheme() {
+  const next = bpiAppearance === "auto" ? readComfyTheme() : bpiAppearance;
+  if (document.documentElement.getAttribute("data-bpi-theme") !== next) {
+    document.documentElement.setAttribute("data-bpi-theme", next);
+  }
+}
+
 function applyBpiAppearance(appearance) {
   const value = String(appearance || "auto").toLowerCase();
-  if (value === "dark" || value === "light") {
-    document.documentElement.setAttribute("data-bpi-theme", value);
-  } else {
-    document.documentElement.removeAttribute("data-bpi-theme");
+  bpiAppearance = value === "dark" || value === "light" ? value : "auto";
+  syncBpiTheme();
+  // 在 ComfyUI 设置里换主题时，前端未必改 class（可能只换 CSS 变量），
+  // 所以再挂一个低频轮询兜底；值没变时不碰 DOM，开销可以忽略。
+  if (!bpiThemeWatchTimer) {
+    bpiThemeWatchTimer = setInterval(() => {
+      if (bpiAppearance === "auto" && !document.hidden) syncBpiTheme();
+    }, 1200);
   }
 }
 
