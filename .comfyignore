@@ -7,6 +7,7 @@
 
 # 用户收藏库（个人提示词与参考图，不进发布包）
 data/saved/
+data/rule_presets/
 
 # 测试
 tests/

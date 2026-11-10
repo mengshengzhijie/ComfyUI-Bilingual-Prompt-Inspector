@@ -41,6 +41,7 @@ from .saved_prompt_store import (
     SavedPromptStore,
 )
 from .library_store import LibraryStore
+from .rule_preset_store import RulePresetStore
 from .token_color_store import TokenColorStore
 
 
@@ -781,6 +782,7 @@ async def cancel_upstream(request):
 
 saved_prompt_store = SavedPromptStore()
 library_store = LibraryStore()
+rule_preset_store = RulePresetStore()
 # multipart 正文 = 文本字段 + 一张可选图片（图片本身最大 5 MB）
 _MAX_SAVED_PROMPT_BYTES = MAX_IMAGE_BYTES + 512 * 1024
 
@@ -996,6 +998,41 @@ async def library_item_image(request):
     except (KeyError, ValueError):
         return error_response("配图不存在", 404)
     return web.FileResponse(path, headers={"Cache-Control": "private, max-age=3600"})
+
+
+# ---------------------------------------------------------------------------
+# AI 规则预设：一套规则一个 json 文件，按后端分目录（data/rule_presets/<backend>/<name>.json）
+# ---------------------------------------------------------------------------
+
+@protected_route("get", "/bpi/rule-presets")
+async def list_rule_presets(request):
+    backend = request.query.get("backend", "openai")
+    return web.json_response({"success": True, "data": rule_preset_store.list_presets(backend)})
+
+
+@protected_route("post", "/bpi/rule-presets")
+async def save_rule_preset(request):
+    try:
+        payload = await request.json()
+    except (ValueError, web.HTTPException):
+        return error_response("请求体必须是 JSON")
+    try:
+        saved = rule_preset_store.save_preset(payload.get("backend"), payload.get("name"), payload.get("rules"))
+        return web.json_response({"success": True, "data": saved})
+    except ValueError as error:
+        return error_response(error)
+
+
+@protected_route("delete", "/bpi/rule-presets/{name}")
+async def delete_rule_preset(request):
+    backend = request.query.get("backend", "openai")
+    try:
+        result = rule_preset_store.delete_preset(backend, request.match_info["name"])
+        return web.json_response({"success": True, "data": result})
+    except FileNotFoundError:
+        return error_response("预设不存在", 404)
+    except ValueError as error:
+        return error_response(error)
 
 
 @protected_route("get", "/bpi/saved-prompts/export")

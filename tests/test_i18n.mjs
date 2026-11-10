@@ -88,7 +88,7 @@ for (const [source, expected] of [
   ["“Optimize” done; please confirm in the preview window", "「优化」完成；请在预览窗口确认"],
   ["Optimize", "优化"],
   ["Fit height", "适应高度"],
-  ["Natural Language Rule", "自然语言规则"],
+  ["Natural Language", "自然语言"],
   ["(Chinese detected; translating to English first)", "（检测到中文，会先译成英文）"],
   [
     "Optimize with the rule for the current mode: tag mode tidies the tag flow, natural language mode rewrites it as English sentences",

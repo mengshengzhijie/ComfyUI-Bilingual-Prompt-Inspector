@@ -29,6 +29,7 @@ import {
   importTags,
   bulkUpdateTags,
   applyBpiAppearance,
+  bpiFetch,
   injectBpiStyles,
   listAssistantModels,
   loadDictionary,
@@ -1135,24 +1136,176 @@ async function buildAssistantForm(host, loading) {
     const labelElement = element("label", "", labelText);
     const textarea = element("textarea");
     textarea.value = value;
-    form.append(labelElement, textarea);
-    list.push(labelElement, textarea);
+    // 小圈挂在标签那一列的左下角：这条规则和所有预设（含内置默认）都对不上时显示
+    const labelCell = element("div", "bpi-rule-label");
+    const orphan = element("span", "bpi-rule-orphan", "*");
+    setTitle(orphan, "这条规则不属于任何一个预设");
+    labelCell.append(labelElement, orphan);
+    form.append(labelCell, textarea);
+    list.push(labelCell, textarea);
+    textarea.orphanBadge = orphan;
     return textarea;
   };
+  // 四条规则归到一个分组里：以后切规则预设时整体一起换，也方便在标题行右侧放管理入口
+  const addRuleHead = (list, title, hint) => {
+    const head = element("div", "bpm-toolbar");
+    head.style.gridColumn = "1 / -1";
+    head.append(element("strong", "", title));
+    if (hint) {
+      const note = element("span", "bpi-config-note", hint);
+      note.style.marginLeft = "8px";
+      head.append(note);
+    }
+    form.append(head);
+    list.push(head);
+    return head;
+  };
+  // 规则编辑和保存是两件事：改完不点保存，刷新或执行翻译时用的还是旧规则
+  const RULE_SAVE_HINT = "修改需保存后生效；未保存的规则不参与翻译";
+  const openaiRulesHead = addRuleHead(openaiOnly, "AI 规则", RULE_SAVE_HINT);
+  const ollamaRulesHead = addRuleHead(ollamaOnly, "AI 规则", RULE_SAVE_HINT);
+
   const rules = {
     openai_compatible: {
       translation: addRule(openaiOnly, "Translation Rule", config.openai_translation_rule),
-      translateOptimize: addRule(openaiOnly, "Translate & Optimize Rule", config.openai_translate_optimize_rule),
+      translateOptimize: addRule(openaiOnly, "Translate & Optimize", config.openai_translate_optimize_rule),
       optimization: addRule(openaiOnly, "Optimize Rule", config.openai_optimization_rule),
-      natural: addRule(openaiOnly, "Natural Language Rule", config.openai_natural_rule),
+      natural: addRule(openaiOnly, "Natural Language", config.openai_natural_rule),
     },
     ollama: {
       translation: addRule(ollamaOnly, "Translation Rule", config.ollama_translation_rule),
-      translateOptimize: addRule(ollamaOnly, "Translate & Optimize Rule", config.ollama_translate_optimize_rule),
+      translateOptimize: addRule(ollamaOnly, "Translate & Optimize", config.ollama_translate_optimize_rule),
       optimization: addRule(ollamaOnly, "Optimize Rule", config.ollama_optimization_rule),
-      natural: addRule(ollamaOnly, "Natural Language Rule", config.ollama_natural_rule),
+      natural: addRule(ollamaOnly, "Natural Language", config.ollama_natural_rule),
     },
   };
+  // —— AI 规则预设：标题行右侧一排（下拉 + 另存为 + 删除），一套规则一个文件 ——
+  // 存在 data/rule_presets/<backend>/<名字>.json，可以直接拷给别人或手工编辑
+  const RULE_FIELDS = [
+    ["translation", "translation"],
+    ["translate_optimize", "translateOptimize"],
+    ["optimization", "optimization"],
+    ["natural", "natural"],
+  ];
+  const readRuleSet = (ruleSet) => Object.fromEntries(
+    RULE_FIELDS.map(([wire, key]) => [wire, String(ruleSet[key].value ?? "")]),
+  );
+  const writeRuleSet = (ruleSet, payload) => {
+    for (const [wire, key] of RULE_FIELDS) {
+      if (typeof payload?.[wire] === "string") ruleSet[key].value = payload[wire];
+    }
+  };
+  const rulePresetApi = async (url, options) => {
+    const response = await bpiFetch(url, options);
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload?.success) throw new Error(payload?.error || `请求失败（HTTP ${response.status}）`);
+    return payload.data;
+  };
+  const buildRulePresetBar = (head, backend, ruleSet) => {
+    const bar = element("span", "bpi-rule-presets");
+    const select = element("select", "bpi-select bpi-rule-preset-select");
+    let presets = [];
+    const fill = () => {
+      select.replaceChildren();
+      const placeholder = element("option", "", presets.length ? "选择一套规则" : "还没有预设");
+      placeholder.value = "";
+      select.appendChild(placeholder);
+      for (const preset of presets) {
+        const option = element("option", "", preset.name);
+        option.value = preset.name;
+        select.appendChild(option);
+      }
+      select.value = "";
+    };
+    const refresh = async () => {
+      try {
+        presets = await rulePresetApi(`/bpi/rule-presets?backend=${encodeURIComponent(backend)}`);
+        fill();
+        markOrphans();
+      } catch (failure) {
+        setText(error, failure.message);
+        error.dataset.kind = "error";
+      }
+    };
+    select.addEventListener("change", () => {
+      const preset = presets.find((item) => item.name === select.value);
+      if (!preset) return;
+      writeRuleSet(ruleSet, preset.rules);
+      markOrphans();
+      setText(error, `已载入规则「${preset.name}」，记得点下面的保存`);
+      error.dataset.kind = "ok";
+    });
+    const saveButton = button("另存为", async () => {
+      const name = window.prompt("这套规则叫什么名字？（同名会覆盖）", "");
+      if (!name?.trim()) return;
+      try {
+        const saved = await rulePresetApi("/bpi/rule-presets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ backend, name: name.trim(), rules: readRuleSet(ruleSet) }),
+        });
+        setText(error, `已保存规则「${saved.name}」`);
+        error.dataset.kind = "ok";
+        await refresh();
+        select.value = saved.name;
+      } catch (failure) {
+        setText(error, failure.message);
+        error.dataset.kind = "error";
+      }
+    }, "bpi-mini");
+    const deleteButton = button("删除", async () => {
+      const name = select.value;
+      if (!name) return;
+      if (!window.confirm(`删除规则「${name}」？`)) return;
+      try {
+        await rulePresetApi(`/bpi/rule-presets/${encodeURIComponent(name)}?backend=${encodeURIComponent(backend)}`, { method: "DELETE" });
+        setText(error, `已删除「${name}」`);
+        error.dataset.kind = "ok";
+        await refresh();
+      } catch (failure) {
+        setText(error, failure.message);
+        error.dataset.kind = "error";
+      }
+    }, "bpi-mini bpi-danger");
+    const resetButton = button("恢复默认", () => {
+      const prefix = backend === "ollama" ? "ollama" : "openai";
+      ruleSet.translation.value = config[`default_${prefix}_translation_rule`];
+      ruleSet.translateOptimize.value = config[`default_${prefix}_translate_optimize_rule`];
+      ruleSet.optimization.value = config[`default_${prefix}_optimization_rule`];
+      ruleSet.natural.value = config[`default_${prefix}_natural_rule`];
+      markOrphans();
+      setText(error, "编辑器已恢复内置默认，记得点下面的保存");
+      error.dataset.kind = "ok";
+    }, "bpi-mini");
+    // 和「内置默认 + 所有预设」比对：哪条规则对不上任何一个，就在它左下角标一个圈 *
+    const normalizeRule = (value) => String(value ?? "").replace(/\r\n/g, "\n").replace(/[ \t]+/g, " ").trim();
+    const markOrphans = () => {
+      const prefix = backend === "ollama" ? "ollama" : "openai";
+      const defaults = {
+        translation: config[`default_${prefix}_translation_rule`],
+        translate_optimize: config[`default_${prefix}_translate_optimize_rule`],
+        optimization: config[`default_${prefix}_optimization_rule`],
+        natural: config[`default_${prefix}_natural_rule`],
+      };
+      const known = [defaults, ...presets.map((preset) => preset.rules)];
+      let orphanCount = 0;
+      for (const [wire, key] of RULE_FIELDS) {
+        const current = normalizeRule(ruleSet[key].value);
+        const found = known.some((set) => normalizeRule(set?.[wire]) === current);
+        const badge = ruleSet[key].orphanBadge;
+        if (badge) badge.classList.toggle("bpi-rule-orphan-on", !found);
+        if (!found) orphanCount += 1;
+      }
+      return orphanCount;
+    };
+    bar.append(select, saveButton, resetButton, deleteButton);
+    head.appendChild(bar);
+    refresh();
+    return { refresh, markOrphans };
+  };
+  const openaiRulesBar = buildRulePresetBar(openaiRulesHead, "openai", rules.openai_compatible);
+  const ollamaRulesBar = buildRulePresetBar(ollamaRulesHead, "ollama", rules.ollama);
+
   form.appendChild(error);
 
   const applyServiceVisibility = () => {
@@ -1171,17 +1324,6 @@ async function buildAssistantForm(host, loading) {
   host.appendChild(element("div", "bpi-config-note", "Settings are stored in the ComfyUI user directory. AI key and Baidu secret are retained independently; switching service never clears either. AI key is only cleared when AI backend/URL changes or on a different machine. Neither is written to workflows or returned to the browser."));
   const actions = element("div", "bpi-form-actions");
   // 只恢复当前所选后端那套规则，另一套不动
-  const resetButton = button("Reset to Default Rules", () => {
-    const backend = currentBackend();
-    const prefix = backend === "ollama" ? "ollama" : "openai";
-    const active = rules[backend] ?? rules.openai_compatible;
-    active.translation.value = config[`default_${prefix}_translation_rule`];
-    active.translateOptimize.value = config[`default_${prefix}_translate_optimize_rule`];
-    active.optimization.value = config[`default_${prefix}_optimization_rule`];
-    active.natural.value = config[`default_${prefix}_natural_rule`];
-    setText(error, "Defaults restored in editor; click Save to apply");
-    error.dataset.kind = "ok";
-  });
   const testButton = button("Save & Test Connection", async () => {
     testButton.disabled = true;
     setText(error, "Testing...");
@@ -1189,7 +1331,11 @@ async function buildAssistantForm(host, loading) {
     try {
       config = await saveAssistantConfig(payload());
       const result = await testAssistantConnection();
-      setText(error, `Connection OK: “${result.message}”`);
+      // 保存这一下才重新判断哪些规则不在任何预设里（打字时不闪）
+      const orphans = openaiRulesBar.markOrphans() + ollamaRulesBar.markOrphans();
+      setText(error, orphans
+        ? `Connection OK: “${result.message}”；有 ${orphans} 条规则不属于任何预设，记得另存为预设`
+        : `Connection OK: “${result.message}”`);
       error.dataset.kind = "ok";
     } catch (testError) {
       setText(error, testError.message);
@@ -1211,7 +1357,7 @@ async function buildAssistantForm(host, loading) {
       saveButton.disabled = false;
     }
   }, "bpi-primary");
-  actions.append(resetButton, testButton, saveButton);
+  actions.append(testButton, saveButton);
   host.appendChild(actions);
   // 两套 AI 配置和两套规则都提交（后端对没给的字段才保留原值，这里给全最省心）；
   // 外观 / 语言已在「设置」面板里独立成项（appearanceControl），这里既不提交也不应用

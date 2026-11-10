@@ -1316,6 +1316,12 @@ function injectBpiStyles() {
 .bpi-model-line input{flex:1 1 auto;min-width:0}
 .bpi-model-line .bpi-button{flex:none;white-space:nowrap;background-color:var(--bpm-accent);border-color:var(--bpm-accent-border);color:#fff}
 .bpi-model-line .bpi-button:hover{background-color:var(--bpm-accent-hover);border-color:var(--bpm-accent-border);color:#fff}
+.bpi-rule-label{position:relative;display:flex;align-self:start;min-width:0;padding-bottom:16px}
+.bpi-rule-orphan{position:absolute;left:0;bottom:0;display:none;width:15px;height:15px;border:1px solid var(--bpi-status-busy);border-radius:50%;background-color:var(--bpi-surface-2);color:var(--bpi-status-busy);font-size:10px;line-height:13px;text-align:center;cursor:help;user-select:none}
+.bpi-rule-orphan.bpi-rule-orphan-on{display:block}
+.bpi-rule-presets{display:flex;gap:6px;align-items:center;margin-left:auto;flex-wrap:nowrap}
+.bpi-rule-presets .bpi-select{max-width:150px;padding:2px 6px;font-size:12px}
+.bpi-rule-presets .bpi-mini{flex:none;white-space:nowrap;padding:2px 9px;font-size:11px;line-height:1.5}
 .bpi-model-picks{display:flex;flex-wrap:wrap;gap:6px;max-height:180px;overflow-y:auto;padding:8px;border:1px solid var(--bpi-border);border-radius:6px;background-color:var(--bpi-surface-2)}
 .bpi-model-picks.bpi-hidden{display:none}
 .bpi-model-pick{font:12px/1.5 ui-monospace,Consolas,monospace;padding:4px 10px;border:1px solid var(--bpi-border-2);border-radius:999px;background-color:var(--bpi-button-bg);color:var(--bpi-button-text);cursor:pointer;white-space:nowrap}

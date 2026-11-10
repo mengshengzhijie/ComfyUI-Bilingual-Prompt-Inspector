@@ -45,3 +45,6 @@ bug.md
 
 # 用户收藏库（个人提示词与参考图）
 data/saved/
+
+# AI 规则预设（个人提示词，可能包含私有写法）
+data/rule_presets/

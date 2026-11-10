@@ -634,9 +634,9 @@ const ZH = {
   "Homepage (optional)": "主页（选填）",
   "Records source only; no automatic access": "仅记录来源，不会自动访问",
   "Translation Rule": "翻译规则",
-  "Translate & Optimize Rule": "翻译并优化规则",
+  "Translate & Optimize": "翻译并优化",
   "Optimize Rule": "优化规则",
-  "Natural Language Rule": "自然语言规则",
+  "Natural Language": "自然语言",
   "Optimize with the rule for the current mode: tag mode tidies the tag flow, natural language mode rewrites it as English sentences":
     "按当前模式对应的规则优化：标签模式整理标签流，自然语言模式改写为英文自然语句",
   "Connection OK: {}": "连接正常：{}",
