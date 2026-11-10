@@ -1267,7 +1267,34 @@ async function buildAssistantForm(host, loading) {
         error.dataset.kind = "error";
       }
     }, "bpi-mini bpi-danger");
+    // 恢复默认是破坏性操作，要点三次：确认？→ 红色「恢复默认」→ 真正执行
+    let resetStage = 0;
+    let resetTimer = null;
+    const resetIdle = () => {
+      resetStage = 0;
+      clearTimeout(resetTimer);
+      resetTimer = null;
+      setText(resetButton, "恢复默认");
+      resetButton.classList.remove("bpi-danger");
+    };
+    const armResetIdle = () => {
+      clearTimeout(resetTimer);
+      resetTimer = setTimeout(resetIdle, 4000);
+    };
     const resetButton = button("恢复默认", () => {
+      if (resetStage === 0) {
+        resetStage = 1;
+        setText(resetButton, "确认？");
+        armResetIdle();
+        return;
+      }
+      if (resetStage === 1) {
+        resetStage = 2;
+        setText(resetButton, "恢复默认");
+        resetButton.classList.add("bpi-danger");
+        armResetIdle();
+        return;
+      }
       const prefix = backend === "ollama" ? "ollama" : "openai";
       ruleSet.translation.value = config[`default_${prefix}_translation_rule`];
       ruleSet.translateOptimize.value = config[`default_${prefix}_translate_optimize_rule`];
@@ -1276,6 +1303,7 @@ async function buildAssistantForm(host, loading) {
       markOrphans();
       setText(error, "编辑器已恢复内置默认，记得点下面的保存");
       error.dataset.kind = "ok";
+      resetIdle();
     }, "bpi-mini");
     // 和「内置默认 + 所有预设」比对：哪条规则对不上任何一个，就在它左下角标一个圈 *
     const normalizeRule = (value) => String(value ?? "").replace(/\r\n/g, "\n").replace(/[ \t]+/g, " ").trim();

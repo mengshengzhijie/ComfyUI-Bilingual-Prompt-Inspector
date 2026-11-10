@@ -188,7 +188,13 @@ export function openLibraryItemDialog({ item = null, parent = null, presetKind =
   removeImageInput.type = "checkbox";
   const removeTrack = element("span", "bpi-switch-track");
   removeTrack.appendChild(element("span", "bpi-switch-thumb"));
-  removeRow.append(removeImageInput, removeTrack, element("span", "bpi-switch-text", "删除已有参考图"));
+  // 打开后变红，旁边提醒一句「保存后生效」——和清除密钥那个开关的写法一致
+  removeRow.append(
+    removeImageInput,
+    removeTrack,
+    element("span", "bpi-switch-text", "删除已有参考图"),
+    element("span", "bpi-switch-hint", "保存后生效"),
+  );
   removeRow.style.gridColumn = "1 / -1";
   if (item?.image) form.append(removeRow);
 
