@@ -170,11 +170,11 @@ function field(form, labelText, name, value = "", placeholder = "") {
   return input;
 }
 
-async function runInspectorAssistant(action, text, instruction = "") {
+async function runInspectorAssistant(action, text, instruction = "", scene = "") {
   const response = await bpiFetch(`${API_ROOT}/assistant/run`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action, text, instruction }),
+    body: JSON.stringify({ action, text, instruction, scene }),
   });
   let result;
   try {
@@ -1316,9 +1316,15 @@ function injectBpiStyles() {
 .bpi-model-line input{flex:1 1 auto;min-width:0}
 .bpi-model-line .bpi-button{flex:none;white-space:nowrap;background-color:var(--bpm-accent);border-color:var(--bpm-accent-border);color:#fff}
 .bpi-model-line .bpi-button:hover{background-color:var(--bpm-accent-hover);border-color:var(--bpm-accent-border);color:#fff}
+.bpi-switch-line{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.bpi-greet-settings{display:flex;flex-direction:column;gap:6px;padding:4px 0 2px}
+.bpi-greet-settings .bpi-greet-prompt{width:100%;box-sizing:border-box;min-height:96px;padding:7px 9px;border:1px solid var(--bpi-field-border);border-radius:5px;background-color:var(--bpi-input-bg);color:var(--bpi-input-text);font:12px/1.6 Arial,sans-serif;resize:vertical}
+.bpi-greet-settings .bpi-modal-actions{display:flex;align-items:center;gap:8px}
 .bpi-rule-label{position:relative;display:flex;align-self:start;min-width:0;padding-bottom:16px}
 .bpi-rule-orphan{position:absolute;left:0;bottom:0;display:none;width:15px;height:15px;border:1px solid var(--bpi-status-busy);border-radius:50%;background-color:var(--bpi-surface-2);color:var(--bpi-status-busy);font-size:10px;line-height:13px;text-align:center;cursor:help;user-select:none}
 .bpi-rule-orphan.bpi-rule-orphan-on{display:block}
+/* 折叠开关的激活态：展开时按钮变成强调色，一眼看出「再点一下能收起」 */
+.bpi-mini.bpi-toggle-on{background-color:var(--bpm-accent);border-color:var(--bpm-accent-border,var(--bpm-accent));color:#fff}
 .bpi-rule-presets{display:flex;gap:6px;align-items:center;margin-left:auto;flex-wrap:nowrap}
 .bpi-rule-presets .bpi-select{max-width:150px;padding:2px 6px;font-size:12px}
 .bpi-rule-presets .bpi-mini{flex:none;white-space:nowrap;padding:2px 9px;font-size:11px;line-height:1.5}

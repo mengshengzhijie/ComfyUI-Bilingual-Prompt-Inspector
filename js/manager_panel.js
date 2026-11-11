@@ -49,6 +49,20 @@ import {
   testAssistantConnection,
 } from "./bpi_shared.js";
 import { createLibraryView, openLibraryItemDialog } from "./bpi_library.js";
+import {
+  createGreetingAiPanel,
+  createGreetingAutoPanel,
+  createGreetingSettingsPanel,
+  generateGreeting,
+  greetingEnabled,
+  loadGreetingConfig,
+  restartGreetingAutoTimer,
+  setGreetingRule,
+  setWelcomeEnabled,
+  welcomeEnabled,
+  setGreetingEnabled,
+  startGreeting,
+} from "./bpi_greeting.js";
 
 const SECTIONS = [
   ["tag-manager", "Tag Manager"],
@@ -699,7 +713,100 @@ async function buildAppearanceForm(host, loading) {
   followToggle.addEventListener("change", () => setFollowSelectionEnabled(followToggle.checked));
   const followNote = element("div", "bpi-config-note", "开：在画布上点一个「双语提示词检查器」节点，侧边栏的「标签管理」就切到它。关：只能在「标签管理」的节点下拉里手动选。");
   followNote.style.gridColumn = "1 / -1";
-  form.append(languageLabel, languageSelect, languageNote, followRow, followNote, status);
+  // 问候/提醒：独立的右上角通知，自己的开关；右边的「测试」用来立刻看效果（以后会删）
+  const greetLine = element("div", "bpi-switch-line");
+  greetLine.style.gridColumn = "1 / -1";
+  const greetRow = element("label", "bpi-switch-row bpi-switch-accent");
+  const greetToggle = element("input", "bpi-switch");
+  greetToggle.type = "checkbox";
+  greetToggle.checked = greetingEnabled();
+  const greetTrack = element("span", "bpi-switch-track");
+  greetTrack.appendChild(element("span", "bpi-switch-thumb"));
+  greetRow.append(greetToggle, greetTrack, element("span", "bpi-switch-text", "显示问候与提醒"));
+  greetToggle.addEventListener("change", () => setGreetingEnabled(greetToggle.checked));
+  // 规则直接内联展开：弹窗在这里会被 ComfyUI 的设置面板压住，输入框点不动
+  // 每次进入时问候：固定文案，按时段挑一段，不走 AI
+  const welcomeRow = element("label", "bpi-switch-row bpi-switch-accent");
+  const welcomeToggle = element("input", "bpi-switch");
+  welcomeToggle.type = "checkbox";
+  welcomeToggle.checked = welcomeEnabled();
+  const welcomeTrack = element("span", "bpi-switch-track");
+  welcomeTrack.appendChild(element("span", "bpi-switch-thumb"));
+  const welcomeHelp = element("span", "bpi-help", "?");
+  welcomeHelp.appendChild(element("span", "bpi-help-pop",
+    "打开页面时请 AI 按当前时间说一句问候（早上/中午/下午/晚上/深夜各不相同）。AI 不可用时退回内置文案；两者的提示词都在 data/greeting_defaults.json，界面上不提供编辑。"));
+  welcomeRow.append(welcomeToggle, welcomeTrack, element("span", "bpi-switch-text", "每次进入时问候"), welcomeHelp);
+  welcomeToggle.addEventListener("change", () => setWelcomeEnabled(welcomeToggle.checked));
+
+  // 失败安慰 / 静默招呼：开关一点就存，不用进去点保存
+  const makeSideSwitch = (text, help, rule, extraNodes = []) => {
+    const row = element("label", "bpi-switch-row bpi-switch-accent");
+    const toggle = element("input", "bpi-switch");
+    toggle.type = "checkbox";
+    const track = element("span", "bpi-switch-track");
+    track.appendChild(element("span", "bpi-switch-thumb"));
+    const mark = element("span", "bpi-help", "?");
+    mark.appendChild(element("span", "bpi-help-pop", help));
+    row.append(toggle, track, element("span", "bpi-switch-text", text), mark, ...extraNodes);
+    toggle.addEventListener("change", async () => {
+      try {
+        await setGreetingRule(rule, toggle.checked);
+        restartGreetingAutoTimer();
+      } catch (failure) {
+        toggle.checked = !toggle.checked;
+        notify(failure.message, "error");
+      }
+    });
+    return { row, toggle };
+  };
+  const errorSwitch = makeSideSwitch(
+    "生成失败时安慰一下",
+    "生成失败时有 1/5 的概率让 AI 安慰你一句。只告诉它「刚才失败了」，不会把报错内容和堆栈发过去。提示词文件：data/greeting_defaults.json（error_prompt 段）。",
+    "error_rule",
+  );
+  const idleSwitch = makeSideSwitch(
+    "静下来时招呼一声",
+    "键盘鼠标安静超过 1 分钟，就让 AI 说句话。中间只要敲键盘、点鼠标或滚动滚轮就重新计时。提示词文件：data/greeting_defaults.json（idle_prompt 段）。",
+    "idle_rule",
+  );
+
+  const greetPanel = createGreetingSettingsPanel();
+  const greetSettings = button("设置", () => {
+    greetPanel.hidden = !greetPanel.hidden;
+    // 展开时按钮变蓝，提示「再点一下收起」
+    greetSettings.classList.toggle("bpi-toggle-on", !greetPanel.hidden);
+  }, "bpi-mini");
+  // 请求：按「设置」里写的要求现问一次 AI，结果直接弹成右上角那张卡
+  const greetRequest = button("请求", async () => {
+    const card = startGreeting({ title: "正在生成" });
+    try {
+      const { title, body } = await generateGreeting();
+      card.setTitle(title);
+      card.finish(body);
+    } catch (failure) {
+      // 失败不占着卡片：直接收掉，用右上角通知说明原因
+      card.dismiss();
+      notify(failure.message || "请求失败", "error");
+    }
+  }, "bpi-mini");
+  greetLine.append(greetRow, greetSettings, greetRequest);
+  // 包成折叠块：以后生成张数、运行时长、日志这些都往这里塞
+  const greetFold = element("details", "bpi-fold");
+  greetFold.style.gridColumn = "1 / -1";
+  const greetFoldBody = element("div", "bpi-fold-body");
+  const greetAiPanel = createGreetingAiPanel();
+  const greetAutoPanel = createGreetingAutoPanel();
+  // 编辑区紧跟开关行：展开「问候的 AI」「自动提示」也不会把输入框挤到看不见
+  greetFoldBody.append(greetLine, welcomeRow, errorSwitch.row, idleSwitch.row, greetPanel, greetAiPanel, greetAutoPanel);
+  loadGreetingConfig()
+    .then((config) => {
+      errorSwitch.toggle.checked = config.error_rule?.enabled === true;
+      idleSwitch.toggle.checked = config.idle_rule?.enabled === true;
+    })
+    .catch(() => {});
+  greetFold.append(element("summary", "", "问候与提醒"), greetFoldBody);
+  form.append(languageLabel, languageSelect, languageNote, followRow, followNote, greetFold, status);
+  restartGreetingAutoTimer();
   // 开：操作提示改成右上角弹窗；关：还是写回明细表上方那条状态文字
   const fold = element("details", "bpi-fold");
   const foldBody = element("div", "bpi-fold-body");
@@ -1058,6 +1165,12 @@ async function buildAssistantForm(host, loading) {
   form.append(openaiHead);
   openaiOnly.push(openaiHead);
   const openaiBaseUrl = addField(openaiOnly, "API URL", "assistant-openai-base-url", config.openai_base_url, "https://host/v1");
+  const openaiApiKey = addField(openaiOnly, "API Key", "assistant-openai-api-key", "", config.openai_api_key_configured ? "Saved; leave empty to keep" : "Optional for local LM Studio");
+  openaiApiKey.type = "password";
+  const clearApiKey = clearSwitch("Clear saved API Key");
+  const apiKeySpacer = element("span");
+  form.append(apiKeySpacer, clearApiKey.row);
+  openaiOnly.push(apiKeySpacer, clearApiKey.row);
   const openaiModel = addModelRow(openaiOnly, "assistant-openai-model", config.openai_model, "provider model ID", {
     backend: "openai_compatible",
     baseUrl: () => openaiBaseUrl,
@@ -1074,12 +1187,6 @@ async function buildAssistantForm(host, loading) {
   presetLine.append(lmStudioPreset, element("span", "bpi-config-note", "Connects to localhost:1234 by default; no external API required."));
   form.append(presetLine);
   openaiOnly.push(presetLine);
-  const openaiApiKey = addField(openaiOnly, "API Key", "assistant-openai-api-key", "", config.openai_api_key_configured ? "Saved; leave empty to keep" : "Optional for local LM Studio");
-  openaiApiKey.type = "password";
-  const clearApiKey = clearSwitch("Clear saved API Key");
-  const apiKeySpacer = element("span");
-  form.append(apiKeySpacer, clearApiKey.row);
-  openaiOnly.push(apiKeySpacer, clearApiKey.row);
   const openaiTemperature = addField(openaiOnly, "Temperature", "assistant-openai-temperature", config.openai_temperature, "0–2");
   openaiTemperature.type = "number";
   openaiTemperature.min = "0";
@@ -1132,7 +1239,7 @@ async function buildAssistantForm(host, loading) {
   ollamaOnly.push(ollamaUrlNote);
 
   // 规则：只有 AI 会读，两个后端各一套（server.py 按当前后端取对应的那套）
-  const addRule = (list, labelText, value) => {
+  const addRule = (list, labelText, value, container = form) => {
     const labelElement = element("label", "", labelText);
     const textarea = element("textarea");
     textarea.value = value;
@@ -1141,42 +1248,43 @@ async function buildAssistantForm(host, loading) {
     const orphan = element("span", "bpi-rule-orphan", "*");
     setTitle(orphan, "这条规则不属于任何一个预设");
     labelCell.append(labelElement, orphan);
-    form.append(labelCell, textarea);
+    container.append(labelCell, textarea);
     list.push(labelCell, textarea);
     textarea.orphanBadge = orphan;
     return textarea;
   };
-  // 四条规则归到一个分组里：以后切规则预设时整体一起换，也方便在标题行右侧放管理入口
-  const addRuleHead = (list, title, hint) => {
-    const head = element("div", "bpm-toolbar");
-    head.style.gridColumn = "1 / -1";
-    head.append(element("strong", "", title));
-    if (hint) {
-      const note = element("span", "bpi-config-note", hint);
-      note.style.marginLeft = "8px";
-      head.append(note);
-    }
-    form.append(head);
-    list.push(head);
-    return head;
+  // 四条规则收进一个折叠块：默认收起，省得设置页太长
+  const addRuleFold = (list, title, hint) => {
+    const fold = element("details", "bpi-fold");
+    fold.style.gridColumn = "1 / -1";
+    const body = element("div", "bpi-fold-body");
+    const toolbar = element("div", "bpm-toolbar");
+    const grid = element("div", "bpi-form");
+    body.append(toolbar);
+    if (hint) body.append(element("div", "bpi-config-note", hint));
+    body.append(grid);
+    fold.append(element("summary", "", title), body);
+    form.append(fold);
+    list.push(fold);
+    return { fold, body, toolbar, grid };
   };
   // 规则编辑和保存是两件事：改完不点保存，刷新或执行翻译时用的还是旧规则
   const RULE_SAVE_HINT = "修改需保存后生效；未保存的规则不参与翻译";
-  const openaiRulesHead = addRuleHead(openaiOnly, "AI 规则", RULE_SAVE_HINT);
-  const ollamaRulesHead = addRuleHead(ollamaOnly, "AI 规则", RULE_SAVE_HINT);
+  const openaiRulesFold = addRuleFold(openaiOnly, "AI 规则", RULE_SAVE_HINT);
+  const ollamaRulesFold = addRuleFold(ollamaOnly, "AI 规则", RULE_SAVE_HINT);
 
   const rules = {
     openai_compatible: {
-      translation: addRule(openaiOnly, "Translation Rule", config.openai_translation_rule),
-      translateOptimize: addRule(openaiOnly, "Translate & Optimize", config.openai_translate_optimize_rule),
-      optimization: addRule(openaiOnly, "Optimize Rule", config.openai_optimization_rule),
-      natural: addRule(openaiOnly, "Natural Language", config.openai_natural_rule),
+      translation: addRule(openaiOnly, "Translation Rule", config.openai_translation_rule, openaiRulesFold.grid),
+      translateOptimize: addRule(openaiOnly, "Translate & Optimize", config.openai_translate_optimize_rule, openaiRulesFold.grid),
+      optimization: addRule(openaiOnly, "Optimize Rule", config.openai_optimization_rule, openaiRulesFold.grid),
+      natural: addRule(openaiOnly, "Natural Language", config.openai_natural_rule, openaiRulesFold.grid),
     },
     ollama: {
-      translation: addRule(ollamaOnly, "Translation Rule", config.ollama_translation_rule),
-      translateOptimize: addRule(ollamaOnly, "Translate & Optimize", config.ollama_translate_optimize_rule),
-      optimization: addRule(ollamaOnly, "Optimize Rule", config.ollama_optimization_rule),
-      natural: addRule(ollamaOnly, "Natural Language", config.ollama_natural_rule),
+      translation: addRule(ollamaOnly, "Translation Rule", config.ollama_translation_rule, ollamaRulesFold.grid),
+      translateOptimize: addRule(ollamaOnly, "Translate & Optimize", config.ollama_translate_optimize_rule, ollamaRulesFold.grid),
+      optimization: addRule(ollamaOnly, "Optimize Rule", config.ollama_optimization_rule, ollamaRulesFold.grid),
+      natural: addRule(ollamaOnly, "Natural Language", config.ollama_natural_rule, ollamaRulesFold.grid),
     },
   };
   // —— AI 规则预设：标题行右侧一排（下拉 + 另存为 + 删除），一套规则一个文件 ——
@@ -1331,8 +1439,8 @@ async function buildAssistantForm(host, loading) {
     refresh();
     return { refresh, markOrphans };
   };
-  const openaiRulesBar = buildRulePresetBar(openaiRulesHead, "openai", rules.openai_compatible);
-  const ollamaRulesBar = buildRulePresetBar(ollamaRulesHead, "ollama", rules.ollama);
+  const openaiRulesBar = buildRulePresetBar(openaiRulesFold.toolbar, "openai", rules.openai_compatible);
+  const ollamaRulesBar = buildRulePresetBar(ollamaRulesFold.toolbar, "ollama", rules.ollama);
 
   form.appendChild(error);
 

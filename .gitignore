@@ -48,3 +48,4 @@ data/saved/
 
 # AI 规则预设（个人提示词，可能包含私有写法）
 data/rule_presets/
+data/greeting/

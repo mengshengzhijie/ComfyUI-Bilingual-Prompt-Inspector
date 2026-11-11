@@ -42,6 +42,7 @@ from .saved_prompt_store import (
 )
 from .library_store import LibraryStore
 from .rule_preset_store import RulePresetStore
+from .greeting_store import GreetingStore
 from .token_color_store import TokenColorStore
 
 
@@ -205,13 +206,16 @@ async def _baidu_translate(text, to_lang):
     return result
 
 
-async def _call_ai_assistant(action, text, instruction, config, connection_test=False):
+async def _call_ai_assistant(action, text, instruction, config, connection_test=False, scene=""):
     """翻译/优化都走这里。优化类恒走 AI；翻译类在翻译服务就是某个 AI 后端时也走 AI。"""
     # 两个后端各一套配置和规则。选 OpenAI / Ollama 当翻译服务时它就是后端；
     # 选词库 / 百度时翻译不走 AI，优化仍走，这时用 ai_provider 决定读哪一套
     prefix = AI_PROVIDER_PREFIXES.get(config.get("translate_service")) or AI_PROVIDER_PREFIXES.get(
         config.get("ai_provider", "openai_compatible"), "openai"
     )
+    # 问候有自己的温度，和翻译那套分开：不论用哪个后端，这里都换成问候的设置
+    if action == "greeting":
+        config = {**config, f"{prefix}_temperature": greeting_store.temperature()}
     if not config.get(f"{prefix}_model"):
         raise ValueError("尚未填写 AI 模型名称（“翻译并优化”“优化”以及 AI 翻译都需要）")
     rule = {
@@ -221,6 +225,8 @@ async def _call_ai_assistant(action, text, instruction, config, connection_test=
         "optimize": config[f"{prefix}_optimization_rule"],
         # 自然语言模式下的「优化」：输入可以是中文，输出是英文自然语句，不走 Anima 标点规则
         "optimize_natural": config[f"{prefix}_natural_rule"],
+        # 问候按场景取：手动请求 / 久坐提醒 / 生成张数，各有各的那句要求
+        "greeting": greeting_store.prompt_for(scene),
     }[action]
     if connection_test:
         rule = "你是连接测试助手。"
@@ -236,6 +242,16 @@ async def _call_ai_assistant(action, text, instruction, config, connection_test=
         if re.search(r"[\u3400-\u9fff]", text):
             raise ValueError("“优化”在标签模式下只接受英文；中文或混合文本请使用“翻译并优化”，或把模式切到“自然语言”")
         rule = f"{rule}\n\n本次任务：整理现有英文内容，不承担翻译。"
+    elif not connection_test and action == "greeting":
+        if scene in {"time", "images"}:
+            # 这两种自动提示的标题由前端固定（比如「当前在线 32 分钟」），AI 只负责正文
+            rule = f"{rule}\n\n本次任务：只写正文，2 到 3 句，不要标题、不要列表、不要前缀标签。"
+        elif scene == "welcome":
+            rule = f"{rule}\n\n本次任务：按上面的要求打一声招呼，第一行写标题。"
+        elif scene in {"error", "idle"}:
+            rule = f"{rule}\n\n本次任务：按上面的要求说一句，第一行写标题，不要提报错细节。"
+        else:
+            rule = f"{rule}\n\n本次任务：按上面的要求写一条新的提醒。"
     elif not connection_test and action == "optimize_natural":
         # 自然语言模式允许中文输入：先译后整理，输出一段英文自然语句
         direction = "先把中文忠实译为英文，再整理表达" if translation_direction(text) == "to_english" else "整理现有英文内容，不承担翻译"
@@ -293,15 +309,25 @@ async def _call_ai_assistant(action, text, instruction, config, connection_test=
     return result
 
 
-async def _call_configured_assistant(action, text, instruction="", connection_test=False):
+async def _call_configured_assistant(action, text, instruction="", connection_test=False, scene=""):
     config = assistant_store.config()
+    if action == "greeting" and not connection_test:
+        override = greeting_store.ai_override()
+        if override:
+            # 问候单独配的 AI：强制走 OpenAI 兼容那套分支
+            config = {**config, **override, "translate_service": "openai_compatible"}
+        elif config["translate_service"] not in AI_SERVICES:
+            raise ValueError(
+                "问候没有可用的 AI：请打开「问候与提醒 → 问候的 AI → 使用助手设置里的 AI」，"
+                "并把助手设置切到 AI 翻译，或在问候里单独填一套 API"
+            )
     translate_service = config["translate_service"]
     # “翻译并优化”“优化”恒走 AI；翻译/解释在翻译服务就是某个 AI 后端时也走 AI
-    needs_ai = action in {"translate_optimize", "optimize", "optimize_natural"} or (
+    needs_ai = action in {"translate_optimize", "optimize", "optimize_natural", "greeting"} or (
         action in {"translate", "explain"} and translate_service in AI_SERVICES
     )
     if needs_ai:
-        return await _call_ai_assistant(action, text, instruction, config, connection_test)
+        return await _call_ai_assistant(action, text, instruction, config, connection_test, scene)
     # 以下只处理 translate/explain 且翻译服务不是 AI
     if translate_service == "dictionary":
         if connection_test:
@@ -418,7 +444,8 @@ async def run_assistant(request):
         action = str(payload.get("action", "translate")) if isinstance(payload, dict) else "translate"
         text = str(payload.get("text", "")) if isinstance(payload, dict) else ""
         instruction = str(payload.get("instruction", "")) if isinstance(payload, dict) else ""
-        if action not in {"translate", "explain", "translate_optimize", "optimize", "optimize_natural"}:
+        scene = str(payload.get("scene", "")) if isinstance(payload, dict) else ""
+        if action not in {"translate", "explain", "translate_optimize", "optimize", "optimize_natural", "greeting"}:
             raise ValueError("未知的助手操作")
         if not text.strip():
             raise ValueError("输入内容为空")
@@ -437,7 +464,7 @@ async def run_assistant(request):
         except asyncio.TimeoutError as error:
             raise AssistantLimitError("已有多个助手任务正在运行，请稍后再试") from error
         try:
-            result = await _call_configured_assistant(action, text, instruction)
+            result = await _call_configured_assistant(action, text, instruction, scene=scene)
         finally:
             _assistant_slots.release()
         return web.json_response({"success": True, "data": {"text": result, "translate_service": assistant_store.config()["translate_service"]}})
@@ -447,6 +474,20 @@ async def run_assistant(request):
         return error_response(error)
     except Exception as error:
         return error_response(error, 502)
+
+
+@protected_route("get", "/bpi/greeting/config")
+async def get_greeting_config(_request):
+    return web.json_response({"success": True, "data": greeting_store.config()})
+
+
+@protected_route("post", "/bpi/greeting/config")
+async def save_greeting_config(request):
+    try:
+        payload = await _read_json(request, _MAX_ASSISTANT_JSON_BYTES)
+        return web.json_response({"success": True, "data": greeting_store.save(payload)})
+    except (ValueError, web.HTTPBadRequest) as error:
+        return error_response(error)
 
 
 @protected_route("get", "/bpi/dictionary")
@@ -783,6 +824,7 @@ async def cancel_upstream(request):
 saved_prompt_store = SavedPromptStore()
 library_store = LibraryStore()
 rule_preset_store = RulePresetStore()
+greeting_store = GreetingStore()
 # multipart 正文 = 文本字段 + 一张可选图片（图片本身最大 5 MB）
 _MAX_SAVED_PROMPT_BYTES = MAX_IMAGE_BYTES + 512 * 1024
 
