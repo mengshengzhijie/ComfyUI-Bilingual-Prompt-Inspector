@@ -657,6 +657,27 @@ function appearanceControl() {
   return appearanceSettingsNode;
 }
 
+// 「说明」单独一页，挂在插件分类下的第一项，不属于通用或助手设置
+let noticeSettingsNode = null;
+
+function noticeControl() {
+  if (noticeSettingsNode) {
+    alignWhenMounted(noticeSettingsNode);
+    return noticeSettingsNode;
+  }
+  noticeSettingsNode = element("div", "bpi-settings-form");
+  const text = element("div", "", "说明：设置页正在重构，近期加入了不少功能，部分位置可能还会调整。");
+  text.style.lineHeight = "1.9";
+  text.style.fontSize = "13px";
+  const second = element("div", "", "使用中遇到问题或有建议，欢迎在 GitHub 提 issue；给你带来的不便，还请谅解。");
+  second.style.marginTop = "6px";
+  second.style.lineHeight = "1.9";
+  second.style.fontSize = "13px";
+  noticeSettingsNode.append(text, second);
+  alignWhenMounted(noticeSettingsNode);
+  return noticeSettingsNode;
+}
+
 async function buildAppearanceForm(host, loading) {
   let config;
   try {
@@ -1986,6 +2007,13 @@ app.registerExtension({
   // 助手设置整体挂在 ComfyUI 的「设置」面板里：项名和分类由前端原生渲染，
   // 不走插件的 t()，直接写中文；控件本体是 assistantSettingsControl() 返回的那块 DOM。
   settings: [
+    {
+      id: "BilingualPromptInspector.Notice",
+      name: "说明",
+      type: noticeControl,
+      defaultValue: "",
+      category: ["双语提示词检查器", "说明"],
+    },
     {
       id: "BilingualPromptInspector.Appearance",
       name: "通用",

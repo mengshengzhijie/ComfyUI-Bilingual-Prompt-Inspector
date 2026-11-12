@@ -74,6 +74,20 @@ async function deleteItem(id) {
   return readJson(await bpiFetch(`${API_ROOT}/${encodeURIComponent(id)}`, { method: "DELETE" }));
 }
 
+// 淡色底在深/浅主题下的观感差很多：亮色背景原本就浅，12% 几乎看不见
+function isDarkTheme() {
+  const root = document.documentElement;
+  const body = document.body;
+  if (root.getAttribute("data-bpi-theme") === "dark") return true;
+  if (root.getAttribute("data-bpi-theme") === "light") return false;
+  if (body.classList.contains("dark-theme")) return true;
+  return false;
+}
+
+function tintAlpha() {
+  return isDarkTheme() ? { folder: "1f", child: "0d" } : { folder: "33", child: "1a" };
+}
+
 function imageUrl(item) {
   return `${API_ROOT}/${encodeURIComponent(item.id)}/image?v=${item.updated_at ?? item.created_at ?? 0}`;
 }
@@ -340,13 +354,14 @@ export function createLibraryView({ mount, onLoad, onToast, confirmDelete }) {
     const row = element("div", `bpi-lib-row ${isFolder ? "bpi-lib-folder" : "bpi-lib-item"}`);
     row.dataset.id = item.id;
     row.draggable = true;
-    // 文件夹的淡色：存的是 #rrggbb，这里补成 12% 透明度铺一层，跟节点里提示词区那种底色一样。
-    // 文件夹里的条目继承同一个颜色，但更淡一档（5%），一眼能看出它属于哪个组。
+    // 文件夹的淡色：存的是 #rrggbb，这里按当前主题补透明度铺一层。
+    // 文件夹里的条目继承同一个颜色，但更淡一档，一眼能看出它属于哪个组。
+    const tint = tintAlpha();
     if (isFolder && item.color) {
-      row.style.backgroundColor = `${item.color}1f`;
+      row.style.backgroundColor = `${item.color}${tint.folder}`;
     } else if (!isFolder && item.parent) {
       const parentColor = byId(item.parent)?.color;
-      if (parentColor) row.style.backgroundColor = `${parentColor}0d`;
+      if (parentColor) row.style.backgroundColor = `${parentColor}${tint.child}`;
     }
 
     const main = element("div", "bpi-lib-main");
