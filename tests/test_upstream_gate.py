@@ -132,7 +132,11 @@ class UpstreamGateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, ("from upstream",))
         self.assertEqual(
             fake_server.events,
-            [(server.UPSTREAM_ARRIVED_EVENT, {"node_id": "12", "text": "from upstream"})],
+            [
+                (server.UPSTREAM_ARRIVED_EVENT, {"node_id": "12", "text": "from upstream"}),
+                # 超时放行时补发一条，前端据此提示「没接管到，已按原文透传」
+                ("bpi/upstream-timeout", {"node_id": "12"}),
+            ],
         )
         server.upstream_gate.handoff_timeout = server._UPSTREAM_HANDOFF_TIMEOUT
 

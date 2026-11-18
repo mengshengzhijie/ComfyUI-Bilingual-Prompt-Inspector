@@ -81,7 +81,8 @@ const manager = {
   data: { tags: [], builtin: [], user: [], packs: [] },
   preferences: loadPreferences(),
   selected: new Set(),
-  section: "tags",
+  // 打开侧边栏先看「标签管理」：这是最常用的页，词库退到第二项
+  section: "tag-manager",
   loaded: false,
   favoritesLoaded: false,
   tagManagerNodeId: null,
@@ -679,6 +680,80 @@ function noticeControl() {
   return noticeSettingsNode;
 }
 
+// 通用页里的「节点」折叠块：点击跟随、上游超时、撤销快捷键
+function createNodeSettingsFold(followRow, followNote) {
+  const fold = element("details", "bpi-fold");
+  fold.style.gridColumn = "1 / -1";
+  const body = element("div", "bpi-fold-body");
+  const form = element("form", "bpi-form");
+
+  const timeoutLabel = element("label", "", "上游接管超时");
+  const timeoutInput = element("input");
+  timeoutInput.type = "number";
+  timeoutInput.min = "3";
+  timeoutInput.max = "600";
+  timeoutInput.step = "1";
+  timeoutInput.value = "20";
+  const timeoutNote = element("div", "bpi-config-note", "上游文本到达后，若这么多秒内没有被接管，就按原文自动透传。默认 20 秒。");
+  timeoutNote.style.gridColumn = "1 / -1";
+
+  const undoLabel = element("label", "", "撤销快捷键");
+  const undoSelect = element("select");
+  for (const { id, label } of undoComboOptions()) {
+    const option = element("option", "", label);
+    option.value = id;
+    undoSelect.appendChild(option);
+  }
+  undoSelect.value = undoComboId();
+  undoSelect.addEventListener("change", () => {
+    setUndoCombo(undoSelect.value);
+    // 侧边栏那行提示立刻跟着改，不用等面板重建
+    const hint = document.getElementById("bpi-undo-hint");
+    if (hint) hint.textContent = `插件撤销：${undoComboLabel()}+Z（重做：${undoComboLabel()}+Y）`;
+  });
+  const undoNote = element("div", "bpi-config-note", "撤销 = 所选组合 + Z，重做 = 组合 + Y。Ctrl+Z 留给 ComfyUI 画布自己的撤销。");
+  undoNote.style.gridColumn = "1 / -1";
+
+  const actions = element("div", "bpi-modal-actions");
+  // 这一块在 .bpi-form（两列 grid）里，按钮行要横跨整行，否则只占右边窄窄一列
+  actions.style.gridColumn = "1 / -1";
+  const status = element("span", "bpi-config-note");
+  const saveButton = button("保存", async () => {
+    saveButton.disabled = true;
+    try {
+      const response = await bpiFetch("/bpi/upstream/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ timeout_seconds: Number(timeoutInput.value) }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.success) throw new Error(payload?.error || "保存失败");
+      setText(status, "已保存");
+      status.dataset.kind = "ok";
+    } catch (failure) {
+      setText(status, failure.message);
+      status.dataset.kind = "error";
+    } finally {
+      saveButton.disabled = false;
+    }
+  }, "bpi-primary");
+  actions.append(saveButton, status);
+
+  form.append(timeoutLabel, timeoutInput, timeoutNote, undoLabel, undoSelect, undoNote, actions);
+  body.append(followRow, followNote, form);
+  fold.append(element("summary", "", "节点"), body);
+
+  bpiFetch("/bpi/upstream/config")
+    .then((response) => response.json())
+    .then((payload) => {
+      if (payload?.success) timeoutInput.value = String(payload.data?.timeout_seconds ?? 20);
+    })
+    .catch(() => {
+      // 读不到就保持默认 20
+    });
+  return fold;
+}
+
 async function buildAppearanceForm(host, loading) {
   let config;
   try {
@@ -827,7 +902,8 @@ async function buildAppearanceForm(host, loading) {
     })
     .catch(() => {});
   greetFold.append(element("summary", "", "问候与提醒"), greetFoldBody);
-  form.append(languageLabel, languageSelect, languageNote, followRow, followNote, greetFold, status);
+  const nodeFold = createNodeSettingsFold(followRow, followNote);
+  form.append(languageLabel, languageSelect, languageNote, nodeFold, greetFold, status);
 
   restartGreetingAutoTimer();
   // 开：操作提示改成右上角弹窗；关：还是写回明细表上方那条状态文字
@@ -936,24 +1012,6 @@ async function buildAppearanceForm(host, loading) {
   fold.append(element("summary", "", "通知弹窗及实时动画预览"), foldBody);
   form.appendChild(fold);
 
-  // 撤销快捷键：只换修饰键，主键固定 Z / Y
-  const undoLabel = element("label", "", "撤销快捷键");
-  const undoSelect = element("select");
-  for (const { id, label } of undoComboOptions()) {
-    const option = element("option", "", label);
-    option.value = id;
-    undoSelect.appendChild(option);
-  }
-  undoSelect.value = undoComboId();
-  undoSelect.addEventListener("change", () => {
-    setUndoCombo(undoSelect.value);
-    // 侧边栏那行提示立刻跟着改，不用等面板重建
-    const hint = document.getElementById("bpi-undo-hint");
-    if (hint) hint.textContent = `插件撤销：${undoComboLabel()}+Z（重做：${undoComboLabel()}+Y）`;
-  });
-  const undoNote = element("div", "bpi-config-note", "撤销 = 所选组合 + Z，重做 = 组合 + Y。Ctrl+Z 留给 ComfyUI 画布自己的撤销。");
-  undoNote.style.gridColumn = "1 / -1";
-  form.append(undoLabel, undoSelect, undoNote);
   host.appendChild(form);
 
   // 只提交这两项：后端 update 对没给的字段一律保留原值，不会动翻译服务和密钥

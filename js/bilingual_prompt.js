@@ -65,6 +65,7 @@ import {
   t,
   UNINDEXED_PACK_ID,
   UPSTREAM_ARRIVED_EVENT,
+  UPSTREAM_TIMEOUT_EVENT,
 } from "./bpi_shared.js";
 
 const NODE_NAME = "BilingualPromptInspector";
@@ -1269,6 +1270,9 @@ function createPanel(node, textWidget) {
 
   const isNaturalSegment = (token) => token?.segmentKind === "natural" || ["natural", "instruction"].includes(token?.inputMode);
 
+  // 批量翻译时用来汇总失败详情（提示词 + 模型返回），单条翻译不影响
+  const translationRejects = [];
+
   // 校验译文并写入机器翻译缓存；逐条翻译与批量翻译共用这一段
   const commitTranslation = (token, translated) => {
     const validation = validateTranslationResult(token.term, translated, { naturalLanguage: isNaturalSegment(token) });
@@ -1278,7 +1282,15 @@ function createPanel(node, textWidget) {
         translated,
         reason: validation.reason,
       });
-      setStatus(`Rejected abnormal translation: “${validation.reason}”`, "error");
+      // 两条各说一件事：状态栏说「为什么拒」，右上角说「原文和模型返回了什么」。
+      // 之前两条内容一模一样，看不出区别。
+      setStatus(`已拒绝异常翻译：${t(validation.reason)}`, "error");
+      notify(`提示词：${token.term}
+模型返回：${translated}`, "error", {
+        group: "translate-reject",
+        hold: 9000,
+      });
+      translationRejects.push({ term: token.term, translated });
       return false;
     }
     setMachineTranslation(token.key, {
@@ -1318,10 +1330,8 @@ function createPanel(node, textWidget) {
         }
       }
       // 失败不上右下角（那里只报成功），走状态栏 / 右上角的红色提示
-      if (!commitTranslation(token, translated)) {
-        say(`Rejected invalid translation: “${token.term}”`, "error");
-        return false;
-      }
+      // 失败原因已由 commitTranslation 报出（含模型原样返回），这里不再重复一句
+      if (!commitTranslation(token, translated)) return false;
       say(`translated “${token.term}”; can save after confirming`, "ok");
       showToast(`已翻译「${token.term}」`, { type: "translate" });
       return true;
@@ -2627,6 +2637,7 @@ function createPanel(node, textWidget) {
       return;
     }
     control.disabled = true;
+    translationRejects.length = 0;
     let completed = 0;
     try {
       // 一个一个来：后端按 QPS 排队，慢但不会撞百度 54003，界面也能逐条看到进度
@@ -2642,6 +2653,22 @@ function createPanel(node, textWidget) {
         : `Translation complete ${completed} items`;
       // fresh：先让进度卡退场，再开一张全新的报「翻译了多少条」
       setStatus(summary, rejected ? "error" : "ok", { group: groupKey, fresh: true });
+      // 一条都没成：单独开一张卡，把前几条的提示词和模型返回列出来，
+      // 否则用户只看到「完成 0 条」，不知道模型到底给了什么
+      if (completed === 0 && translationRejects.length) {
+        const head = translationRejects
+          .slice(0, 3)
+          .map((item) => `${item.term}
+  模型返回：${item.translated}`)
+          .join("\n");
+        const rest = translationRejects.length > 3 ? `
+…还有 ${translationRejects.length - 3} 条` : "";
+        notify(`全部 ${translationRejects.length} 条翻译失败：
+${head}${rest}`, "error", {
+          group: "translate-reject-batch",
+          hold: 15000,
+        });
+      }
     } finally {
       control.disabled = false;
     }
@@ -2793,7 +2820,7 @@ function createPanel(node, textWidget) {
         warn(`翻译结果异常，已拒绝：「${validation.reason}」`);
         // 被拒这一种另外开一张右上角弹窗，把模型原样返回的内容贴出来：
         // 判断是翻译跑偏了，还是校验规则太严，光看 reason 看不出来
-        notify(`「${raw}」的翻译结果被拒绝：${validation.reason}\n模型返回：${translated}`, "error", { hold: 8000 });
+        notify(`「${raw}」的翻译结果被拒绝：${t(validation.reason)}\n模型返回：${translated}`, "error", { hold: 8000 });
         return;
       }
       const english = validation.text.replace(/[\s,，]+$/u, "").trim();
@@ -3099,20 +3126,52 @@ installBpiWheelGuard();
 // 后端按 node_id 推事件，这里把节点实例登记下来，事件到达时直接转发。
 const inspectorRegistry = new Map();
 let upstreamListenerBound = false;
-const bindUpstreamListener = () => {
+const bindUpstreamListener = (attempt = 0) => {
   // 自定义 socket 事件只有先注册过才会被前端分发，晚一步注册就收不到，
   // 所以在 setup 与节点创建两个时机都试一次，注册本身幂等。
-  if (upstreamListenerBound || !app.api?.addEventListener) return;
+  if (upstreamListenerBound) return;
+  if (!app.api?.addEventListener) {
+    // 前端 API 还没就绪时，重试几次；只靠 onNodeCreated 兜底会漏掉「刷新后立刻运行」
+    if (attempt < 20) setTimeout(() => bindUpstreamListener(attempt + 1), 250);
+    return;
+  }
   upstreamListenerBound = true;
   app.api.addEventListener(UPSTREAM_ARRIVED_EVENT, (event) => {
     const detail = event?.detail ?? {};
-    findInspectorByNodeId(detail.node_id)?.handleUpstream?.(detail.text ?? "");
+    const inspector = findInspectorByNodeId(detail.node_id);
+    if (inspector?.handleUpstream) {
+      inspector.handleUpstream(detail.text ?? "");
+      return;
+    }
+    // 找不到节点（在未展开的子图里、或已切到别的画布）：先放宽时限，再提示，
+    // 否则 20 秒后会静默按原文透传，用户只看到「接管没生效」
+    postUpstreamAction("ack", detail.node_id).catch(() => {});
+    showToast("收到上游文本，但没找到对应节点：请切到它所在的画布或子图", { type: "duplicate" });
+  });
+  app.api.addEventListener(UPSTREAM_TIMEOUT_EVENT, () => {
+    showToast("上游文本未接管，已按原文透传", { type: "duplicate" });
   });
 };
+
+// 节点可能在子图里：app.graph._nodes 只含当前画布顶层，必须递归
+const findNodeInGraph = (graph, nodeId, seen = new Set()) => {
+  if (!graph || seen.has(graph)) return null;
+  seen.add(graph);
+  for (const node of graph._nodes ?? []) {
+    if (String(node.id) === String(nodeId)) return node;
+    const inner = node.subgraph;
+    if (inner) {
+      const hit = findNodeInGraph(inner, nodeId, seen);
+      if (hit) return hit;
+    }
+  }
+  return null;
+};
+
 const findInspectorByNodeId = (nodeId) => {
   const known = inspectorRegistry.get(String(nodeId ?? ""));
   if (known) return known;
-  const target = (app.graph?._nodes ?? []).find((node) => String(node.id) === String(nodeId));
+  const target = findNodeInGraph(app.graph, nodeId);
   return target?._bilingualPromptInspector ?? null;
 };
 

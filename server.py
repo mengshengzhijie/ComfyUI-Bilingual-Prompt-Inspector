@@ -43,6 +43,7 @@ from .stores.saved_prompt_store import (
 from .stores.library_store import LibraryStore
 from .stores.rule_preset_store import RulePresetStore
 from .stores.greeting_store import GreetingStore
+from .core.upstream_store import UpstreamSettings
 from .stores.token_color_store import TokenColorStore
 
 
@@ -766,6 +767,11 @@ class UpstreamGate:
             remaining = entry["deadline"] - time.monotonic()
             if remaining <= 0:
                 self.drop(node_id)
+                # 告诉前端「这次没等到接管，已经按原文放行」，避免静默失败
+                try:
+                    PromptServer.instance.send_sync("bpi/upstream-timeout", {"node_id": node_id})
+                except Exception:
+                    pass
                 return None
             try:
                 return await asyncio.wait_for(
@@ -775,7 +781,8 @@ class UpstreamGate:
                 continue
 
 
-upstream_gate = UpstreamGate()
+upstream_settings = UpstreamSettings()
+upstream_gate = UpstreamGate(handoff_timeout=upstream_settings.timeout())
 
 
 def current_prompt_id():
@@ -795,6 +802,22 @@ def announce_upstream(node_id, text):
 async def _read_node_payload(request):
     payload = await _read_json(request)
     return str(payload.get("node_id") or ""), payload.get("prompt_id"), payload.get("text")
+
+
+@protected_route("get", "/bpi/upstream/config")
+async def get_upstream_config(_request):
+    return web.json_response({"success": True, "data": upstream_settings.config()})
+
+
+@protected_route("post", "/bpi/upstream/config")
+async def save_upstream_config(request):
+    try:
+        saved = upstream_settings.save(await _read_json(request, _MAX_ASSISTANT_JSON_BYTES))
+        # 立刻生效，不用重启
+        upstream_gate.handoff_timeout = saved["timeout_seconds"]
+        return web.json_response({"success": True, "data": saved})
+    except (ValueError, web.HTTPBadRequest) as error:
+        return error_response(error)
 
 
 @protected_route("post", "/bpi/upstream/ack")

@@ -328,6 +328,14 @@ def replace_sentence_periods(text):
     return "".join(parts)
 
 
+def _preview_result(value, limit=180):
+    """报错时把模型返回的原文截一段带上，否则用户只知道「格式不对」不知道为什么。"""
+    snippet = re.sub(r"\s+", " ", str(value or "")).strip()
+    if not snippet:
+        return "（空）"
+    return snippet if len(snippet) <= limit else snippet[:limit] + "…"
+
+
 def sanitize_anima_prompt(value):
     text = str(value or "").strip()
     fenced = re.fullmatch(r"```(?:text|plaintext)?\s*([\s\S]*?)\s*```", text, re.IGNORECASE)
@@ -354,13 +362,13 @@ def sanitize_anima_prompt(value):
     # 它没有意义，却会让前端把整串标签误判成自然语言段落，所以直接去掉。
     text = re.sub(r"\s*[.]+\s*$", "", text)
     if re.search(r"[\u3400-\u9fff]", text):
-        raise ValueError("助手返回的 Anima 提示词仍包含中文，请调整规则后重试")
+        raise ValueError(f"助手返回的 Anima 提示词仍包含中文：{_preview_result(text)}")
     allowed_punctuation = set(",.():@_-'<>%+/&")
     invalid = sorted({char for char in text if not (char.isalnum() or char.isspace() or char in allowed_punctuation)})
     if invalid:
-        raise ValueError(f"助手返回了不符合 Anima 规则的标点：{' '.join(invalid)}")
+        raise ValueError(f"助手返回了不符合 Anima 规则的标点（{' '.join(invalid)}）：{_preview_result(text)}")
     if not text:
-        raise ValueError("助手返回的 Anima 提示词为空")
+        raise ValueError(f"助手返回的 Anima 提示词为空：{_preview_result(value)}")
     return text
 
 

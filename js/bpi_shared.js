@@ -24,6 +24,7 @@ const MANAGER_TAB_ID = "bpi-manager";
 const MANAGER_OPEN_EVENT = "bpi:open-manager";
 // 后端把上游传来的提示词推给前端时使用的事件名
 const UPSTREAM_ARRIVED_EVENT = "bpi/upstream-arrived";
+const UPSTREAM_TIMEOUT_EVENT = "bpi/upstream-timeout";
 // 按词库配色时，「没命中任何词库」也当成一个来源，与后端 token_color_store.UNINDEXED_PACK_ID 对齐
 const UNINDEXED_PACK_ID = "unindexed";
 // 骰子：点一下从 random_pool 里随机抽一个颜色
@@ -1508,6 +1509,7 @@ export {
   MANAGER_OPEN_EVENT,
   UNINDEXED_PACK_ID,
   UPSTREAM_ARRIVED_EVENT,
+  UPSTREAM_TIMEOUT_EVENT,
   applyBpiAppearance,
   bpiFetch,
   applyLanguageToDom,
