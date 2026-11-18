@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from library_store import LibraryStore, safe_dir_name  # noqa: E402
+from stores.library_store import LibraryStore, safe_dir_name  # noqa: E402
 
 # 1x1 透明 PNG
 PNG = base64.b64decode(

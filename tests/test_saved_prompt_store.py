@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from saved_prompt_store import (
+from stores.saved_prompt_store import (
     MAX_IMAGE_BYTES,
     MAX_MODELS,
     SavedPromptStore,

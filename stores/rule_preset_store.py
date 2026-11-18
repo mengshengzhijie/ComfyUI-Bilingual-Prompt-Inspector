@@ -13,6 +13,10 @@ import json
 import os
 import tempfile
 from pathlib import Path
+try:
+    from ..core.paths import DATA_DIR
+except ImportError:  # 测试里以单文件方式加载
+    from core.paths import DATA_DIR
 
 MAX_NAME_CHARS = 60
 MAX_RULE_CHARS = 20000
@@ -23,7 +27,7 @@ _ILLEGAL_NAME_CHARS = set('\\/:*?"<>|')
 
 
 def _default_preset_dir():
-    return Path(__file__).resolve().parent / "data" / "rule_presets"
+    return DATA_DIR / "rule_presets"
 
 
 def safe_preset_name(name):

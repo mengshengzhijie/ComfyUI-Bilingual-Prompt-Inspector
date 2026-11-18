@@ -8,6 +8,10 @@ import tempfile
 from contextlib import closing
 from datetime import datetime
 from pathlib import Path
+try:
+    from ..core.paths import DATA_DIR
+except ImportError:  # 测试里以单文件方式加载
+    from core.paths import DATA_DIR
 
 
 SCHEMA_VERSION = 1
@@ -113,7 +117,7 @@ def validate_tag(value, *, default_source="user"):
 
 class DictionaryStore:
     def __init__(self, data_dir=None):
-        self.data_dir = Path(data_dir or Path(__file__).resolve().parent / "data")
+        self.data_dir = Path(data_dir or DATA_DIR)
         self.builtin_path = self.data_dir / "base_tags.json"
         self.user_path = self.data_dir / "user_tags.json"
         self.backup_dir = self.data_dir / "backups"

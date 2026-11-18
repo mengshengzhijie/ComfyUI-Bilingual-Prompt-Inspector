@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from token_color_store import (
+from stores.token_color_store import (
     DEFAULT_PRESETS,
     DEFAULT_RANDOM_POOL,
     TokenColorStore,

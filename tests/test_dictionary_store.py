@@ -5,7 +5,7 @@ import unittest
 from contextlib import closing
 from pathlib import Path
 
-from dictionary_store import (
+from stores.dictionary_store import (
     DictionaryStore,
     MAX_COMMUNITY_PACK_TAGS,
     MAX_PERSONAL_IMPORT_TAGS,

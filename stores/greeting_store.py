@@ -8,6 +8,10 @@ import json
 import os
 import tempfile
 from pathlib import Path
+try:
+    from ..core.paths import DATA_DIR
+except ImportError:  # 测试里以单文件方式加载
+    from core.paths import DATA_DIR
 
 MAX_PROMPT_CHARS = 8000
 MAX_FIELD_CHARS = 500
@@ -15,7 +19,7 @@ DEFAULT_TEMPERATURE = 0.8
 
 # 默认文案放在 data/greeting_defaults.json：不进代码、可读可改，也随发布包一起走。
 # Python 这边只负责读，读不到就当空字符串（AI 会退化成没有系统提示词的样子）。
-DEFAULTS_PATH = Path(__file__).resolve().parent / "data" / "greeting_defaults.json"
+DEFAULTS_PATH = DATA_DIR / "greeting_defaults.json"
 
 
 def _load_defaults():
@@ -78,7 +82,7 @@ def _clean_rule(value, number_key, default_number, low, high):
 
 
 def _default_config_path():
-    return Path(__file__).resolve().parent / "data" / "greeting" / "config.json"
+    return DATA_DIR / "greeting" / "config.json"
 
 
 class GreetingStore:

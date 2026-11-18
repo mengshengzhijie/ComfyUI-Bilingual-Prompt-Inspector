@@ -13,7 +13,7 @@ from aiohttp import ClientSession, ClientTimeout, web
 from comfy import model_management
 from server import PromptServer
 
-from .assistant_store import (
+from .stores.assistant_store import (
     AI_PROVIDER_PREFIXES,
     AI_SERVICES,
     BAIDU_ERROR_MESSAGES,
@@ -34,16 +34,16 @@ from .assistant_store import (
     translation_direction,
     upstream_error_message,
 )
-from .dictionary_store import DictionaryStore, normalize_key
-from .duplicate_check import find_duplicates
-from .saved_prompt_store import (
+from .stores.dictionary_store import DictionaryStore, normalize_key
+from .core.text import find_duplicates
+from .stores.saved_prompt_store import (
     MAX_IMAGE_BYTES,
     SavedPromptStore,
 )
-from .library_store import LibraryStore
-from .rule_preset_store import RulePresetStore
-from .greeting_store import GreetingStore
-from .token_color_store import TokenColorStore
+from .stores.library_store import LibraryStore
+from .stores.rule_preset_store import RulePresetStore
+from .stores.greeting_store import GreetingStore
+from .stores.token_color_store import TokenColorStore
 
 
 store = DictionaryStore()

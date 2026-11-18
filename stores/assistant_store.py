@@ -6,6 +6,10 @@ import secrets
 import tempfile
 from ipaddress import ip_address
 from pathlib import Path
+try:
+    from ..core.paths import DATA_DIR
+except ImportError:  # 测试里以单文件方式加载
+    from core.paths import DATA_DIR
 from urllib.parse import urlparse
 
 
@@ -394,7 +398,7 @@ def _default_config_dir():
         import folder_paths
         return Path(folder_paths.get_user_directory()) / "bilingual-prompt-inspector"
     except (ImportError, AttributeError, TypeError):
-        return Path(__file__).resolve().parent / "data" / "user_config"
+        return DATA_DIR / "user_config"
 
 
 class AssistantStore:
@@ -405,7 +409,7 @@ class AssistantStore:
         default_install_id_path = (
             self.config_dir / ".installation_id"
             if custom_config_dir
-            else Path(__file__).resolve().parent / "data" / "runtime" / "installation_id"
+            else DATA_DIR / "runtime" / "installation_id"
         )
         self.install_id_path = Path(install_id_path or default_install_id_path)
         self.installation_id = self._load_or_create_installation_id()

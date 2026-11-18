@@ -17,6 +17,10 @@ import shutil
 import tempfile
 import time
 from pathlib import Path
+try:
+    from ..core.paths import DATA_DIR
+except ImportError:  # 测试里以单文件方式加载
+    from core.paths import DATA_DIR
 
 try:  # 包内导入优先；单文件调试时退化成同目录导入
     from .saved_prompt_store import sniff_image
@@ -37,7 +41,7 @@ _WINDOWS_RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 1
 
 def _default_library_dir():
     """收藏库放在插件目录下的 data/saved：和用户词库、配置在一起，备份时一起带走。"""
-    return Path(__file__).resolve().parent / "data" / "saved"
+    return DATA_DIR / "saved"
 
 
 def safe_dir_name(name):

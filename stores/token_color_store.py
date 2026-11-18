@@ -9,6 +9,10 @@ import os
 import re
 import tempfile
 from pathlib import Path
+try:
+    from ..core.paths import DATA_DIR
+except ImportError:  # 测试里以单文件方式加载
+    from core.paths import DATA_DIR
 
 
 DEFAULT_PRESETS = [
@@ -40,7 +44,7 @@ def normalize_color(value):
 
 class TokenColorStore:
     def __init__(self, data_dir=None):
-        self.data_dir = Path(data_dir or Path(__file__).resolve().parent / "data")
+        self.data_dir = Path(data_dir or DATA_DIR)
         self.path = self.data_dir / "token_colors.json"
 
     @staticmethod

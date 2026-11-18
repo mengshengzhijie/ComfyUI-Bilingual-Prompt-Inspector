@@ -1,4 +1,4 @@
-from .duplicate_check import dedupe_prompt, find_duplicates, format_duplicates
+from .core.text import dedupe_prompt, find_duplicates, format_duplicates
 from .server import announce_upstream, current_prompt_id, upstream_gate
 
 

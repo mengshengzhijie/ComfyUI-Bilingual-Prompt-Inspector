@@ -12,6 +12,10 @@ import secrets
 import tempfile
 import time
 from pathlib import Path
+try:
+    from ..core.paths import DATA_DIR
+except ImportError:  # 测试里以单文件方式加载
+    from core.paths import DATA_DIR
 
 MAX_PROMPTS = 2000
 MAX_NAME_CHARS = 80
@@ -32,7 +36,7 @@ def _default_store_dir():
 
         return Path(folder_paths.get_user_directory()) / "bilingual-prompt-inspector" / "saved_prompts"
     except (ImportError, AttributeError, TypeError):
-        return Path(__file__).resolve().parent / "data" / "user_config" / "saved_prompts"
+        return DATA_DIR / "user_config" / "saved_prompts"
 
 
 def sniff_image(data):

@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from rule_preset_store import RulePresetStore  # noqa: E402
+from stores.rule_preset_store import RulePresetStore  # noqa: E402
 
 SAMPLE = {
     "translation": "translate to chinese",

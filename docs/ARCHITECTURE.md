@@ -2,6 +2,28 @@
 
 本文面向后续维护者，记录 ComfyUI 双语提示词检查器当前公开源码的真实结构。使用方法以根目录 `README.md` 为准；版本演进以 `DEVELOPMENT_HISTORY.md` 为准。
 
+## 目录结构
+
+只列需要知道的层级。`data/` 里的文件随使用生成，不在这里逐个展开。
+
+| 路径 | 作用 |
+|---|---|
+| `__init__.py` | 插件入口。注册节点、声明前端资源目录为 `js/`，并引入 `server.py` 完成本地接口注册 |
+| `nodes.py` | 两个节点的定义与执行逻辑（双语提示词检查器、重复检查器） |
+| `server.py` | 本地 HTTP 接口层：词库、收藏、助手翻译、规则预设、问候与提醒 |
+| `core/` | 公共模块。`paths.py` 提供 `PLUGIN_ROOT` 与 `DATA_DIR`，全部数据路径由此获取；`text.py` 为去重与解析的纯函数 |
+| `stores/` | 持久化层。每个文件对应一类数据的读写：`assistant_store.py`（助手配置）、`dictionary_store.py`（词库）、`library_store.py`（收藏）、`saved_prompt_store.py`、`greeting_store.py`、`rule_preset_store.py`、`token_color_store.py` |
+| `js/` | 前端代码，共 25 个 ES 模块。主要文件：`bilingual_prompt.js`（节点主逻辑）、`bpi_shared.js`（公共样式与工具）、`bpi_library.js`（收藏库）、`bpi_greeting.js`（右上角问候卡）、`manager_panel.js`（设置面板） |
+| `data/` | 运行时数据：词库、收藏、规则预设、问候配置、用户标签；`greeting_defaults.json` 为唯一纳入仓库的默认文案 |
+| `assets/` | 静态资源：`icon.png`、`banner.png`、`demo-*.gif` |
+| `locales/` | 语言包，目前仅含 `zh` |
+| `tests/` | 测试用例：`test_*.mjs`（前端模块）与 `test_*.py`（store 逻辑），统一由 `tools/main_test.py` 执行 |
+| `tools/` | 开发脚本：`bump_version.py`（版本号更新）、`main_test.py`（全量测试）、`build_large_dictionary.py`（大型词库生成） |
+| `docs/` | 文档：架构、设计决策、已知问题、维护说明 |
+| `release_docs/` | 面向发布的中文说明与安装手册 |
+
+新增 store 应置于 `stores/` 目录，并通过 `from ..core.paths import DATA_DIR` 获取数据目录，不再各自计算 `Path(__file__)`。
+
 ## 1. 核心目标与不可破坏约束
 
 本扩展的首要目标不是“替用户改写提示词”，而是在不破坏原始英文输出的前提下提供检查、翻译、整理和词库管理能力。

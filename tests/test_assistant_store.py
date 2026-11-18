@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from assistant_store import (
+from stores.assistant_store import (
     AssistantStore,
     DEFAULT_NATURAL_RULE,
     DEFAULT_OPTIMIZATION_RULE,
@@ -26,7 +26,7 @@ from assistant_store import (
     translation_direction,
     upstream_error_message,
 )
-from dictionary_store import DictionaryStore
+from stores.dictionary_store import DictionaryStore
 
 
 class AssistantStoreTests(unittest.TestCase):
