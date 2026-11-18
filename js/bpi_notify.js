@@ -175,6 +175,9 @@ function createCard() {
     pendingItem: null,
     pendingTimer: null,
     timers: [],
+    holdTimer: null,
+    holdDeadline: 0,
+    holdRemaining: 0,
     closed: false,
     leaving: false,
   };
@@ -200,6 +203,26 @@ function sameItem(a, b) {
 }
 
 // 「处理中」一直挂着，等下一条结果把它顶掉；真等不到结果，兜底这么多毫秒后自己收掉
+// 错误卡的停留计时单独管，便于鼠标悬停时暂停
+function armHold(card, ms) {
+  clearTimeout(card.holdTimer);
+  card.holdRemaining = ms;
+  card.holdDeadline = Date.now() + ms;
+  card.holdTimer = setTimeout(() => dismissCard(card), ms);
+}
+
+function pauseHold(card) {
+  if (!card.holdTimer) return;
+  clearTimeout(card.holdTimer);
+  card.holdTimer = null;
+  card.holdRemaining = Math.max(0, card.holdDeadline - Date.now());
+}
+
+function resumeHold(card) {
+  if (card.holdTimer || !card.holdRemaining) return;
+  armHold(card, card.holdRemaining);
+}
+
 function armDismiss(card) {
   card.sticky = card.item.kind === "busy";
   if (card.sticky) {
@@ -209,7 +232,11 @@ function armDismiss(card) {
   }
   const baseHold = card.item.kind === "error" ? ERROR_HOLD_MS : HOLD_MS;
   const hold = Number(card.item.hold) > 0 ? Number(card.item.hold) : baseHold;
-  card.timers.push(setTimeout(() => dismissCard(card), hold));
+  if (card.item.kind === "error") {
+    armHold(card, hold);
+  } else {
+    card.timers.push(setTimeout(() => dismissCard(card), hold));
+  }
 }
 
 function measure(card) {
@@ -300,6 +327,8 @@ function flushPending(card) {
 }
 
 function dismissCard(card) {
+  clearTimeout(card.holdTimer);
+  card.holdTimer = null;
   // leaving 挡住重复调用：退场要跑 0.9 秒才真正从 cards 里摘掉，
   // 期间 trimCards 可能又点到同一张卡，没有这个标记就会反复触发、甚至死循环
   if (card.closed || card.leaving) return;
@@ -431,6 +460,9 @@ export function notify(message, kind = "", options = null) {
   }
 
   const card = createCard();
+  // 错误提示：鼠标停在卡片上暂停计时，移开按剩余时间继续
+  card.notif.addEventListener("mouseenter", () => pauseHold(card));
+  card.notif.addEventListener("mouseleave", () => resumeHold(card));
   card.item = item;
   const before = snapshotTops();
   cards.unshift(card);

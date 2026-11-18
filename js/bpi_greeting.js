@@ -13,6 +13,8 @@ import { notify } from "./bpi_notify.js";
 
 const STORAGE_KEY = "bpi.greeting.v1";
 const MIN_HOLD_MS = 8000;      // 结果展示至少留这么久
+// 结果来得太快时，也要等紫色区域长满再落结果层：1150ms 只是开始生长，450ms 才长完
+const MIN_LOADING_MS = 520;
 const CHARS_PER_SECOND = 5;    // 之后再按 5 字/秒往上加：字多的能读完
 
 // 瀑布 8 色：最后一层紫必须和 --bpi-greet-paper 同色，落下后与紫色区域融为一体
@@ -781,8 +783,9 @@ export function startGreeting({ title = "提醒" } = {}) {
       return;
     }
     finished = true;
-    // AI 可能在入场动画还没走完时就返回：等加载阶段开始再落结果，否则紫色层没处长
-    const wait = Math.max(0, 1150 - (Date.now() - begunAt));
+    // AI 可能在入场动画还没走完时就返回：等紫色区域长满再落结果，
+    // 否则结果层会盖在一株刚冒头的紫色上，看起来像「没播加载动画」
+    const wait = Math.max(0, 1150 + MIN_LOADING_MS - (Date.now() - begunAt));
     if (wait > 0) {
       later(() => finishLoadingNow(body), wait);
       return;

@@ -4,6 +4,50 @@
 // 这里只负责「把最后一条回滚/重放」，以及把快捷键分派过来。
 import { showToast } from "./bpi_toast.js";
 
+// 撤销/重做用哪套修饰键由用户决定：Ctrl+Z 在 ComfyUI 里属于画布，
+// 所以这里只提供几种不冲突的组合，主键固定 Z（撤销）/ Y（重做）。
+const COMBO_KEY = "bpi.shortcut.undo.v1";
+const COMBOS = {
+  "shift+alt": { shiftKey: true, altKey: true, label: "Shift+Alt" },
+  "ctrl+shift": { shiftKey: true, ctrlKey: true, label: "Ctrl+Shift" },
+  "ctrl+alt": { ctrlKey: true, altKey: true, label: "Ctrl+Alt" },
+  alt: { altKey: true, label: "Alt" },
+  "shift": { shiftKey: true, label: "Shift" },
+};
+
+export function undoComboId() {
+  try {
+    const stored = localStorage.getItem(COMBO_KEY);
+    return COMBOS[stored] ? stored : "shift+alt";
+  } catch {
+    return "shift+alt";
+  }
+}
+
+export function setUndoCombo(id) {
+  try {
+    localStorage.setItem(COMBO_KEY, COMBOS[id] ? id : "shift+alt");
+  } catch {
+    // 存不了就只影响本次会话
+  }
+}
+
+export function undoComboLabel() {
+  return COMBOS[undoComboId()].label;
+}
+
+export function undoComboOptions() {
+  return Object.entries(COMBOS).map(([id, combo]) => ({ id, label: combo.label }));
+}
+
+function comboMatches(event) {
+  const combo = COMBOS[undoComboId()];
+  if (event.metaKey) return false;
+  return Boolean(event.ctrlKey) === Boolean(combo.ctrlKey)
+    && Boolean(event.shiftKey) === Boolean(combo.shiftKey)
+    && Boolean(event.altKey) === Boolean(combo.altKey);
+}
+
 export function createShortcuts({ store, setHiddenTags, setUniqueKeys }) {
   const { state, textWidget } = store;
   const hooks = store.hooks;
@@ -59,7 +103,7 @@ export function createShortcuts({ store, setHiddenTags, setUniqueKeys }) {
   // Ctrl+Z 在 ComfyUI 里被画布自己的撤销吃掉（焦点不在文本框时甚至根本到不了这里），
   // 与其抢一个抢不过的键，不如整个让给它，换一个没人占的组合。
   const handleHistoryShortcut = (event) => {
-    if (!event.altKey || !event.shiftKey || event.ctrlKey || event.metaKey) return;
+    if (!comboMatches(event)) return;
     const key = event.key.toLowerCase();
     const handled = key === "y" ? redoStructuredEdit() : key === "z" ? undoStructuredEdit() : false;
     if (handled) {

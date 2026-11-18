@@ -4,6 +4,7 @@ import { mergeImportAsAliases, previewImport, toggleFavorite } from "./dictionar
 import { panelSyncHub } from "./panel_sync.js";
 import { installBpiWheelGuard } from "./wheel_guard.js";
 import { notify, notifyEnabled, setNotifyEnabled } from "./bpi_notify.js";
+import { setUndoCombo, undoComboId, undoComboLabel, undoComboOptions } from "./bpi_shortcut.js";
 import { setToastEnabled, toastEnabled } from "./bpi_toast.js";
 import {
   dragPreviewNodeEnabled,
@@ -827,6 +828,7 @@ async function buildAppearanceForm(host, loading) {
     .catch(() => {});
   greetFold.append(element("summary", "", "问候与提醒"), greetFoldBody);
   form.append(languageLabel, languageSelect, languageNote, followRow, followNote, greetFold, status);
+
   restartGreetingAutoTimer();
   // 开：操作提示改成右上角弹窗；关：还是写回明细表上方那条状态文字
   const fold = element("details", "bpi-fold");
@@ -933,6 +935,25 @@ async function buildAppearanceForm(host, loading) {
   foldBody.append(masterRow, masterNote, masterNoteTail, popupRow, foldNote, toastRow, toastNote, nodeDragRow, nodeDragNote, tableDragRow, tableDragNote, deleteAnimRow, deleteAnimNote);
   fold.append(element("summary", "", "通知弹窗及实时动画预览"), foldBody);
   form.appendChild(fold);
+
+  // 撤销快捷键：只换修饰键，主键固定 Z / Y
+  const undoLabel = element("label", "", "撤销快捷键");
+  const undoSelect = element("select");
+  for (const { id, label } of undoComboOptions()) {
+    const option = element("option", "", label);
+    option.value = id;
+    undoSelect.appendChild(option);
+  }
+  undoSelect.value = undoComboId();
+  undoSelect.addEventListener("change", () => {
+    setUndoCombo(undoSelect.value);
+    // 侧边栏那行提示立刻跟着改，不用等面板重建
+    const hint = document.getElementById("bpi-undo-hint");
+    if (hint) hint.textContent = `插件撤销：${undoComboLabel()}+Z（重做：${undoComboLabel()}+Y）`;
+  });
+  const undoNote = element("div", "bpi-config-note", "撤销 = 所选组合 + Z，重做 = 组合 + Y。Ctrl+Z 留给 ComfyUI 画布自己的撤销。");
+  undoNote.style.gridColumn = "1 / -1";
+  form.append(undoLabel, undoSelect, undoNote);
   host.appendChild(form);
 
   // 只提交这两项：后端 update 对没给的字段一律保留原值，不会动翻译服务和密钥
@@ -1185,6 +1206,17 @@ async function buildAssistantForm(host, loading) {
   openaiHead.append(element("strong", "", "OpenAI-compatible API"));
   form.append(openaiHead);
   openaiOnly.push(openaiHead);
+  // 接口相关的字段收进折叠块，和下面的「AI 规则」平级
+  const openaiApiFold = element("details", "bpi-fold");
+  openaiApiFold.style.gridColumn = "1 / -1";
+  const openaiApiBody = element("div", "bpi-fold-body");
+  const openaiApiGrid = element("div", "bpi-form");
+  openaiApiBody.append(openaiApiGrid);
+  openaiApiFold.append(element("summary", "", "接口配置"), openaiApiBody);
+  form.append(openaiApiFold);
+  openaiOnly.push(openaiApiFold);
+  const openaiApiStart = openaiOnly.length;
+
   const openaiBaseUrl = addField(openaiOnly, "API URL", "assistant-openai-base-url", config.openai_base_url, "https://host/v1");
   const openaiApiKey = addField(openaiOnly, "API Key", "assistant-openai-api-key", "", config.openai_api_key_configured ? "Saved; leave empty to keep" : "Optional for local LM Studio");
   openaiApiKey.type = "password";
@@ -1223,11 +1255,24 @@ async function buildAssistantForm(host, loading) {
   openaiOnly.push(openaiUrlNote);
 
   // Ollama：只允许本机回环，没有密钥
+  // 把上面这些接口字段搬进折叠块（包含密钥行、模型行、预设按钮）
+  openaiApiGrid.append(...openaiOnly.slice(openaiApiStart));
+
   const ollamaHead = element("div", "bpm-toolbar");
   ollamaHead.style.gridColumn = "1 / -1";
   ollamaHead.append(element("strong", "", "Ollama (local)"));
   form.append(ollamaHead);
   ollamaOnly.push(ollamaHead);
+  const ollamaApiFold = element("details", "bpi-fold");
+  ollamaApiFold.style.gridColumn = "1 / -1";
+  const ollamaApiBody = element("div", "bpi-fold-body");
+  const ollamaApiGrid = element("div", "bpi-form");
+  ollamaApiBody.append(ollamaApiGrid);
+  ollamaApiFold.append(element("summary", "", "接口配置"), ollamaApiBody);
+  form.append(ollamaApiFold);
+  ollamaOnly.push(ollamaApiFold);
+  const ollamaApiStart = ollamaOnly.length;
+
   const ollamaBaseUrl = addField(ollamaOnly, "API URL", "assistant-ollama-base-url", config.ollama_base_url, "http://127.0.0.1:11434");
   const ollamaModel = addModelRow(ollamaOnly, "assistant-ollama-model", config.ollama_model, "e.g.: qwen3:8b", {
     backend: "ollama",
@@ -1258,6 +1303,8 @@ async function buildAssistantForm(host, loading) {
   ollamaUrlNote.style.gridColumn = "1 / -1";
   form.append(ollamaUrlNote);
   ollamaOnly.push(ollamaUrlNote);
+
+  ollamaApiGrid.append(...ollamaOnly.slice(ollamaApiStart));
 
   // 规则：只有 AI 会读，两个后端各一套（server.py 按当前后端取对应的那套）
   const addRule = (list, labelText, value, container = form) => {
@@ -1472,6 +1519,12 @@ async function buildAssistantForm(host, loading) {
     for (const node of aiOnly) node.hidden = !AI_SERVICES.has(value);
     for (const node of openaiOnly) node.hidden = value !== "openai_compatible";
     for (const node of ollamaOnly) node.hidden = value !== "ollama";
+    // 翻译服务本身就是 AI 时，下面那个「AI 后端」下拉不起作用（后端即翻译服务），隐藏掉，
+    // 免得让人以为还要再选一次
+    if (AI_SERVICES.has(value)) {
+      aiProviderLabel.hidden = true;
+      aiProvider.hidden = true;
+    }
   };
   service.addEventListener("change", applyServiceVisibility);
   aiProvider.addEventListener("change", applyServiceVisibility);
@@ -1841,7 +1894,8 @@ function build() {
   // 撤销键没写在任何提示里，这里在分区上方给一行小字：
   // Ctrl+Z 归画布，插件自己的撤销是 Shift+Alt+Z。这行直接写中文：
   // 侧边栏面板的标题/提示不进 i18n 译表，写英文就会一路显示英文
-  const undoHint = element("div", "bpi-config-note", "插件撤销：Shift+Alt+Z（重做：Shift+Alt+Y）");
+  const undoHint = element("div", "bpi-config-note", `插件撤销：${undoComboLabel()}+Z（重做：${undoComboLabel()}+Y）`);
+  undoHint.id = "bpi-undo-hint";
   undoHint.style.cssText = "padding:0 10px 6px";
   root.append(head, refs.tabs, undoHint, refs.sections);
   root.addEventListener("mousedown", (event) => event.stopPropagation());
